@@ -12,7 +12,7 @@ const fs = require("fs");
 const path = require("path");
 
 // --- REGISTER BUNDLED FONT ---
-const fontPath = path.join(__dirname, "fonts", "font.ttf");
+const fontPath = path.join(__dirname, "font.ttf");
 if (fs.existsSync(fontPath)) {
     Canvas.registerFont(fontPath, { family: "BotFont" });
     console.log("✅ Custom font 'BotFont' successfully loaded.");
