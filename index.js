@@ -42,7 +42,8 @@ async function createCard(member, type) {
     ctx.fillStyle = "#5865F2";
     ctx.fillRect(0, 0, canvas.width, 15);
 
-    ctx.font = "bold 70px Sans";
+    // Using standard system fonts that Railway will now provide
+    ctx.font = "bold 70px sans-serif";
     ctx.fillStyle = "#ffffff";
 
     ctx.fillText(
@@ -51,7 +52,7 @@ async function createCard(member, type) {
         120
     );
 
-    ctx.font = "40px Sans";
+    ctx.font = "40px sans-serif";
 
     ctx.fillText(
         member.user.username,
