@@ -3,17 +3,19 @@ const e = require("../emojis");
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName("rps")
-    .setDescription("Rock Paper Scissors")
-    .addStringOption(opt =>
-      opt.setName("choice")
-        .setRequired(true)
-        .addChoices(
-          { name: "rock", value: "rock" },
-          { name: "paper", value: "paper" },
-          { name: "scissors", value: "scissors" }
-        )
-    ),
+  .setName("rps")
+  .setDescription("Rock Paper Scissors")
+  .addStringOption(opt =>
+    opt
+      .setName("choice")
+      .setDescription("Choose rock, paper, or scissors")
+      .setRequired(true)
+      .addChoices(
+        { name: "rock", value: "rock" },
+        { name: "paper", value: "paper" },
+        { name: "scissors", value: "scissors" }
+      )
+  ),
 
   async execute(interaction) {
     const choices = ["rock", "paper", "scissors"];
