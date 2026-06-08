@@ -1,4 +1,4 @@
-module.exports = {
+const { SlashCommandBuilder } = require("discord.js");
 data: new SlashCommandBuilder()
   .setName("setLeave")
   .setDescription("set leave channel"),
@@ -6,5 +6,5 @@ data: new SlashCommandBuilder()
   async execute(interaction, client, redis) {
     await redis.set(`leave:${interaction.guild.id}`, interaction.channel.id);
     interaction.reply("Leave channel set.");
-  }
+
 };
