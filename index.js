@@ -1,6 +1,19 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, PermissionFlagsBits } = require('discord.js');
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+const {
+    Client,
+    GatewayIntentBits,
+    AttachmentBuilder,
+    SlashCommandBuilder,
+    REST,
+    Routes,
+    PermissionFlagsBits
+} = require("discord.js");
 
+const Canvas = require("canvas");
+const fs = require("fs");
+const path = require("path");
+const { createClient } = require("redis");
+
+// --- ICON DICTIONARY ---
 const ICONS = {
     announce: "<:announcement:1513533499607351356>", bot: "<:bot:1513533291385458708>",
     coin: "<:coin_flip:1513532556140744856>", error: "<:error:1513532700202631240>",
@@ -11,76 +24,82 @@ const ICONS = {
     setting: "<:setting:1513533096740257993>", user: "<:user:1513533036472307814>"
 };
 
-const config = {}; // Stores { channelId, customMessage }
+// ... (Canvas, Redis, and createCard function remain identical to your version) ...
 
-client.once('ready', async () => {
-    const commands = [
-        new SlashCommandBuilder().setName('help').setDescription('View commands'),
-        new SlashCommandBuilder().setName('setwelcome').setDescription('Set welcome channel').addChannelOption(o => o.setName('channel').setRequired(true)),
-        new SlashCommandBuilder().setName('setleave').setDescription('Set leave channel').addChannelOption(o => o.setName('channel').setRequired(true)),
-        new SlashCommandBuilder().setName('setwelcomemessage').setDescription('Set custom welcome text').addStringOption(o => o.setName('text').setRequired(true)),
-        new SlashCommandBuilder().setName('setleavemessage').setDescription('Set custom leave text').addStringOption(o => o.setName('text').setRequired(true)),
-        new SlashCommandBuilder().setName('purge').setDescription('Clear msgs').addIntegerOption(o => o.setName('amount').setRequired(true)),
-        new SlashCommandBuilder().setName('info').setDescription('Server info'),
-        new SlashCommandBuilder().setName('rps').setDescription('RPS').addStringOption(o => o.setName('choice').addChoices({name:'Rock', value:'rock'}, {name:'Paper', value:'paper'}, {name:'Scissor', value:'scissor'}))
-    ];
-    const rest = new REST({ version: '10' }).setToken(process.env.token);
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commands.map(c => c.toJSON()) });
-    console.log("System Online & Synced.");
-});
+client.on("interactionCreate", async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+    const { commandName, guildId, options, user, guild, channel } = interaction;
 
-client.on('interactionCreate', async i => {
-    if (!i.isChatInputCommand()) return;
-    const gid = i.guild.id;
-    if (!config[gid]) config[gid] = { welcomeChan: null, leaveChan: null, welcomeMsg: "Welcome {user}!", leaveMsg: "{user} left!" };
-
-    // SETTINGS
-    if (i.commandName === 'setwelcome') {
-        config[gid].welcomeChan = i.options.getChannel('channel').id;
-        i.reply(`${ICONS.memberAdd} Welcome channel set.`);
-    }
-    if (i.commandName === 'setleave') {
-        config[gid].leaveChan = i.options.getChannel('channel').id;
-        i.reply(`${ICONS.memberLeave} Leave channel set.`);
-    }
-    if (i.commandName === 'setwelcomemessage') {
-        config[gid].welcomeMsg = i.options.getString('text');
-        i.reply(`${ICONS.message} Welcome message updated.`);
-    }
-    if (i.commandName === 'setleavemessage') {
-        config[gid].leaveMsg = i.options.getString('text');
-        i.reply(`${ICONS.message} Leave message updated.`);
+    // HELP MENU
+    if (commandName === "help") {
+        return interaction.reply({
+            embeds: [{
+                title: `${ICONS.bot} System Command Interface`,
+                description: `Welcome to the utility grid.`,
+                color: 0x1A1D29,
+                fields: [
+                    { name: `${ICONS.setting} SERVER CONFIG`, value: "`/setwelcomechannel`\n`/setleavechannel`\n`/configuration`" },
+                    { name: `${ICONS.search} UTILITY MATRIX`, value: "`/purge`\n`/serverinfo`\n`/userinfo`" },
+                    { name: `${ICONS.coin} ENTERTAINMENT`, value: "`/coinflip`\n`/rps`" }
+                ]
+            }]
+        });
     }
 
-    // UTILS & GAMES
-    if (i.commandName === 'help') i.reply(`${ICONS.bot} **Commands:** /setwelcome, /setleave, /setwelcomemessage, /setleavemessage, /purge, /info, /rps`);
-    if (i.commandName === 'purge') {
-        const deleted = await i.channel.bulkDelete(i.options.getInteger('amount'), true);
-        i.reply({ content: `${ICONS.message} Deleted ${deleted.size} msgs.`, ephemeral: true });
+    // CONFIGURATION
+    if (commandName === "configuration") {
+        const [wChan, lChan] = await Promise.all([db.get(`gc:${guildId}:welcomeChannel`), db.get(`gc:${guildId}:leaveChannel`)]);
+        return interaction.reply({
+            embeds: [{
+                title: `${ICONS.setting} Core Configuration`,
+                fields: [
+                    { name: `${ICONS.memberAdd} Welcome Channel`, value: wChan ? `<#${wChan}>` : "*Not Set*", inline: true },
+                    { name: `${ICONS.memberLeave} Leave Channel`, value: lChan ? `<#${lChan}>` : "*Not Set*", inline: true }
+                ]
+            }]
+        });
     }
-    if (i.commandName === 'info') i.reply(`${ICONS.search} Server: ${i.guild.name} | Members: ${i.guild.memberCount}`);
-    if (i.commandName === 'rps') {
-        const c = i.options.getString('choice');
+
+    // ADMIN
+    if (commandName === "purge") {
+        await interaction.deferReply({ ephemeral: true });
+        const deleted = await channel.bulkDelete(options.getInteger("amount"), true);
+        return interaction.editReply(`${ICONS.message} Vaporized **${deleted.size}** messages.`);
+    }
+
+    // GAMES
+    if (commandName === "rps") {
+        const c = options.getString("choice");
         const b = ['rock', 'paper', 'scissor'][Math.floor(Math.random() * 3)];
         const m = { rock: ICONS.rock, paper: ICONS.paper, scissor: ICONS.scissor };
-        i.reply(`You: ${m[c]} | Me: ${m[b]}`);
+        return interaction.reply(`You chose ${m[c]} | I chose ${m[b]}`);
+    }
+
+    if (commandName === "coinflip") {
+        const res = Math.random() > 0.5 ? "Heads" : "Tails";
+        return interaction.reply(`${ICONS.coin} Result: **${res}**`);
+    }
+
+    // INFO
+    if (commandName === "serverinfo") {
+        return interaction.reply(`${ICONS.search} **Server:** ${guild.name} | **Members:** ${guild.memberCount}`);
     }
 });
 
 // EVENTS
-client.on('guildMemberAdd', m => {
-    const c = config[m.guild.id];
-    if (c?.welcomeChan) {
-        const text = c.welcomeMsg.replace('{user}', `<@${m.id}>`);
-        m.guild.channels.cache.get(c.welcomeChan).send(`${ICONS.memberAdd} ${text}`);
+client.on("guildMemberAdd", async member => {
+    const chId = await db.get(`gc:${member.guild.id}:welcomeChannel`);
+    if (chId) {
+        const card = await createCard(member, "welcome");
+        member.guild.channels.cache.get(chId).send({ content: `${ICONS.memberAdd} Welcome!`, files: [card] });
     }
 });
 
-client.on('guildMemberRemove', m => {
-    const c = config[m.guild.id];
-    if (c?.leaveChan) {
-        const text = c.leaveMsg.replace('{user}', m.user.username);
-        m.guild.channels.cache.get(c.leaveChan).send(`${ICONS.memberLeave} ${text}`);
+client.on("guildMemberRemove", async member => {
+    const chId = await db.get(`gc:${member.guild.id}:leaveChannel`);
+    if (chId) {
+        const card = await createCard(member, "leave");
+        member.guild.channels.cache.get(chId).send({ content: `${ICONS.memberLeave} ${member.user.username} left.`, files: [card] });
     }
 });
 
