@@ -2,10 +2,8 @@ const { SlashCommandBuilder } = require('discord.js');
 const { ICONS } = require('../icons');
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('serverinfo')
-        .setDescription('See server stats'),
-    async execute(interaction) {
-        await interaction.reply(`${ICONS.search} **Server Stats:**\nName: ${interaction.guild.name}\nMembers: ${interaction.guild.memberCount}`);
+    data: new SlashCommandBuilder().setName('info').setDescription('Diagnostics'),
+    async execute(i) {
+        await i.reply(`${ICONS.search} Server: ${i.guild.name} | Members: ${i.guild.memberCount}`);
     }
 };
