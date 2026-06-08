@@ -35,4 +35,31 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
+
+const { welcomeCard } = require("./canvas/welcome");
+const { leaveCard } = require("./canvas/leave");
+
+client.on("guildMemberAdd", async (member) => {
+  const channelId = await redis.get(`welcome:${member.guild.id}`);
+  if (!channelId) return;
+
+  const channel = member.guild.channels.cache.get(channelId);
+  if (!channel) return;
+
+  const img = await welcomeCard(member.user, member.guild);
+  channel.send({ files: [{ attachment: img, name: "welcome.png" }] });
+});
+
+client.on("guildMemberRemove", async (member) => {
+  const channelId = await redis.get(`leave:${member.guild.id}`);
+  if (!channelId) return;
+
+  const channel = member.guild.channels.cache.get(channelId);
+  if (!channel) return;
+
+  const img = await leaveCard(member.user, member.guild);
+  channel.send({ files: [{ attachment: img, name: "leave.png" }] });
+});
+
+
 client.login(token);
