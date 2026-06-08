@@ -9,6 +9,16 @@ const {
 
 const Canvas = require("canvas");
 const fs = require("fs");
+const path = require("path");
+
+// --- REGISTER BUNDLED FONT ---
+const fontPath = path.join(__dirname, "fonts", "font.ttf");
+if (fs.existsSync(fontPath)) {
+    Canvas.registerFont(fontPath, { family: "BotFont" });
+    console.log("✅ Custom font 'BotFont' successfully loaded.");
+} else {
+    console.warn("⚠️ WARNING: ./fonts/font.ttf not found! Text will remain blank until you add the font file.");
+}
 
 const config = require("./config.json");
 
@@ -42,8 +52,8 @@ async function createCard(member, type) {
     ctx.fillStyle = "#5865F2";
     ctx.fillRect(0, 0, canvas.width, 15);
 
-    // Using standard system fonts that Railway will now provide
-    ctx.font = "bold 70px sans-serif";
+    // Using the registered 'BotFont' explicitly
+    ctx.font = "bold 70px BotFont";
     ctx.fillStyle = "#ffffff";
 
     ctx.fillText(
@@ -52,7 +62,7 @@ async function createCard(member, type) {
         120
     );
 
-    ctx.font = "40px sans-serif";
+    ctx.font = "40px BotFont";
 
     ctx.fillText(
         member.user.username,
@@ -98,7 +108,8 @@ async function createCard(member, type) {
     );
 }
 
-client.once("ready", async () => {
+// --- FIX: Renamed 'ready' to 'clientReady' to clear deprecation warning ---
+client.once("clientReady", async () => {
     console.log(`${client.user.tag} ready`);
 
     const commands = [
