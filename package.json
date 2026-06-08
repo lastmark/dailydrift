@@ -1,19 +1,29 @@
 {
   "name": "daily-drift-bot",
   "version": "1.0.0",
-  "description": "Multi-feature Discord bot (welcome, games, canvas, slash commands)",
+  "description": "Multi-guild Discord bot with welcome system, games, and canvas images",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
+  "keywords": [
+    "discord-bot",
+    "discord.js",
+    "canvas",
+    "games",
+    "welcome-bot",
+    "redis"
+  ],
+  "author": "Daily Drift",
+  "license": "MIT",
   "dependencies": {
+    "canvas": "^2.11.2",
     "discord.js": "^14.16.3",
-    "@napi-rs/canvas": "^0.1.60",
-    "sqlite3": "^5.1.7",
+    "ioredis": "^5.4.1",
     "dotenv": "^16.4.5"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "18.x"
   }
 }
