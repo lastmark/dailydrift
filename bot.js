@@ -237,6 +237,18 @@ const client = new Client({
 
 client.commands = new Collection();
 
+// ========== HELPER: Deferred reply wrapper ==========
+async defReply(interaction, callback) {
+  await interaction.deferReply({ ephemeral: true });
+  try {
+    const result = await callback();
+    await interaction.editReply(result);
+  } catch (error) {
+    console.error(error);
+    await interaction.editReply({ content: `${CONFIG.ICONS.error} An error occurred.` });
+  }
+}
+
 // ========== SLASH COMMANDS ==========
 // Admin commands (developer only)
 client.commands.set("dev", {
@@ -246,16 +258,20 @@ client.commands.set("dev", {
     .addSubcommand(sub => sub.setName("eval").setDescription("Evaluate JS code").addStringOption(opt => opt.setName("code").setRequired(true)))
     .addSubcommand(sub => sub.setName("presence").setDescription("Set bot status").addStringOption(opt => opt.setName("text").setRequired(true))),
   async execute(interaction) {
-    if (interaction.user.id !== process.env.DEV_USER_ID) 
+    if (interaction.user.id !== process.env.DEV_USER_ID) {
       return interaction.reply({ content: `${CONFIG.ICONS.error} No permission.`, ephemeral: true });
+    }
     const sub = interaction.options.getSubcommand();
     if (sub === "eval") {
+      await interaction.deferReply({ ephemeral: true });
       try {
         const code = interaction.options.getString("code");
         let result = eval(code);
         if (typeof result !== "string") result = require("util").inspect(result);
-        await interaction.reply({ content: `${CONFIG.ICONS.bot} \`\`\`js\n${result.slice(0, 1900)}\n\`\`\``, ephemeral: true });
-      } catch(e) { await interaction.reply({ content: `${CONFIG.ICONS.error} Error: ${e}`, ephemeral: true }); }
+        await interaction.editReply({ content: `${CONFIG.ICONS.bot} \`\`\`js\n${result.slice(0, 1900)}\n\`\`\`` });
+      } catch(e) { 
+        await interaction.editReply({ content: `${CONFIG.ICONS.error} Error: ${e}` });
+      }
     } else if (sub === "presence") {
       const text = interaction.options.getString("text");
       interaction.client.user.setPresence({ activities: [{ name: text, type: 3 }] });
@@ -274,20 +290,22 @@ client.commands.set("setwelcome", {
     .addSubcommand(sub => sub.setName("message").setDescription("Set welcome text (use {user} and {server})").addStringOption(opt => opt.setName("text").setRequired(true)))
     .addSubcommand(sub => sub.setName("image").setDescription("Set background image URL").addStringOption(opt => opt.setName("url").setRequired(true))),
   async execute(interaction) {
+    await interaction.deferReply({ ephemeral: true });
     const sub = interaction.options.getSubcommand();
     const guildId = interaction.guildId;
+    
     if (sub === "channel") {
       const ch = interaction.options.getChannel("channel");
       await redis.set(`guild:${guildId}:welcomeChannel`, ch.id);
-      await interaction.reply({ content: `${CONFIG.ICONS.setting} ✅ Welcome channel set to ${ch}`, ephemeral: true });
+      await interaction.editReply({ content: `${CONFIG.ICONS.setting} ✅ Welcome channel set to ${ch}` });
     } else if (sub === "message") {
       const text = interaction.options.getString("text");
       await redis.set(`guild:${guildId}:welcomeMsg`, text);
-      await interaction.reply({ content: `${CONFIG.ICONS.message} ✅ Welcome message saved.`, ephemeral: true });
+      await interaction.editReply({ content: `${CONFIG.ICONS.message} ✅ Welcome message saved.` });
     } else if (sub === "image") {
       const url = interaction.options.getString("url");
       await redis.set(`guild:${guildId}:welcomeImage`, url);
-      await interaction.reply({ content: `${CONFIG.ICONS.search} ✅ Welcome background set.`, ephemeral: true });
+      await interaction.editReply({ content: `${CONFIG.ICONS.search} ✅ Welcome background set.` });
     }
   }
 });
@@ -301,20 +319,22 @@ client.commands.set("setleave", {
     .addSubcommand(sub => sub.setName("message").setDescription("Set leave text (use {user} and {server})").addStringOption(opt => opt.setName("text").setRequired(true)))
     .addSubcommand(sub => sub.setName("image").setDescription("Set background image URL").addStringOption(opt => opt.setName("url").setRequired(true))),
   async execute(interaction) {
+    await interaction.deferReply({ ephemeral: true });
     const sub = interaction.options.getSubcommand();
     const guildId = interaction.guildId;
+    
     if (sub === "channel") {
       const ch = interaction.options.getChannel("channel");
       await redis.set(`guild:${guildId}:leaveChannel`, ch.id);
-      await interaction.reply({ content: `${CONFIG.ICONS.setting} ✅ Leave channel set to ${ch}`, ephemeral: true });
+      await interaction.editReply({ content: `${CONFIG.ICONS.setting} ✅ Leave channel set to ${ch}` });
     } else if (sub === "message") {
       const text = interaction.options.getString("text");
       await redis.set(`guild:${guildId}:leaveMsg`, text);
-      await interaction.reply({ content: `${CONFIG.ICONS.message} ✅ Leave message saved.`, ephemeral: true });
+      await interaction.editReply({ content: `${CONFIG.ICONS.message} ✅ Leave message saved.` });
     } else if (sub === "image") {
       const url = interaction.options.getString("url");
       await redis.set(`guild:${guildId}:leaveImage`, url);
-      await interaction.reply({ content: `${CONFIG.ICONS.search} ✅ Leave background set.`, ephemeral: true });
+      await interaction.editReply({ content: `${CONFIG.ICONS.search} ✅ Leave background set.` });
     }
   }
 });
@@ -326,6 +346,7 @@ client.commands.set("userinfo", {
     .setDescription("Get user information")
     .addUserOption(opt => opt.setName("user").setDescription("Target user")),
   async execute(interaction) {
+    await interaction.deferReply();
     const user = interaction.options.getUser("user") || interaction.user;
     const member = interaction.guild.members.cache.get(user.id);
     const embed = new EmbedBuilder()
@@ -337,7 +358,7 @@ client.commands.set("userinfo", {
         { name: `${CONFIG.ICONS.memberAdd} Joined Server`, value: member?.joinedAt?.toDateString() || "Unknown", inline: true },
         { name: `${CONFIG.ICONS.bot} Bot`, value: user.bot ? "Yes" : "No", inline: true }
       );
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   }
 });
 
@@ -346,7 +367,9 @@ client.commands.set("serverinfo", {
     .setName("serverinfo")
     .setDescription("Get server information"),
   async execute(interaction) {
+    await interaction.deferReply();
     const guild = interaction.guild;
+    const owner = await guild.fetchOwner();
     const embed = new EmbedBuilder()
       .setColor(0x2b2d31)
       .setTitle(`${CONFIG.ICONS.announce} ${guild.name}`)
@@ -354,9 +377,9 @@ client.commands.set("serverinfo", {
       .addFields(
         { name: `${CONFIG.ICONS.message} ID`, value: guild.id, inline: true },
         { name: `${CONFIG.ICONS.user} Members`, value: guild.memberCount.toString(), inline: true },
-        { name: `${CONFIG.ICONS.memberAdd} Owner`, value: (await guild.fetchOwner()).user.tag, inline: true }
+        { name: `${CONFIG.ICONS.memberAdd} Owner`, value: owner.user.tag, inline: true }
       );
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   }
 });
 
@@ -370,29 +393,34 @@ client.commands.set("game", {
     .addSubcommand(sub => sub.setName("picturerace").setDescription("Guess the drawn word (first correct wins)")),
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
+    
     if (sub === "counting") {
+      await interaction.deferReply({ ephemeral: true });
       const active = interaction.options.getBoolean("active");
       await counting.setActive(interaction.guildId, interaction.channelId, active);
       const icon = active ? CONFIG.ICONS.coin : CONFIG.ICONS.error;
-      await interaction.reply({ content: `${icon} Counting game ${active ? "started" : "stopped"} in this channel.`, ephemeral: true });
+      await interaction.editReply({ content: `${icon} Counting game ${active ? "started" : "stopped"} in this channel.` });
     } 
     else if (sub === "rps") {
       const opponent = interaction.options.getUser("opponent");
       if (opponent.bot) return interaction.reply({ content: `${CONFIG.ICONS.error} You cannot challenge a bot.`, ephemeral: true });
       if (opponent.id === interaction.user.id) return interaction.reply({ content: `${CONFIG.ICONS.error} You cannot play with yourself.`, ephemeral: true });
+      
+      await interaction.deferReply({ ephemeral: true });
       const challengeId = `${interaction.channelId}:${Date.now()}`;
       await rps.createChallenge(challengeId, interaction.user.id, opponent.id, interaction.channelId);
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`rps_accept_${challengeId}`).setLabel("Accept").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`rps_decline_${challengeId}`).setLabel("Decline").setStyle(ButtonStyle.Danger)
       );
-      await interaction.reply({ content: `${CONFIG.ICONS.announce} ${opponent}, you have been challenged to Rock Paper Scissors by ${interaction.user}.`, components: [row] });
+      await interaction.editReply({ content: `${CONFIG.ICONS.announce} ${opponent}, you have been challenged to Rock Paper Scissors by ${interaction.user}.`, components: [row] });
     }
     else if (sub === "picturerace") {
+      await interaction.deferReply();
       const word = CONFIG.PICTURE_WORDS[Math.floor(Math.random() * CONFIG.PICTURE_WORDS.length)];
       await pictureRace.startRace(interaction.channelId, word);
       const image = await drawPictureWord(word);
-      await interaction.reply({ content: `${CONFIG.ICONS.search} **Picture Word Race!** First to type the correct word wins. You have 30 seconds.`, files: [image] });
+      await interaction.editReply({ content: `${CONFIG.ICONS.search} **Picture Word Race!** First to type the correct word wins. You have 30 seconds.`, files: [image] });
     }
   }
 });
@@ -400,7 +428,7 @@ client.commands.set("game", {
 // ========== EVENTS ==========
 client.once("ready", () => {
   console.log(`✅ Shard ${client.shard?.ids[0] || "0"} logged in as ${client.user.tag}`);
-  client.user.setPresence({ activities: [{ name: "/help | am i real?", type: 3 }] });
+  client.user.setPresence({ activities: [{ name: "/help | 1M+ guilds", type: 3 }] });
 });
 
 client.on("guildMemberAdd", async (member) => {
@@ -435,6 +463,7 @@ client.on("guildMemberRemove", async (member) => {
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
+  if (!message.guild) return;
   
   // Counting game
   const state = await counting.getState(message.guild.id, message.channel.id);
@@ -463,27 +492,71 @@ client.on("messageCreate", async (message) => {
   }
 });
 
+// RPS choice storage (in-memory for quick access)
+const rpsChoices = new Map();
+
 // Button handler for RPS
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
   const customId = interaction.customId;
   
   if (customId.startsWith("rps_accept_")) {
+    await interaction.deferReply({ ephemeral: true });
     const challengeId = customId.replace("rps_accept_", "");
     const challenge = await rps.getChallenge(challengeId);
-    if (!challenge) return interaction.reply({ content: `${CONFIG.ICONS.error} Challenge expired.`, ephemeral: true });
-    if (interaction.user.id !== challenge.target) return interaction.reply({ content: `${CONFIG.ICONS.error} Not for you.`, ephemeral: true });
+    if (!challenge) return interaction.editReply({ content: `${CONFIG.ICONS.error} Challenge expired.` });
+    if (interaction.user.id !== challenge.target) return interaction.editReply({ content: `${CONFIG.ICONS.error} Not for you.` });
     
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`rps_choice_${challengeId}_rock`).setLabel(`${CONFIG.ICONS.rock} Rock`).setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`rps_choice_${challengeId}_paper`).setLabel(`${CONFIG.ICONS.paper} Paper`).setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`rps_choice_${challengeId}_scissors`).setLabel(`${CONFIG.ICONS.scissor} Scissors`).setStyle(ButtonStyle.Primary)
     );
-    await interaction.reply({ content: `${CONFIG.ICONS.announce} Choose your move:`, components: [row] });
-  } else if (customId.startsWith("rps_decline_")) {
+    await interaction.editReply({ content: `${CONFIG.ICONS.announce} Choose your move:`, components: [row] });
+    rpsChoices.set(`${challengeId}:${challenge.target}`, { challengeId, userId: challenge.target });
+  } 
+  else if (customId.startsWith("rps_decline_")) {
+    await interaction.deferReply({ ephemeral: true });
     const challengeId = customId.replace("rps_decline_", "");
     await rps.deleteChallenge(challengeId);
-    await interaction.reply({ content: `${CONFIG.ICONS.error} Challenge declined.`, ephemeral: true });
+    await interaction.editReply({ content: `${CONFIG.ICONS.error} Challenge declined.` });
+  }
+  else if (customId.startsWith("rps_choice_")) {
+    await interaction.deferReply({ ephemeral: true });
+    const parts = customId.replace("rps_choice_", "").split("_");
+    const challengeId = parts[0];
+    const choice = parts[1];
+    const challenge = await rps.getChallenge(challengeId);
+    if (!challenge) return interaction.editReply({ content: `${CONFIG.ICONS.error} Challenge expired.` });
+    
+    // Store this player's choice
+    const choiceKey = `${challengeId}:${interaction.user.id}`;
+    rpsChoices.set(choiceKey, { choice });
+    
+    // Check if both players have chosen
+    const challengerChoice = rpsChoices.get(`${challengeId}:${challenge.challenger}`);
+    const targetChoice = rpsChoices.get(`${challengeId}:${challenge.target}`);
+    
+    if (challengerChoice && targetChoice) {
+      // Determine winner
+      const beats = { rock: "scissors", paper: "rock", scissors: "paper" };
+      let result = "";
+      if (challengerChoice.choice === targetChoice.choice) {
+        result = "It's a tie!";
+      } else if (beats[challengerChoice.choice] === targetChoice.choice) {
+        result = `<@${challenge.challenger}> wins!`;
+      } else {
+        result = `<@${challenge.target}> wins!`;
+      }
+      
+      await interaction.editReply({ content: `${CONFIG.ICONS.coin} ${result}` });
+      await rps.deleteChallenge(challengeId);
+      // Clean up choices
+      rpsChoices.delete(`${challengeId}:${challenge.challenger}`);
+      rpsChoices.delete(`${challengeId}:${challenge.target}`);
+    } else {
+      await interaction.editReply({ content: `${CONFIG.ICONS.message} Choice recorded. Waiting for opponent...` });
+    }
   }
 });
 
@@ -496,7 +569,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await command.execute(interaction);
   } catch (err) {
     console.error(err);
-    await interaction.reply({ content: `${CONFIG.ICONS.error} An error occurred.`, ephemeral: true });
+    if (interaction.deferred) {
+      await interaction.editReply({ content: `${CONFIG.ICONS.error} An error occurred.` });
+    } else {
+      await interaction.reply({ content: `${CONFIG.ICONS.error} An error occurred.`, ephemeral: true });
+    }
   }
 });
 
