@@ -1,11 +1,12 @@
 const { SlashCommandBuilder } = require("discord.js");
+const e = require("../emojis");
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("rps")
     .setDescription("Rock Paper Scissors")
-    .addStringOption(o =>
-      o.setName("choice")
+    .addStringOption(opt =>
+      opt.setName("choice")
         .setRequired(true)
         .addChoices(
           { name: "rock", value: "rock" },
@@ -20,6 +21,7 @@ module.exports = {
     const user = interaction.options.getString("choice");
 
     let result = "draw";
+
     if (
       (user === "rock" && bot === "scissors") ||
       (user === "paper" && bot === "rock") ||
@@ -27,6 +29,13 @@ module.exports = {
     ) result = "win";
     else if (user !== bot) result = "lose";
 
-    interaction.reply(`Bot: ${bot} | You: ${user} | ${result}`);
+    const icon =
+      result === "win" ? e.money :
+      result === "lose" ? e.error :
+      e.coin;
+
+    return interaction.reply(
+      `${e.bot} Bot chose **${bot}**\n${e.user} You chose **${user}**\n${icon} Result: **${result.toUpperCase()}**`
+    );
   }
 };
