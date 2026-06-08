@@ -4,33 +4,22 @@ const { ICONS } = require('./icons');
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
 client.commands = new Collection();
 
-fs.readdirSync('./commands').forEach(file => {
+// LOAD COMMANDS
+const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
+for (const file of commandFiles) {
     const cmd = require(`./commands/${file}`);
     client.commands.set(cmd.data.name, cmd);
-});
+}
 
 client.on('interactionCreate', async i => {
     if (!i.isChatInputCommand()) return;
-    try { await client.commands.get(i.commandName).execute(i); } 
-    catch (e) { i.reply(`${ICONS.error} Error.`); }
-});
-
-client.on('interactionCreate', async i => {
-    if (!i.isChatInputCommand()) return;
-    
-    const command = client.commands.get(i.commandName);
-    if (!command) {
-        console.error(`No command matching ${i.commandName} was found.`);
-        return i.reply({ content: `${ICONS.error} Command not found!`, ephemeral: true });
-    }
-
-    try {
-        await command.execute(i);
-    } catch (e) {
-        console.error(e); // <--- THIS WILL PRINT THE REAL ERROR IN YOUR LOGS
-        await i.reply({ content: `${ICONS.error} There was an error executing this!`, ephemeral: true });
+    const cmd = client.commands.get(i.commandName);
+    if (!cmd) return;
+    try { await cmd.execute(i); } catch (e) { 
+        console.error(e);
+        if (i.replied || i.deferred) await i.followUp(`${ICONS.error} Error.`);
+        else await i.reply({ content: `${ICONS.error} Error.`, ephemeral: true });
     }
 });
-
 
 client.login(process.env.token);
