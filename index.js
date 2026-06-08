@@ -1,6 +1,6 @@
 const {
-    Client, GatewayIntentBits, AttachmentBuilder, SlashCommandBuilder,
-    REST, Routes, PermissionFlagsBits, ActivityType
+    Client, GatewayIntentBits, AttachmentBuilder, 
+    REST, Routes, PermissionFlagsBits, ActivityType, Events
 } = require("discord.js");
 const Canvas = require("canvas");
 const path = require("path");
@@ -68,7 +68,8 @@ async function createCard(member, type) {
 
     // Avatar
     try {
-        const avatar = await Canvas.loadImage(member.user.displayAvatarURL({ extension: "png", size: 128 }));
+        const avatarUrl = member.user.displayAvatarURL({ extension: "png", forceStatic: true, size: 128 });
+        const avatar = await Canvas.loadImage(avatarUrl);
         ctx.drawImage(avatar, 50, 50, 100, 100);
     } catch (err) {
         console.error("Avatar load error:", err);
@@ -93,7 +94,7 @@ async function createCard(member, type) {
     return new AttachmentBuilder(canvas.toBuffer(), { name: `${type}.png` });
 }
 
-// ---------- COMMANDS (RAW OBJECTS - GUARANTEED VALID) ----------
+// ---------- COMMANDS (RAW OBJECTS) ----------
 const commands = [
     { name: "ping", description: "Test the bot" },
     { name: "eval", description: "Developer only", options: [{ type: 3, name: "code", description: "JavaScript code", required: true }] },
@@ -110,13 +111,14 @@ const commands = [
     { name: "dice", description: "Roll a dice" }
 ];
 
-// ---------- CLIENT READY (using clientReady event) ----------
-client.once("clientReady", async () => {
-    console.log(`${ICONS.bot} ${client.user.tag} is online`);
+// ---------- CLIENT READY (Using explicit v14 Events enum) ----------
+client.once(Events.ClientReady, async (readyClient) => {
+    console.log(`${ICONS.bot} ${readyClient.user.tag} is online`);
 
-    const rest = new REST({ version: "10" }).setToken(process.env.token);
+    // Using client.token instead of process.env to guarantee the token context matches
+    const rest = new REST({ version: "10" }).setToken(readyClient.token);
     try {
-        await rest.put(Routes.applicationGuildCommands(client.user.id, TEST_GUILD_ID), { body: commands });
+        await rest.put(Routes.applicationGuildCommands(readyClient.user.id, TEST_GUILD_ID), { body: commands });
         console.log(`${ICONS.announce} Registered ${commands.length} commands to guild ${TEST_GUILD_ID}`);
     } catch (err) {
         console.error(`${ICONS.error} Command registration failed:`, err);
@@ -125,12 +127,12 @@ client.once("clientReady", async () => {
     // Start activity rotation (every hour)
     setInterval(() => {
         const act = ACTIVITIES[Math.floor(Math.random() * ACTIVITIES.length)];
-        client.user.setActivity(act.name, { type: act.type });
+        readyClient.user.setActivity(act.name, { type: act.type });
     }, 60 * 60 * 1000);
 });
 
-// ---------- COMMAND HANDLER (bulletproof, always replies) ----------
-client.on("interactionCreate", async interaction => {
+// ---------- COMMAND HANDLER ----------
+client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
     const { commandName, options, user, guild, channel, member } = interaction;
@@ -139,12 +141,7 @@ client.on("interactionCreate", async interaction => {
 
     console.log(`📥 Command: ${commandName} by ${user.tag} (Dev:${isDev} Admin:${isAdmin})`);
 
-    // Helper that always replies within 3 seconds
     const reply = (content, ephemeral = false) => interaction.reply({ content, ephemeral });
-    const deferAndReply = async (content, ephemeral = true) => {
-        if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ ephemeral });
-        return interaction.editReply(content);
-    };
 
     try {
         switch (commandName) {
@@ -206,7 +203,6 @@ client.on("interactionCreate", async interaction => {
                 return reply(`${ICONS.coin} You: ${emojis[choice]} | Me: ${emojis[botChoice]}\n${result}`);
             }
 
-            // ---------- ADMIN COMMANDS ----------
             case "purge": {
                 if (!isAdmin) return reply(`${ICONS.error} Admin only`, true);
                 const amount = options.getInteger("amount");
@@ -236,7 +232,6 @@ client.on("interactionCreate", async interaction => {
                 return reply(`**Welcome Channel:** ${welcome ? `<#${welcome}>` : "Not set"}\n**Leave Channel:** ${leave ? `<#${leave}>` : "Not set"}`);
             }
 
-            // ---------- DEVELOPER COMMANDS ----------
             case "eval": {
                 if (!isDev) return reply(`${ICONS.error} Developer only`, true);
                 const code = options.getString("code");
@@ -268,7 +263,7 @@ client.on("interactionCreate", async interaction => {
 });
 
 // ---------- WELCOME / LEAVE CARDS ----------
-client.on("guildMemberAdd", async member => {
+client.on(Events.GuildMemberAdd, async member => {
     const welcomeId = settings.get(`${member.guild.id}:welcome`);
     if (welcomeId) {
         const channel = member.guild.channels.cache.get(welcomeId);
@@ -279,7 +274,7 @@ client.on("guildMemberAdd", async member => {
     }
 });
 
-client.on("guildMemberRemove", async member => {
+client.on(Events.GuildMemberRemove, async member => {
     const leaveId = settings.get(`${member.guild.id}:leave`);
     if (leaveId) {
         const channel = member.guild.channels.cache.get(leaveId);
@@ -290,5 +285,4 @@ client.on("guildMemberRemove", async member => {
     }
 });
 
-// ---------- LOGIN ----------
 client.login(process.env.token);
