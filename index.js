@@ -27,14 +27,13 @@ const ICONS = {
     scissor: "<:scissor:1513532752669053090>"
 };
 
-/* ---------------- CONFIG (FIXED FOR GITHUB HOSTING) ---------------- */
+/* ---------------- CONFIG ---------------- */
 const config = {
     token: process.env.DISCORD_TOKEN,
     clientId: process.env.CLIENT_ID,
     devId: "1303357369622990889"
 };
 
-/* ---------------- SAFETY CHECK ---------------- */
 if (!config.token) {
     console.log("❌ Missing DISCORD_TOKEN in environment variables");
     process.exit(1);
@@ -176,7 +175,11 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName("server")
-        .setDescription("Server info")
+        .setDescription("Server info"),
+
+    new SlashCommandBuilder()
+        .setName("help")
+        .setDescription("Show all bot commands")
 ];
 
 /* ---------------- REGISTER COMMANDS ---------------- */
@@ -290,6 +293,23 @@ client.on("interactionCreate", async i => {
 
     if (i.commandName === "server") {
         return i.reply(`${ICONS.announce} ${i.guild.name}\nMembers: ${i.guild.memberCount}`);
+    }
+
+    if (i.commandName === "help") {
+        return i.reply({
+            embeds: [{
+                color: 0x2b2d31,
+                title: `${ICONS.bot} Help Menu`,
+                description:
+                    `**/setup** → configure welcome & leave\n` +
+                    `**/rps** → rock paper scissors\n` +
+                    `**/word** → word guessing game\n` +
+                    `**/user** → user info\n` +
+                    `**/server** → server info\n` +
+                    `**/help** → show this menu`
+            }],
+            ephemeral: true
+        });
     }
 });
 
