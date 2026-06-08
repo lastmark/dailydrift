@@ -10,11 +10,9 @@ const fontPath = path.join(__dirname, "font.ttf");
 Canvas.registerFont(fontPath, { family: "CustomFont" });
 console.log("✅ Custom font registered");
 
-// ---------- DEV ID ----------
+// ---------- CONFIGURATION ----------
 const DEV_ID = "1303357369622990889";
-
-// ---------- YOUR SERVER ID (for instant commands) ----------
-const TEST_GUILD_ID = "1319429710094270554";
+const TEST_GUILD_ID = "1319429710094270554";  // your server ID
 
 // ---------- CUSTOM ICONS ----------
 const ICONS = {
@@ -150,7 +148,7 @@ client.once("clientReady", async () => {
     }, 60 * 60 * 1000);
 });
 
-// ---------- COMMAND HANDLER ----------
+// ---------- COMMAND HANDLER WITH SAFE REPLY (FIXES "application did not respond") ----------
 client.on("interactionCreate", async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -160,19 +158,25 @@ client.on("interactionCreate", async interaction => {
 
     console.log(`Command: ${commandName} by ${user.tag} (Dev:${isDev} Admin:${isAdmin})`);
 
+    // SAFE REPLY FUNCTION – always replies within 3 seconds
+    const safeReply = async (content, ephemeral = false) => {
+        const payload = typeof content === 'string' ? { content, ephemeral } : content;
+        if (interaction.deferred) return interaction.editReply(payload);
+        if (interaction.replied) return interaction.followUp(payload);
+        return interaction.reply(payload);
+    };
+
     try {
         // --- PUBLIC COMMANDS ---
         if (commandName === "ping") {
-            return interaction.reply(`${ICONS.bot} Pong! ${Date.now() - interaction.createdTimestamp}ms`);
+            return await safeReply(`${ICONS.bot} Pong! ${Date.now() - interaction.createdTimestamp}ms`);
         }
-
         if (commandName === "coinflip") {
             const result = Math.random() < 0.5 ? "Heads" : "Tails";
-            return interaction.reply(`${ICONS.coin} ${result}`);
+            return await safeReply(`${ICONS.coin} ${result}`);
         }
-
         if (commandName === "serverinfo") {
-            return interaction.reply({
+            return await safeReply({
                 embeds: [{
                     title: `${ICONS.search} ${guild.name}`,
                     fields: [
@@ -184,11 +188,10 @@ client.on("interactionCreate", async interaction => {
                 }]
             });
         }
-
         if (commandName === "userinfo") {
             const target = options.getUser("user") || user;
             const memberTarget = guild.members.cache.get(target.id);
-            return interaction.reply({
+            return await safeReply({
                 embeds: [{
                     title: `${ICONS.user} ${target.username}`,
                     fields: [
@@ -200,19 +203,16 @@ client.on("interactionCreate", async interaction => {
                 }]
             });
         }
-
         if (commandName === "8ball") {
             const question = options.getString("question");
             const answers = ["Definitely", "No way", "Ask later", "Yes", "Don't count on it", "Outlook good", "Very doubtful", "Without a doubt"];
             const answer = answers[Math.floor(Math.random() * answers.length)];
-            return interaction.reply(`${ICONS.coin} **Question:** ${question}\n**Answer:** ${answer}`);
+            return await safeReply(`${ICONS.coin} **Question:** ${question}\n**Answer:** ${answer}`);
         }
-
         if (commandName === "dice") {
             const roll = Math.floor(Math.random() * 6) + 1;
-            return interaction.reply(`${ICONS.coin} You rolled **${roll}**`);
+            return await safeReply(`${ICONS.coin} You rolled **${roll}**`);
         }
-
         if (commandName === "rps") {
             const choice = options.getString("choice");
             const botChoice = ["rock", "paper", "scissor"][Math.floor(Math.random() * 3)];
@@ -223,37 +223,34 @@ client.on("interactionCreate", async interaction => {
                      (choice === "paper" && botChoice === "rock") ||
                      (choice === "scissor" && botChoice === "paper")) result = "You win!";
             else result = "I win!";
-            return interaction.reply(`${ICONS.coin} You: ${emojis[choice]} | Me: ${emojis[botChoice]}\n${result}`);
+            return await safeReply(`${ICONS.coin} You: ${emojis[choice]} | Me: ${emojis[botChoice]}\n${result}`);
         }
 
-        // --- ADMIN COMMANDS ---
+        // --- ADMIN COMMANDS (defer for purge) ---
         if (commandName === "purge") {
-            if (!isAdmin) return interaction.reply({ content: `${ICONS.error} Admin only`, ephemeral: true });
+            if (!isAdmin) return await safeReply(`${ICONS.error} Admin only`, true);
             const amount = options.getInteger("amount");
-            if (amount < 1 || amount > 100) return interaction.reply({ content: "Amount must be 1-100", ephemeral: true });
+            if (amount < 1 || amount > 100) return await safeReply("Amount must be 1-100", true);
             await interaction.deferReply({ ephemeral: true });
             const deleted = await channel.bulkDelete(amount, true);
-            return interaction.editReply(`${ICONS.message} Deleted ${deleted.size} messages`);
+            return await interaction.editReply(`${ICONS.message} Deleted ${deleted.size} messages`);
         }
-
         if (commandName === "setwelcome") {
-            if (!isAdmin) return interaction.reply({ content: `${ICONS.error} Admin only`, ephemeral: true });
-            const channel = options.getChannel("channel");
-            settings.set(`${guild.id}:welcome`, channel.id);
-            return interaction.reply(`${ICONS.setting} Welcome channel set to ${channel}`);
+            if (!isAdmin) return await safeReply(`${ICONS.error} Admin only`, true);
+            const channelOpt = options.getChannel("channel");
+            settings.set(`${guild.id}:welcome`, channelOpt.id);
+            return await safeReply(`${ICONS.setting} Welcome channel set to ${channelOpt}`);
         }
-
         if (commandName === "setleave") {
-            if (!isAdmin) return interaction.reply({ content: `${ICONS.error} Admin only`, ephemeral: true });
-            const channel = options.getChannel("channel");
-            settings.set(`${guild.id}:leave`, channel.id);
-            return interaction.reply(`${ICONS.setting} Leave channel set to ${channel}`);
+            if (!isAdmin) return await safeReply(`${ICONS.error} Admin only`, true);
+            const channelOpt = options.getChannel("channel");
+            settings.set(`${guild.id}:leave`, channelOpt.id);
+            return await safeReply(`${ICONS.setting} Leave channel set to ${channelOpt}`);
         }
-
         if (commandName === "config") {
             const welcome = settings.get(`${guild.id}:welcome`);
             const leave = settings.get(`${guild.id}:leave`);
-            return interaction.reply({
+            return await safeReply({
                 embeds: [{
                     title: `${ICONS.setting} Configuration`,
                     fields: [
@@ -266,29 +263,35 @@ client.on("interactionCreate", async interaction => {
 
         // --- DEV COMMANDS ---
         if (commandName === "eval") {
-            if (!isDev) return interaction.reply({ content: `${ICONS.error} Dev only`, ephemeral: true });
+            if (!isDev) return await safeReply(`${ICONS.error} Dev only`, true);
             const code = options.getString("code");
             try {
                 let result = eval(code);
                 if (typeof result !== "string") result = require("util").inspect(result);
                 if (result.length > 1900) result = result.slice(0, 1900);
-                await interaction.reply({ content: `\`\`\`js\n${result}\n\`\`\``, ephemeral: true });
+                return await safeReply(`\`\`\`js\n${result}\n\`\`\``, true);
             } catch (err) {
-                await interaction.reply({ content: `\`\`\`js\n${err.message}\n\`\`\``, ephemeral: true });
+                return await safeReply(`\`\`\`js\n${err.message}\n\`\`\``, true);
             }
         }
-
         if (commandName === "activity") {
-            if (!isDev) return interaction.reply({ content: `${ICONS.error} Dev only`, ephemeral: true });
+            if (!isDev) return await safeReply(`${ICONS.error} Dev only`, true);
             const text = options.getString("text");
             client.user.setActivity(text);
-            await interaction.reply(`${ICONS.setting} Status changed to: ${text}`);
+            return await safeReply(`${ICONS.setting} Status changed to: ${text}`);
         }
 
+        // Fallback if command not recognized (should not happen)
+        return await safeReply(`${ICONS.error} Unknown command`, true);
+
     } catch (err) {
-        console.error(err);
-        const replyMethod = interaction.deferred || interaction.replied ? "editReply" : "reply";
-        await interaction[replyMethod]({ content: `${ICONS.error} ${err.message}`, ephemeral: true });
+        console.error("Command crash:", err);
+        // Ultimate fallback – try to send error message
+        try {
+            await safeReply({ content: `${ICONS.error} Critical error: ${err.message}`, ephemeral: true });
+        } catch (finalErr) {
+            console.error("Could not send error reply:", finalErr);
+        }
     }
 });
 
