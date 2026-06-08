@@ -2,7 +2,7 @@ require("dotenv").config();
 const { ShardingManager } = require("discord.js");
 
 // Use sharding for 1M+ guilds
-const manager = new ShardingManager("./bot.js", { token: process.env.DISCORD_TOKEN, totalShards: "auto" });
+const manager = new ShardingManager("bot.js", { token: process.env.DISCORD_TOKEN, totalShards: "auto" });
 manager.on("shardCreate", shard => console.log(`Launching shard ${shard.id}`));
 manager.spawn();
 
