@@ -60,6 +60,27 @@ client.on("guildMemberRemove", async (member) => {
   const img = await leaveCard(member.user, member.guild);
   channel.send({ files: [{ attachment: img, name: "leave.png" }] });
 });
+const { REST, Routes } = require("discord.js");
 
+client.once("ready", async () => {
+  console.log(`${client.user.tag} online`);
+
+  const commands = [...client.commands.values()].map(cmd =>
+    cmd.data.toJSON()
+  );
+
+  try {
+    const rest = new REST({ version: "10" }).setToken(token);
+
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: commands }
+    );
+
+    console.log(`Registered ${commands.length} slash commands`);
+  } catch (err) {
+    console.error("Command registration failed:", err);
+  }
+});
 
 client.login(token);
