@@ -3,7 +3,7 @@ const path = require("path");
 
 // Register the custom font before using it in the function
 // Replace 'path/to/font.ttf' with the actual path to your font file, e.g., './fonts/MyCustomFont.ttf'
-registerFont(path.join(__dirname, "fonts/MyCustomFont.ttf"), {
+registerFont(path.join(__dirname, "font.ttf"), {
   family: "CustomFontName" // This is the name you will use in ctx.font
 });
 
