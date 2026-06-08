@@ -139,10 +139,10 @@ client.once("ready", async () => {
     ].map(c => c.toJSON());
 
     const rest = new REST({ version: "10" })
-        .setToken(config.token);
+        .setToken(process.env.token);
 
     await rest.put(
-        Routes.applicationCommands(config.clientId),
+        Routes.applicationCommands(process.env.clientId),
         { body: commands }
     );
 });
