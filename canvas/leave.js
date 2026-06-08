@@ -2,7 +2,7 @@ const { createCanvas, loadImage, registerFont } = require("canvas");
 const path = require("path");
 
 // Register the custom font (Make sure the path and filename match your project)
-registerFont(path.join(__dirname, "font.ttf"), {
+registerFont(path.join(__dirname, "..", "font.ttf"), {
   family: "CustomFontName" 
 });
 
