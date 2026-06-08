@@ -1,11 +1,10 @@
-require("dotenv").config();
 const {
-  Client,
-  GatewayIntentBits,
-  Partials,
-  REST,
-  Routes,
-  SlashCommandBuilder
+    Client,
+    GatewayIntentBits,
+    Partials,
+    REST,
+    Routes,
+    SlashCommandBuilder
 } = require("discord.js");
 
 const { createCanvas, loadImage } = require("@napi-rs/canvas");
@@ -28,12 +27,18 @@ const ICONS = {
     scissor: "<:scissor:1513532752669053090>"
 };
 
-/* ---------------- CONFIG ---------------- */
+/* ---------------- CONFIG (FIXED FOR GITHUB HOSTING) ---------------- */
 const config = {
     token: process.env.DISCORD_TOKEN,
-    clientId: "1513494975290150992",
+    clientId: process.env.CLIENT_ID,
     devId: "1303357369622990889"
 };
+
+/* ---------------- SAFETY CHECK ---------------- */
+if (!config.token) {
+    console.log("❌ Missing DISCORD_TOKEN in environment variables");
+    process.exit(1);
+}
 
 /* ---------------- CLIENT ---------------- */
 const client = new Client({
@@ -75,10 +80,10 @@ function get(guildId) {
 }
 
 /* ---------------- GAME STATE ---------------- */
-const counting = new Map(); // guild -> {num, lastUser}
+const counting = new Map();
 const wordGame = new Map();
 
-/* ---------------- WORD SYSTEM ---------------- */
+/* ---------------- WORD GAME ---------------- */
 function randomWord() {
     const words = ["apple", "dragon", "system", "matrix", "rocket", "shadow"];
     return words[Math.floor(Math.random() * words.length)];
@@ -222,7 +227,6 @@ client.on("guildMemberRemove", async member => {
 client.on("interactionCreate", async i => {
     if (!i.isChatInputCommand()) return;
 
-    /* SETUP */
     if (i.commandName === "setup") {
         const type = i.options.getString("type");
         const channel = i.options.getChannel("channel");
@@ -242,7 +246,6 @@ client.on("interactionCreate", async i => {
         });
     }
 
-    /* RPS */
     if (i.commandName === "rps") {
         const user = i.options.getString("choice");
         const bot = ["rock", "paper", "scissors"][Math.floor(Math.random() * 3)];
@@ -269,7 +272,6 @@ client.on("interactionCreate", async i => {
         return i.reply(`${iconUser} vs ${iconBot}\nResult: **${result}**`);
     }
 
-    /* WORD GAME */
     if (i.commandName === "word") {
         const word = randomWord();
         wordGame.set(i.guild.id, word);
@@ -282,20 +284,12 @@ client.on("interactionCreate", async i => {
         });
     }
 
-    /* USER */
     if (i.commandName === "user") {
-        const u = i.user;
-
-        return i.reply(
-            `${ICONS.user} ${u.username}\nID: ${u.id}`
-        );
+        return i.reply(`${ICONS.user} ${i.user.username}\nID: ${i.user.id}`);
     }
 
-    /* SERVER */
     if (i.commandName === "server") {
-        return i.reply(
-            `${ICONS.announce} ${i.guild.name}\nMembers: ${i.guild.memberCount}`
-        );
+        return i.reply(`${ICONS.announce} ${i.guild.name}\nMembers: ${i.guild.memberCount}`);
     }
 });
 
@@ -303,7 +297,6 @@ client.on("interactionCreate", async i => {
 client.on("messageCreate", async message => {
     if (!message.guild || message.author.bot) return;
 
-    /* COUNTING GAME */
     if (!counting.has(message.guild.id)) {
         counting.set(message.guild.id, { num: 0, last: null });
     }
@@ -328,7 +321,6 @@ client.on("messageCreate", async message => {
         return message.react("✅");
     }
 
-    /* WORD GAME WIN CHECK */
     const word = wordGame.get(message.guild.id);
     if (word && message.content.toLowerCase() === word) {
         wordGame.delete(message.guild.id);
