@@ -109,24 +109,20 @@ client.once("clientReady", async () => {
     console.log(`🚀 System Online: ${client.user.tag}`);
     
     const commands = [
+        new SlashCommandBuilder().setName("help").setDescription("📖 View full dynamic registry guide of system commands"),
         new SlashCommandBuilder().setName("setwelcomechannel").setDescription("Set the automated welcome channel").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addChannelOption(o => o.setName("channel").setDescription("Target channel").setRequired(true)),
         new SlashCommandBuilder().setName("setleavechannel").setDescription("Set the automated departure channel").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addChannelOption(o => o.setName("channel").setDescription("Target channel").setRequired(true)),
         new SlashCommandBuilder().setName("setwelcomemessage").setDescription("Configure customized welcome string template").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addStringOption(o => o.setName("message").setDescription("Template variables: {user}").setRequired(true)),
         new SlashCommandBuilder().setName("setleavemessage").setDescription("Configure customized departure string template").setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).addStringOption(o => o.setName("message").setDescription("Template variables: {user}").setRequired(true)),
         new SlashCommandBuilder().setName("configuration").setDescription("Displays active channels config mapping for this server"),
         
-        // UTILITY: Purge Chat Messages
         new SlashCommandBuilder().setName("purge").setDescription("🧹 Mass deletes a specific volume of recent messages").setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages).addIntegerOption(o => o.setName("amount").setDescription("Number of lines to delete (1-100)").setRequired(true)),
-        
-        // INFO SYSTEM MODULES
         new SlashCommandBuilder().setName("serverinfo").setDescription("📊 Displays detailed analytical footprints of this server"),
         new SlashCommandBuilder().setName("userinfo").setDescription("👤 Deep scans profile matrix of a specified target user").addUserOption(o => o.setName("target").setDescription("Select user profile")),
 
-        // MINI-GAMES INTERACTION HOOKS
         new SlashCommandBuilder().setName("coinflip").setDescription("Wager a guess on a highly volatile high-stakes coin flip").addStringOption(o => o.setName("guess").setDescription("Heads or Tails").setRequired(true).addChoices({ name: 'Heads', value: 'heads' }, { name: 'Tails', value: 'tails' })),
         new SlashCommandBuilder().setName("rps").setDescription("🪨✂️📄 Challenge the core engine to Rock, Paper, Scissors").addStringOption(o => o.setName("choice").setDescription("Your weapon of choice").setRequired(true).addChoices({ name: 'Rock', value: 'rock' }, { name: 'Paper', value: 'paper' }, { name: 'Scissors', value: 'scissors' })),
         
-        // ROOT DEVELOPER CONTROLS
         new SlashCommandBuilder().setName("dev-stats").setDescription("🔒 Developer Only: Internal diagnostics dashboard"),
         new SlashCommandBuilder().setName("dev-leaveserver").setDescription("🔒 Developer Only: Forces bot to terminate presence in a guild").addStringOption(o => o.setName("id").setDescription("Guild Snowflake ID").setRequired(true))
     ].map(c => c.toJSON());
@@ -149,6 +145,49 @@ client.on("interactionCreate", async interaction => {
     const leaveChanKey = `gc:${guildId}:leaveChannel`;
     const welcomeMsgKey = `gc:${guildId}:welcomeMsg`;
     const leaveMsgKey = `gc:${guildId}:leaveMsg`;
+
+    // --- DYNAMIC HELP COMMAND (PUBLIC VISIBILITY) ---
+    if (commandName === "help") {
+        const isDeveloper = user.id === DEVELOPER_ID;
+
+        const helpEmbed = {
+            title: "🤖 Bot Application System Guide",
+            description: "Welcome to the official server utility dashboard. Below are the available command modules you can execute.",
+            color: 0x5865F2, 
+            thumbnail: { url: client.user.displayAvatarURL() },
+            fields: [
+                {
+                    name: "⚙️ Server Administration Setups",
+                    value: "`/setwelcomechannel` - Configure entry card channel.\n`/setleavechannel` - Configure departure card channel.\n`/setwelcomemessage` - Setup greet phrases.\n`/setleavemessage` - Setup leave phrases.\n`/configuration` - View active server map tracking layout."
+                },
+                {
+                    name: "🧹 Utility Assets",
+                    value: "`/purge` - Mass remove up to 100 messages.\n`/serverinfo` - Check advanced server telemetry details.\n`/userinfo` - Scans profile parameters of a specific member."
+                },
+                {
+                    name: "🪙 Active Game Hub",
+                    value: "`/coinflip` - Guess heads or tails.\n`/rps` - Play Rock, Paper, Scissors with the system engine."
+                }
+            ],
+            footer: { text: "Public Release Version v2.0" }
+        };
+
+        if (isDeveloper) {
+            helpEmbed.fields.push({
+                name: "👑 Root System Master Overrides (Developer Unlocked)",
+                value: "`/dev-stats` - View global performance matrix indices.\n`/dev-leaveserver` - Force disconnect presence from a specified guild."
+            });
+            helpEmbed.color = 0x10B981; 
+            helpEmbed.title = "👑 Master System Command Control Dashboard";
+        } else {
+            helpEmbed.fields.push({
+                name: "🔒 Root System Master Overrides (Locked)",
+                value: "Administrative global footprint commands are strictly locked to the bot creator: <@1303357369622990889>."
+            });
+        }
+
+        return interaction.reply({ embeds: [helpEmbed], ephemeral: false }); 
+    }
 
     // 1. Administration Controls Settings
     if (commandName === "setwelcomechannel") {
