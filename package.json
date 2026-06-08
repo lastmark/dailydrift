@@ -1,15 +1,11 @@
 {
-  "name": "welcome-leave-bot",
+  "name": "your-bot-name",
   "version": "1.0.0",
-  "description": "Discord.js Welcome & Leave Bot",
+  "description": "",
   "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
-  "author": "",
-  "license": "MIT",
   "dependencies": {
-    "canvas": "^3.1.2",
-    "discord.js": "^14.21.0"
+    "canvas": "^2.11.2",
+    "discord.js": "^14.14.1",
+    "redis": "^4.7.0"
   }
 }
