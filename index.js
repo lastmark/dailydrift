@@ -1,3 +1,4 @@
+require("dotenv").config();
 const {
   Client,
   GatewayIntentBits,
@@ -29,7 +30,7 @@ const ICONS = {
 
 /* ---------------- CONFIG ---------------- */
 const config = {
-    token: "MTUxMzQ5NDk3NTI5MDE1MDk5Mg.GGZJ8O.1AG3wfZ-eUnxxVeNbwZ82oRV0qMN99wRBio_y4",
+    token: process.env.DISCORD_TOKEN,
     clientId: "1513494975290150992",
     devId: "1303357369622990889"
 };
