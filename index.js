@@ -7,7 +7,6 @@ const {
     SlashCommandBuilder
 } = require("discord.js");
 
-const { createCanvas, loadImage } = require("@napi-rs/canvas");
 const sqlite3 = require("sqlite3").verbose();
 
 /* ---------------- ICONS ---------------- */
@@ -19,10 +18,7 @@ const ICONS = {
     memberAdd: "<:memberadd:1513532586998239335>",
     memberLeave: "<:memberleave:1513532632992845965>",
     user: "<:user:1513533036472307814>",
-    announce: "<:announcement:1513533499607351356>",
-    rock: "<:rock:1513532823301259446>",
-    paper: "<:paper:1513532786445783151>",
-    scissor: "<:scissor:1513532752669053090>"
+    announce: "<:announcement:1513533499607351356>"
 };
 
 /* ---------------- CONFIG ---------------- */
@@ -54,9 +50,7 @@ const db = new sqlite3.Database("./data.db");
 db.run(`CREATE TABLE IF NOT EXISTS settings (
     guildId TEXT PRIMARY KEY,
     welcomeChannel TEXT,
-    leaveChannel TEXT,
-    welcomeMsg TEXT,
-    leaveMsg TEXT
+    leaveChannel TEXT
 )`);
 
 function set(guildId, key, value) {
@@ -76,22 +70,17 @@ function get(guildId) {
     });
 }
 
-/* ---------------- STATE ---------------- */
+/* ---------------- GAME STATE ---------------- */
 const counting = new Map();
 const wordGame = new Map();
 
-/* ---------------- WORD ---------------- */
-function randomWord() {
-    const words = ["apple", "dragon", "system", "matrix", "rocket", "shadow"];
-    return words[Math.floor(Math.random() * words.length)];
-}
-
-/* ---------------- SAFE COMMANDS ---------------- */
+/* ---------------- SAFE COMMAND BUILDER ---------------- */
 const cmd = (name, desc) =>
     new SlashCommandBuilder()
         .setName(name)
-        .setDescription(desc || "No description");
+        .setDescription(typeof desc === "string" ? desc : "No description");
 
+/* ---------------- COMMANDS ---------------- */
 const commands = [
     cmd("setup", "Setup welcome/leave system")
         .addStringOption(o =>
@@ -104,9 +93,6 @@ const commands = [
         )
         .addChannelOption(o =>
             o.setName("channel").setRequired(true)
-        )
-        .addStringOption(o =>
-            o.setName("message").setRequired(false)
         ),
 
     cmd("rps", "Rock Paper Scissors")
@@ -120,20 +106,25 @@ const commands = [
                 )
         ),
 
-    cmd("word", "Word guessing game"),
+    cmd("word", "Word game"),
     cmd("user", "User info"),
     cmd("server", "Server info"),
     cmd("help", "Show commands")
 ];
 
-/* ---------------- REGISTER ---------------- */
+/* ---------------- REGISTER COMMANDS ---------------- */
 const rest = new REST({ version: "10" }).setToken(config.token);
 
 async function registerCommands() {
-    await rest.put(
-        Routes.applicationCommands(config.clientId),
-        { body: commands.map(c => c.toJSON()) }
-    );
+    try {
+        await rest.put(
+            Routes.applicationCommands(config.clientId),
+            { body: commands.map(c => c.toJSON()) }
+        );
+        console.log("Commands registered");
+    } catch (err) {
+        console.log("Command error:", err);
+    }
 }
 
 /* ---------------- READY ---------------- */
@@ -171,11 +162,7 @@ client.on("interactionCreate", async i => {
         const type = i.options.getString("type");
         const channel = i.options.getChannel("channel");
 
-        if (type === "welcome") {
-            set(i.guild.id, "welcomeChannel", channel.id);
-        } else {
-            set(i.guild.id, "leaveChannel", channel.id);
-        }
+        set(i.guild.id, type === "welcome" ? "welcomeChannel" : "leaveChannel", channel.id);
 
         return i.reply({ content: `${ICONS.setting} Saved`, ephemeral: true });
     }
@@ -188,7 +175,7 @@ client.on("interactionCreate", async i => {
     }
 
     if (i.commandName === "word") {
-        const word = randomWord();
+        const word = ["apple", "dragon", "matrix", "rocket"][Math.floor(Math.random() * 4)];
         wordGame.set(i.guild.id, word);
 
         return i.reply(`${ICONS.search} Guess the word: ${word}`);
@@ -210,7 +197,7 @@ client.on("interactionCreate", async i => {
     }
 });
 
-/* ---------------- MESSAGE ---------------- */
+/* ---------------- MESSAGE GAMES ---------------- */
 client.on("messageCreate", message => {
     if (!message.guild || message.author.bot) return;
 
