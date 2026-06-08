@@ -49,27 +49,26 @@ client.on("guildMemberAdd", async (member) => {
   const img = await welcomeCard(member.user, member.guild);
   channel.send({ files: [{ attachment: img, name: "welcome.png" }] });
 });
-
-client.on("guildMemberRemove", async (member) => {
-  const channelId = await redis.get(`leave:${member.guild.id}`);
-  if (!channelId) return;
-
-  const channel = member.guild.channels.cache.get(channelId);
-  if (!channel) return;
-
-  const img = await leaveCard(member.user, member.guild);
-  channel.send({ files: [{ attachment: img, name: "leave.png" }] });
-});
-const { REST, Routes } = require("discord.js");
-
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`${client.user.tag} online`);
+
+  for (const [name, cmd] of client.commands) {
+    try {
+      cmd.data.toJSON();
+      console.log(`✅ ${name}`);
+    } catch (err) {
+      console.error(`❌ Broken command: ${name}`);
+      console.error(err);
+    }
+  }
 
   const commands = [...client.commands.values()].map(cmd =>
     cmd.data.toJSON()
   );
 
   try {
+    const { REST, Routes } = require("discord.js");
+
     const rest = new REST({ version: "10" }).setToken(token);
 
     await rest.put(
@@ -77,9 +76,9 @@ client.once("ready", async () => {
       { body: commands }
     );
 
-    console.log(`Registered ${commands.length} slash commands`);
+    console.log(`Registered ${commands.length} commands`);
   } catch (err) {
-    console.error("Command registration failed:", err);
+    console.error(err);
   }
 });
 
