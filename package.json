@@ -1,16 +1,16 @@
 {
-  "name": "discord-ultimate-bot",
+  "name": "daily-drift-bot",
   "version": "1.0.0",
-  "description": "High-scale Discord bot with welcome canvas, games, Redis",
+  "description": "Multi-feature Discord bot (welcome, games, canvas, slash commands)",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "ioredis": "^5.3.2",
-    "canvas": "^2.11.2",
-    "dotenv": "^16.3.1"
+    "discord.js": "^14.16.3",
+    "@napi-rs/canvas": "^0.1.60",
+    "sqlite3": "^5.1.7"
   },
   "engines": {
     "node": ">=18.0.0"
