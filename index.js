@@ -6,15 +6,17 @@ const Canvas = require("canvas");
 const path = require("path");
 
 // ---------- REGISTER YOUR CUSTOM FONT ----------
-// Place your font file (e.g., "font.ttf") in the same folder as this script
-const fontPath = path.join(__dirname, "font.ttf"); // Change to "font.tff" if that's the exact name
+const fontPath = path.join(__dirname, "font.ttf");
 Canvas.registerFont(fontPath, { family: "CustomFont" });
 console.log("✅ Custom font registered");
 
-// ---------- YOUR DEV ID ----------
+// ---------- DEV ID ----------
 const DEV_ID = "1303357369622990889";
 
-// ---------- ICONS ----------
+// ---------- YOUR SERVER ID (for instant commands) ----------
+const TEST_GUILD_ID = "1319429710094270554";
+
+// ---------- CUSTOM ICONS ----------
 const ICONS = {
     bot: "<:bot:1513533291385458708>",
     error: "<:error:1513532700202631240>",
@@ -37,9 +39,14 @@ const ACTIVITIES = [
     { name: "my users argue", type: ActivityType.Watching },
     { name: "to elevator music", type: ActivityType.Listening },
     { name: "why did the chicken cross the road", type: ActivityType.Competing },
-    { name: "the Bee Movie script", type: ActivityType.Playing }
+    { name: "the Bee Movie script", type: ActivityType.Playing },
+    { name: "how many licks to a Tootsie Pop", type: ActivityType.Watching }
 ];
 
+// ---------- SIMPLE STORAGE (instead of Redis) ----------
+const settings = new Map(); // keys: "guildId:welcome", "guildId:leave"
+
+// ---------- CLIENT SETUP ----------
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -48,7 +55,7 @@ const client = new Client({
     ]
 });
 
-// ---------- CANVAS CARD WITH YOUR CUSTOM FONT ----------
+// ---------- CANVAS CARD WITH CUSTOM FONT ----------
 async function createCard(member, type) {
     const canvas = Canvas.createCanvas(600, 300);
     const ctx = canvas.getContext("2d");
@@ -69,15 +76,17 @@ async function createCard(member, type) {
         console.error("Avatar load error:", err);
     }
 
-    // Text with your custom font (fallback to Arial if missing)
-    const fontFamily = "CustomFont, Arial, sans-serif";
+    // Text with custom font (fallback to sans-serif)
+    const fontFamily = "CustomFont, 'Segoe UI', Arial, sans-serif";
     ctx.font = `bold 32px ${fontFamily}`;
     ctx.fillStyle = "#FFFFFF";
     ctx.fillText(type === "welcome" ? "WELCOME" : "GOODBYE", 180, 90);
 
     ctx.font = `24px ${fontFamily}`;
     ctx.fillStyle = "#CCCCCC";
-    ctx.fillText(member.user.username, 180, 140);
+    let username = member.user.username;
+    if (username.length > 15) username = username.slice(0, 12) + "...";
+    ctx.fillText(username, 180, 140);
 
     ctx.font = `18px ${fontFamily}`;
     ctx.fillStyle = "#888888";
@@ -86,63 +95,45 @@ async function createCard(member, type) {
     return new AttachmentBuilder(canvas.toBuffer(), { name: `${type}.png` });
 }
 
-// ---------- COMMANDS (Guild-specific for instant update) ----------
+// ---------- COMMANDS (ALL DESCRIPTIONS INCLUDED) ----------
 const commands = [
     new SlashCommandBuilder().setName("ping").setDescription("Test the bot"),
-    
     new SlashCommandBuilder().setName("purge")
-        .addIntegerOption(opt => opt.setName("amount").setDescription("Number of messages to delete (1-100)").setRequired(true))
+        .addIntegerOption(opt => opt.setName("amount").setDescription("Number of messages (1-100)").setRequired(true))
         .setDescription("Delete messages (Admin)"),
-    
     new SlashCommandBuilder().setName("eval")
-        .addStringOption(opt => opt.setName("code").setDescription("JavaScript code to execute").setRequired(true))
+        .addStringOption(opt => opt.setName("code").setDescription("JavaScript code").setRequired(true))
         .setDescription("Developer only"),
-    
     new SlashCommandBuilder().setName("activity")
-        .addStringOption(opt => opt.setName("text").setDescription("New bot status text").setRequired(true))
+        .addStringOption(opt => opt.setName("text").setDescription("New bot status").setRequired(true))
         .setDescription("Developer only"),
-    
     new SlashCommandBuilder().setName("setwelcome")
         .addChannelOption(opt => opt.setName("channel").setDescription("Welcome channel").setRequired(true))
         .setDescription("Admin only"),
-    
     new SlashCommandBuilder().setName("setleave")
         .addChannelOption(opt => opt.setName("channel").setDescription("Leave channel").setRequired(true))
         .setDescription("Admin only"),
-    
     new SlashCommandBuilder().setName("config").setDescription("Show current settings"),
-    
     new SlashCommandBuilder().setName("rps")
         .addStringOption(opt => opt.setName("choice").setDescription("Your choice").setRequired(true)
             .addChoices({ name: "Rock", value: "rock" }, { name: "Paper", value: "paper" }, { name: "Scissors", value: "scissor" }))
         .setDescription("Play Rock Paper Scissors"),
-    
     new SlashCommandBuilder().setName("coinflip").setDescription("Flip a coin"),
-    
-    new SlashCommandBuilder().setName("serverinfo").setDescription("Get server information"),
-    
+    new SlashCommandBuilder().setName("serverinfo").setDescription("Server information"),
     new SlashCommandBuilder().setName("userinfo")
         .addUserOption(opt => opt.setName("user").setDescription("User to check").setRequired(false))
         .setDescription("Get user information"),
-    
     new SlashCommandBuilder().setName("8ball")
         .addStringOption(opt => opt.setName("question").setDescription("Ask any question").setRequired(true))
         .setDescription("Ask the magic 8ball"),
-    
     new SlashCommandBuilder().setName("dice").setDescription("Roll a dice")
 ];
 
-// ---------- SIMPLE STORAGE (no Redis needed) ----------
-const settings = new Map(); // key: "guildId:welcome" or "guildId:leave"
-
-// ---------- READY EVENT ----------
-client.once("ready", async () => {
+// ---------- CLIENT READY (using clientReady event) ----------
+client.once("clientReady", async () => {
     console.log(`${ICONS.bot} ${client.user.tag} is online`);
 
-    // Replace with your actual test server ID for instant commands
-    const TEST_GUILD_ID = "YOUR_GUILD_ID_HERE"; // <-- CHANGE THIS
     const rest = new REST({ version: "10" }).setToken(process.env.token);
-
     try {
         await rest.put(Routes.applicationGuildCommands(client.user.id, TEST_GUILD_ID), {
             body: commands.map(cmd => cmd.toJSON())
@@ -152,14 +143,14 @@ client.once("ready", async () => {
         console.error(`${ICONS.error} Command registration failed:`, err);
     }
 
-    // Activity rotation
+    // Start activity rotation
     setInterval(() => {
         const act = ACTIVITIES[Math.floor(Math.random() * ACTIVITIES.length)];
         client.user.setActivity(act.name, { type: act.type });
     }, 60 * 60 * 1000);
 });
 
-// ---------- INTERACTION HANDLER ----------
+// ---------- COMMAND HANDLER ----------
 client.on("interactionCreate", async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -214,7 +205,7 @@ client.on("interactionCreate", async interaction => {
             const question = options.getString("question");
             const answers = ["Definitely", "No way", "Ask later", "Yes", "Don't count on it", "Outlook good", "Very doubtful", "Without a doubt"];
             const answer = answers[Math.floor(Math.random() * answers.length)];
-            return interaction.reply(`${ICONS.coin} ${question}\n🎱 ${answer}`);
+            return interaction.reply(`${ICONS.coin} **Question:** ${question}\n**Answer:** ${answer}`);
         }
 
         if (commandName === "dice") {
@@ -227,11 +218,11 @@ client.on("interactionCreate", async interaction => {
             const botChoice = ["rock", "paper", "scissor"][Math.floor(Math.random() * 3)];
             const emojis = { rock: ICONS.rock, paper: ICONS.paper, scissor: ICONS.scissor };
             let result = "";
-            if (choice === botChoice) result = "Tie";
+            if (choice === botChoice) result = "It's a tie!";
             else if ((choice === "rock" && botChoice === "scissor") ||
                      (choice === "paper" && botChoice === "rock") ||
-                     (choice === "scissor" && botChoice === "paper")) result = "You win";
-            else result = "I win";
+                     (choice === "scissor" && botChoice === "paper")) result = "You win!";
+            else result = "I win!";
             return interaction.reply(`${ICONS.coin} You: ${emojis[choice]} | Me: ${emojis[botChoice]}\n${result}`);
         }
 
@@ -239,7 +230,7 @@ client.on("interactionCreate", async interaction => {
         if (commandName === "purge") {
             if (!isAdmin) return interaction.reply({ content: `${ICONS.error} Admin only`, ephemeral: true });
             const amount = options.getInteger("amount");
-            if (amount < 1 || amount > 100) return interaction.reply({ content: "1-100 only", ephemeral: true });
+            if (amount < 1 || amount > 100) return interaction.reply({ content: "Amount must be 1-100", ephemeral: true });
             await interaction.deferReply({ ephemeral: true });
             const deleted = await channel.bulkDelete(amount, true);
             return interaction.editReply(`${ICONS.message} Deleted ${deleted.size} messages`);
@@ -324,4 +315,5 @@ client.on("guildMemberRemove", async member => {
     }
 });
 
+// ---------- LOGIN ----------
 client.login(process.env.token);
