@@ -10,8 +10,6 @@ const {
 } = require("discord.js");
 
 const Canvas = require("canvas");
-const fs = require("fs");
-const path = require("path");
 const { createClient } = require("redis");
 
 // --- ICON DICTIONARY ---
@@ -50,47 +48,53 @@ const redisClient = createClient({
 });
 
 redisClient.on('error', err => console.error('Redis Error:', err));
+redisClient.on('connect', () => console.log('Redis connected'));
 
-// --- CANVAS FUNCTION WITH FIXED FONTS ---
+// --- FIXED CANVAS FUNCTION (NO FONT ERRORS) ---
 async function createCard(member, type) {
     const canvas = Canvas.createCanvas(800, 400);
     const ctx = canvas.getContext('2d');
     
-    // Register a fallback font
-    Canvas.registerFont('./fonts/arial.ttf', { family: 'Arial' });
-    Canvas.registerFont('./fonts/arialbd.ttf', { family: 'Arial Bold' });
-    
+    // Background
     ctx.fillStyle = '#1A1D29';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
+    // Accent bar
     ctx.fillStyle = type === 'welcome' ? '#00FF88' : '#FF4444';
     ctx.fillRect(0, 0, 10, canvas.height);
     
-    const avatar = await Canvas.loadImage(member.user.displayAvatarURL({ extension: 'png', size: 256 }));
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(150, 200, 80, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.clip();
-    ctx.drawImage(avatar, 70, 120, 160, 160);
-    ctx.restore();
+    // Avatar
+    try {
+        const avatar = await Canvas.loadImage(member.user.displayAvatarURL({ extension: 'png', size: 256 }));
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(150, 200, 80, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(avatar, 70, 120, 160, 160);
+        ctx.restore();
+        
+        ctx.beginPath();
+        ctx.arc(150, 200, 85, 0, Math.PI * 2);
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 5;
+        ctx.stroke();
+    } catch (err) {
+        console.error('Avatar load error:', err);
+    }
     
-    ctx.beginPath();
-    ctx.arc(150, 200, 85, 0, Math.PI * 2);
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 5;
-    ctx.stroke();
-    
-    // Use system fonts instead of custom ones that might not exist
-    ctx.font = 'bold 48px "Segoe UI", "Arial", "Helvetica", sans-serif';
+    // Text with guaranteed working font
+    ctx.font = 'bold 48px "Noto Sans", "Segoe UI", Arial, sans-serif';
     ctx.fillStyle = '#FFFFFF';
     ctx.fillText(type === 'welcome' ? 'Welcome!' : 'Goodbye!', 280, 150);
     
-    ctx.font = '32px "Segoe UI", "Arial", "Helvetica", sans-serif';
+    ctx.font = '32px "Noto Sans", "Segoe UI", Arial, sans-serif';
     ctx.fillStyle = '#AAAAAA';
-    ctx.fillText(member.user.username, 280, 220);
+    let username = member.user.username;
+    if (username.length > 15) username = username.slice(0, 12) + '...';
+    ctx.fillText(username, 280, 220);
     
-    ctx.font = '24px "Segoe UI", "Arial", "Helvetica", sans-serif';
+    ctx.font = '24px "Noto Sans", "Segoe UI", Arial, sans-serif';
     ctx.fillStyle = '#888888';
     ctx.fillText(`Member #${member.guild.memberCount}`, 280, 280);
     
@@ -111,10 +115,12 @@ const client = new Client({
 function rotateActivity() {
     const randomActivity = FUNNY_ACTIVITIES[Math.floor(Math.random() * FUNNY_ACTIVITIES.length)];
     client.user.setActivity(randomActivity.name, { type: randomActivity.type });
+    console.log(`Activity changed to: ${randomActivity.type} ${randomActivity.name}`);
 }
 
-// --- COMMAND REGISTRATION ---
+// --- ALL COMMANDS (including dev) ---
 const commands = [
+    // Public commands
     new SlashCommandBuilder().setName("help").setDescription("Show all commands"),
     new SlashCommandBuilder().setName("configuration").setDescription("View server configuration"),
     new SlashCommandBuilder().setName("purge")
@@ -135,7 +141,8 @@ const commands = [
         .setDescription("Set leave channel (Admin)"),
     new SlashCommandBuilder().setName("8ball").addStringOption(opt => opt.setName("question").setDescription("Ask anything").setRequired(true)).setDescription("Ask the magic 8ball"),
     new SlashCommandBuilder().setName("dice").setDescription("Roll a dice"),
-    // Developer commands
+    
+    // Developer commands (hidden from non-devs via check)
     new SlashCommandBuilder().setName("dev_eval").addStringOption(opt => opt.setName("code").setDescription("Code to evaluate").setRequired(true)).setDescription("Execute JavaScript code"),
     new SlashCommandBuilder().setName("dev_reload").setDescription("Reload bot commands"),
     new SlashCommandBuilder().setName("dev_guilds").setDescription("List all guilds the bot is in"),
@@ -151,6 +158,7 @@ const commands = [
 client.once("ready", async () => {
     console.log(`${ICONS.bot} Logged in as ${client.user.tag}`);
     
+    // Connect to Redis
     try {
         await redisClient.connect();
         console.log(`${ICONS.setting} Connected to Redis`);
@@ -158,14 +166,16 @@ client.once("ready", async () => {
         console.error(`${ICONS.error} Redis connection failed:`, err);
     }
     
+    // Register commands
     const rest = new REST({ version: '10' }).setToken(process.env.token);
     try {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands.map(cmd => cmd.toJSON()) });
-        console.log(`${ICONS.announce} Commands registered`);
+        console.log(`${ICONS.announce} Registered ${commands.length} commands`);
     } catch (err) {
         console.error(`${ICONS.error} Command registration failed:`, err);
     }
     
+    // Start activity rotation
     rotateActivity();
     setInterval(rotateActivity, 60 * 60 * 1000);
 });
@@ -180,13 +190,20 @@ client.on("interactionCreate", async interaction => {
     if (!interaction.isChatInputCommand()) return;
     
     const { commandName, guildId, options, user, guild, channel, member } = interaction;
-    const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
     const dev = isDev(user.id);
+    
+    // Block non-devs from using dev commands
+    if (commandName.startsWith("dev_") && !dev) {
+        return interaction.reply({ 
+            content: `${ICONS.error} This command is only available to the bot developer`, 
+            ephemeral: true 
+        });
+    }
     
     try {
         // --- DEVELOPER COMMANDS ---
         if (commandName === "dev_eval") {
-            if (!dev) return interaction.reply({ content: `${ICONS.error} Developer only command`, ephemeral: true });
             const code = options.getString("code");
             try {
                 let result = eval(code);
@@ -199,20 +216,17 @@ client.on("interactionCreate", async interaction => {
         }
         
         else if (commandName === "dev_reload") {
-            if (!dev) return interaction.reply({ content: `${ICONS.error} Developer only command`, ephemeral: true });
             const rest = new REST({ version: '10' }).setToken(process.env.token);
             await rest.put(Routes.applicationCommands(client.user.id), { body: commands.map(cmd => cmd.toJSON()) });
-            await interaction.reply({ content: `${ICONS.announce} Commands reloaded`, ephemeral: true });
+            await interaction.reply({ content: `${ICONS.announce} Reloaded ${commands.length} commands`, ephemeral: true });
         }
         
         else if (commandName === "dev_guilds") {
-            if (!dev) return interaction.reply({ content: `${ICONS.error} Developer only command`, ephemeral: true });
             const guilds = client.guilds.cache.map(g => `${g.name} - ${g.id} (${g.memberCount} members)`).join('\n');
             await interaction.reply({ content: `${ICONS.search} **Guilds:**\n\`\`\`${guilds.slice(0, 1900)}\`\`\``, ephemeral: true });
         }
         
         else if (commandName === "dev_leave") {
-            if (!dev) return interaction.reply({ content: `${ICONS.error} Developer only command`, ephemeral: true });
             const targetGuild = client.guilds.cache.get(options.getString("guildid"));
             if (!targetGuild) return interaction.reply({ content: `${ICONS.error} Guild not found`, ephemeral: true });
             await targetGuild.leave();
@@ -220,28 +234,24 @@ client.on("interactionCreate", async interaction => {
         }
         
         else if (commandName === "dev_activity") {
-            if (!dev) return interaction.reply({ content: `${ICONS.error} Developer only command`, ephemeral: true });
             const activity = options.getString("activity");
             client.user.setActivity(activity);
             await interaction.reply({ content: `${ICONS.setting} Activity changed to: ${activity}`, ephemeral: true });
         }
         
         else if (commandName === "dev_status") {
-            if (!dev) return interaction.reply({ content: `${ICONS.error} Developer only command`, ephemeral: true });
             const status = options.getString("status");
             await client.user.setStatus(status);
             await interaction.reply({ content: `${ICONS.setting} Status changed to: ${status}`, ephemeral: true });
         }
         
         else if (commandName === "dev_redis") {
-            if (!dev) return interaction.reply({ content: `${ICONS.error} Developer only command`, ephemeral: true });
             const key = options.getString("key");
             const value = await redisClient.get(key);
             await interaction.reply({ content: `${ICONS.search} Key: ${key}\nValue: ${value || 'null'}`, ephemeral: true });
         }
         
         else if (commandName === "dev_redis_set") {
-            if (!dev) return interaction.reply({ content: `${ICONS.error} Developer only command`, ephemeral: true });
             const key = options.getString("key");
             const value = options.getString("value");
             await redisClient.set(key, value);
@@ -249,7 +259,6 @@ client.on("interactionCreate", async interaction => {
         }
         
         else if (commandName === "dev_stats") {
-            if (!dev) return interaction.reply({ content: `${ICONS.error} Developer only command`, ephemeral: true });
             const uptime = Math.floor(process.uptime());
             const hours = Math.floor(uptime / 3600);
             const minutes = Math.floor((uptime % 3600) / 60);
@@ -270,7 +279,7 @@ client.on("interactionCreate", async interaction => {
             });
         }
         
-        // --- PUBLIC COMMANDS (same as before) ---
+        // --- PUBLIC COMMANDS ---
         else if (commandName === "help") {
             return interaction.reply({
                 embeds: [{
@@ -399,14 +408,21 @@ client.on("interactionCreate", async interaction => {
     }
 });
 
-// --- EVENTS ---
+// --- FIXED WELCOME/LEAVE EVENTS ---
 client.on("guildMemberAdd", async member => {
+    console.log(`Member joined: ${member.user.username} in ${member.guild.name}`);
     try {
         const chId = await redisClient.get(`gc:${member.guild.id}:welcomeChannel`);
+        console.log(`Welcome channel for ${member.guild.id}: ${chId}`);
         if (chId) {
             const card = await createCard(member, "welcome");
             const channel = member.guild.channels.cache.get(chId);
-            if (channel) channel.send({ content: `${ICONS.memberAdd} Welcome ${member.user.username}`, files: [card] });
+            if (channel) {
+                await channel.send({ content: `${ICONS.memberAdd} Welcome ${member.user.username}!`, files: [card] });
+                console.log(`Welcome message sent to ${channel.name}`);
+            } else {
+                console.log(`Channel ${chId} not found in cache`);
+            }
         }
     } catch (err) {
         console.error("Welcome error:", err);
@@ -414,12 +430,19 @@ client.on("guildMemberAdd", async member => {
 });
 
 client.on("guildMemberRemove", async member => {
+    console.log(`Member left: ${member.user.username} from ${member.guild.name}`);
     try {
         const chId = await redisClient.get(`gc:${member.guild.id}:leaveChannel`);
+        console.log(`Leave channel for ${member.guild.id}: ${chId}`);
         if (chId) {
             const card = await createCard(member, "leave");
             const channel = member.guild.channels.cache.get(chId);
-            if (channel) channel.send({ content: `${ICONS.memberLeave} ${member.user.username} left`, files: [card] });
+            if (channel) {
+                await channel.send({ content: `${ICONS.memberLeave} ${member.user.username} left the server`, files: [card] });
+                console.log(`Leave message sent to ${channel.name}`);
+            } else {
+                console.log(`Channel ${chId} not found in cache`);
+            }
         }
     } catch (err) {
         console.error("Leave error:", err);
