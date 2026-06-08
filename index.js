@@ -89,34 +89,46 @@ async function createCard(member, type) {
 // ---------- COMMANDS (Guild-specific for instant update) ----------
 const commands = [
     new SlashCommandBuilder().setName("ping").setDescription("Test the bot"),
+    
     new SlashCommandBuilder().setName("purge")
-        .addIntegerOption(opt => opt.setName("amount").setDescription("1-100").setRequired(true))
+        .addIntegerOption(opt => opt.setName("amount").setDescription("Number of messages to delete (1-100)").setRequired(true))
         .setDescription("Delete messages (Admin)"),
+    
     new SlashCommandBuilder().setName("eval")
-        .addStringOption(opt => opt.setName("code").setDescription("JS code").setRequired(true))
+        .addStringOption(opt => opt.setName("code").setDescription("JavaScript code to execute").setRequired(true))
         .setDescription("Developer only"),
+    
     new SlashCommandBuilder().setName("activity")
-        .addStringOption(opt => opt.setName("text").setDescription("New status").setRequired(true))
+        .addStringOption(opt => opt.setName("text").setDescription("New bot status text").setRequired(true))
         .setDescription("Developer only"),
+    
     new SlashCommandBuilder().setName("setwelcome")
         .addChannelOption(opt => opt.setName("channel").setDescription("Welcome channel").setRequired(true))
         .setDescription("Admin only"),
+    
     new SlashCommandBuilder().setName("setleave")
         .addChannelOption(opt => opt.setName("channel").setDescription("Leave channel").setRequired(true))
         .setDescription("Admin only"),
+    
     new SlashCommandBuilder().setName("config").setDescription("Show current settings"),
+    
     new SlashCommandBuilder().setName("rps")
-        .addStringOption(opt => opt.setName("choice").setRequired(true)
+        .addStringOption(opt => opt.setName("choice").setDescription("Your choice").setRequired(true)
             .addChoices({ name: "Rock", value: "rock" }, { name: "Paper", value: "paper" }, { name: "Scissors", value: "scissor" }))
         .setDescription("Play Rock Paper Scissors"),
+    
     new SlashCommandBuilder().setName("coinflip").setDescription("Flip a coin"),
-    new SlashCommandBuilder().setName("serverinfo").setDescription("Server info"),
+    
+    new SlashCommandBuilder().setName("serverinfo").setDescription("Get server information"),
+    
     new SlashCommandBuilder().setName("userinfo")
-        .addUserOption(opt => opt.setName("user").setDescription("User to check"))
-        .setDescription("User info"),
+        .addUserOption(opt => opt.setName("user").setDescription("User to check").setRequired(false))
+        .setDescription("Get user information"),
+    
     new SlashCommandBuilder().setName("8ball")
-        .addStringOption(opt => opt.setName("question").setDescription("Ask anything").setRequired(true))
-        .setDescription("Magic 8ball"),
+        .addStringOption(opt => opt.setName("question").setDescription("Ask any question").setRequired(true))
+        .setDescription("Ask the magic 8ball"),
+    
     new SlashCommandBuilder().setName("dice").setDescription("Roll a dice")
 ];
 
