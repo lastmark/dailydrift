@@ -8,6 +8,8 @@ for (const file of fs.readdirSync("./commands")) {
   const cmd = require(`./commands/${file}`);
   commands.push(cmd.data.toJSON());
 }
+console.log(commands.map(cmd => cmd.name));
+console.log(`Loaded ${commands.length} commands`);
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
