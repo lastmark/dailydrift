@@ -35,6 +35,30 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
+// Add this new listener right below your interactionCreate block
+client.on("messageCreate", async (message) => {
+  // 1. Ignore direct messages, system messages, and other bots
+  if (!message.guild || message.author.bot) return;
+
+  try {
+    // 2. Check if this server has configured a counting channel in Redis
+    const countingChannelId = await redis.get(`counting_channel:${message.guild.id}`);
+
+    // 3. If the message is in that channel, process it
+    if (countingChannelId && message.channel.id === countingChannelId) {
+      
+      // If someone types normal chat text instead of a number, ignore it
+      if (isNaN(message.content)) return; 
+
+      // Pull the game logic from your games folder and run it
+      const runCountingGame = require("./games/counting.js"); 
+      await runCountingGame(message, redis);
+    }
+  } catch (error) {
+    console.error("Error in counting game message listener:", error);
+  }
+});
+
 
 const { welcomeCard } = require("./canvas/welcome");
 const { leaveCard } = require("./canvas/leave");
