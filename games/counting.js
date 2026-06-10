@@ -40,12 +40,12 @@ module.exports = async (message, redis) => {
       } catch (err) {
         console.error("Failed to clear counting channel on reset:", err);
       }
-    }, 5000);
+    }, 2000);
   };
 
   // Game Validation Rules
   if (message.author.id === lastUser) {
-    return handleReset(`${e.error} **Reset!** <@${message.author.id}> counted twice in a row. Channel clearing in 5 seconds...`);
+    return handleReset(`${e.error} **Reset!** <@${message.author.id}> counted twice in a row. Channel clearing...`);
   }
 
   if (userNumber !== expected) {
