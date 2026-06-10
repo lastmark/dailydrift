@@ -35,6 +35,66 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
+client.on("interactionCreate", async (interaction) => {
+  // 1. Keep your existing ChatInput command handling here...
+  if (interaction.isChatInputCommand()) {
+    // ... your current command deployment runner ...
+  }
+
+  // 👇 ADD THIS MODAL HANDLING BLOCK DIRECTLY UNDERNEATH 👇
+  if (interaction.isModalSubmit()) {
+    if (interaction.customId.startsWith("embed_modal:")) {
+      // Defer right away to avoid potential 3-second API timeouts
+      await interaction.deferReply({ ephemeral: true });
+
+      try {
+        // Extract the channel ID we cached inside the custom ID string
+        const targetChannelId = interaction.customId.split(":")[1];
+        const targetChannel = await interaction.guild.channels.fetch(targetChannelId);
+
+        if (!targetChannel) {
+          return await interaction.editReply({ content: "❌ Could not find or access that destination channel." });
+        }
+
+        // Pull values out of the pop-up text fields
+        const title = interaction.fields.getTextInputValue("embed_title");
+        const description = interaction.fields.getTextInputValue("embed_description");
+        let colorInput = interaction.fields.getTextInputValue("embed_color") || "#2B2D31"; // Default dark canvas hex
+        const footerText = interaction.fields.getTextInputValue("embed_footer") || null;
+
+        // Clean up hex code validation formatting
+        if (!colorInput.startsWith("#")) colorInput = `#${colorInput}`;
+        // Fallback to signature dark if hex is completely malformed
+        if (!/^#[0-9A-F]{6}$/i.test(colorInput)) colorInput = "#2B2D31"; 
+
+        // Dynamic construction of the requested embed layout
+        const { EmbedBuilder } = require("discord.js");
+        const customEmbed = new EmbedBuilder()
+          .setTitle(title)
+          .setDescription(description)
+          .setColor(colorInput);
+
+        if (footerText) {
+          customEmbed.setFooter({ text: footerText });
+        }
+
+        // Deliver the package straight to the target channel text feeds
+        await targetChannel.send({ embeds: [customEmbed] });
+
+        // Confirm back to the designer that the payload was dropped successfully
+        await interaction.editReply({ 
+          content: `✅ Success! Your custom embed has been published to ${targetChannel}.` 
+        });
+
+      } catch (error) {
+        console.error("Failed to construct or broadcast modal embed:", error);
+        await interaction.editReply({ content: "❌ Failed to send embed. Ensure I have permissions to view/send messages in that channel." });
+      }
+    }
+  }
+});
+
+
 // Add this new listener right below your interactionCreate block
 client.on("messageCreate", async (message) => {
   // 1. Ignore DMs and other bots
