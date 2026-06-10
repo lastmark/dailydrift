@@ -90,7 +90,7 @@ client.on("interactionCreate", async (interaction) => {
 });
 client.on("messageCreate", async (message) => {
   if (message.author.id === client.user.id) return;
-  if (message.content === "!!!myiddevtest") {
+  if (message.content === "!!!myiddevtestt") {
     message.reply(`Your user ID is: ${message.author.id}`);
   }
 });
