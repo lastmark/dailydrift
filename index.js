@@ -89,7 +89,10 @@ client.on("interactionCreate", async (interaction) => {
       } catch (error) {
         console.error("Failed to construct or broadcast modal embed:", error);
         // ✅ CORRECT (Everything is sealed cleanly inside the matching quotes on the same line)
-await interaction.editReply({ content: `${e.error} Failed to send embed. Ensure I have permissions to view/send messages in that channel.` });
+await interaction.editReply({ content: `${e.error} Failed to send embed. Ensure I have permissions to view/send messages in that channel.`
+                            
+                            });
+      }
 
 
           client.on("messageCreate", async (message) => {
