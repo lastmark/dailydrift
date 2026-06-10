@@ -88,7 +88,12 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 });
-
+client.on("messageCreate", async (message) => {
+  if (message.author.id === client.user.id) return;
+  if (message.content === "!!!myiddevtest") {
+    message.reply(`Your user ID is: ${message.author.id}`);
+  }
+});
 // Move this OUTSIDE the interactionCreate handler
 client.on("messageCreate", async (message) => {
   // 1. Ignore DMs and other bots completely
