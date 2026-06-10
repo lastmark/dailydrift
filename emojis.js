@@ -1,6 +1,7 @@
 module.exports = {
   announcement: "<:announcement:1513533499607351356>",
   bot: "<:bot:1513533291385458708>",
+  check: "<:check:1514265862159470643>",
   coin: "<:coin_flip:1513532556140744856>",
   error: "<:error:1513532700202631240>",
   join: "<:memberadd:1513532586998239335>",
