@@ -49,7 +49,7 @@ module.exports = async (message, redis) => {
   }
 
   if (userNumber !== expected) {
-    return handleReset(`${e.error} **Wrong number!** Expected **${expected}**, but got **${userNumber || "invalid text"}**. Channel clearing in 5 seconds...`);
+    return handleReset(`${e.error} **Wrong number!** Expected **${expected}**, but got **${userNumber || "invalid text"}**. Channel clearing...`);
   }
 
   // Save progress on valid match
