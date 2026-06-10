@@ -28,7 +28,7 @@ module.exports = {
   
   async execute(interaction, client, redis) {
     // YOUR HARDCODED DEV ID
-    const devId = "1303357369622990889";
+    const devId = "1513628077178228747";
     
     // Dev-only check
     if (interaction.user.id !== devId) {
