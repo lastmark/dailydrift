@@ -55,7 +55,7 @@ module.exports = async (message, redis) => {
   // Save progress on valid match
   await redis.set(key, expected);
   await redis.set(`${key}:user`, message.author.id);
-  await message.react("✅");
+  await message.react(`${e.check}`);
 
   // Custom Easter Egg Event for Number 67
   if (expected === 67) {
