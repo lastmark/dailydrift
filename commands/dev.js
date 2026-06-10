@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const fs = require("fs");
-
+const e = require("../emojis.js");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("dev")
@@ -33,7 +33,7 @@ module.exports = {
     // Dev-only check
     if (interaction.user.id !== devId) {
       return interaction.reply({ 
-        content: "❌ You don't have permission to use this command.", 
+        content: `${e.error} You don't have permission to use this command.`, 
         ephemeral: true 
       });
     }
@@ -46,7 +46,7 @@ module.exports = {
       const memory = process.memoryUsage().heapUsed / 1024 / 1024;
       
       const embed = new EmbedBuilder()
-        .setTitle("🤖 Bot Status")
+        .setTitle(`${e.bot} Bot Status`)
         .addFields(
           { name: "Uptime", value: `${uptime} minutes`, inline: true },
           { name: "Memory", value: `${memory.toFixed(2)} MB`, inline: true },
@@ -66,7 +66,7 @@ module.exports = {
       
       if (!fs.existsSync(commandPath)) {
         return interaction.reply({ 
-          content: `❌ Command "${commandName}" not found!`, 
+          content: `${e.error} Command "${commandName}" not found!`, 
           ephemeral: true 
         });
       }
@@ -77,12 +77,12 @@ module.exports = {
         client.commands.set(commandName, newCommand);
         
         await interaction.reply({ 
-          content: `✅ Reloaded command: ${commandName}`, 
+          content: `${e.check} Reloaded command: ${commandName}`, 
           ephemeral: true 
         });
       } catch (error) {
         await interaction.reply({ 
-          content: `❌ Failed to reload: ${error.message}`, 
+          content: `${e.error} Failed to reload: ${error.message}`, 
           ephemeral: true 
         });
       }
@@ -113,7 +113,7 @@ module.exports = {
         });
       } catch (error) {
         await interaction.reply({
-          content: `❌ **Error:**\`\`\`js\n${error}\n\`\`\``,
+          content: `${e.error} **Error:**\`\`\`js\n${error}\n\`\`\``,
           ephemeral: true
         });
       }
