@@ -22,23 +22,17 @@ for (const file of fs.readdirSync("./commands")) {
 }
 
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-
-  const cmd = client.commands.get(interaction.commandName);
-  if (!cmd) return;
-
-  try {
-    await cmd.execute(interaction, client, redis);
-  } catch (e) {
-    console.error(e);
-    interaction.reply({ content: "Error occurred.", ephemeral: true });
-  }
-});
-
-client.on("interactionCreate", async (interaction) => {
   // 1. Keep your existing ChatInput command handling here...
   if (interaction.isChatInputCommand()) {
-    // ... your current command deployment runner ...
+    const cmd = client.commands.get(interaction.commandName);
+    if (!cmd) return;
+
+    try {
+      await cmd.execute(interaction, client, redis);
+    } catch (e) {
+      console.error(e);
+      interaction.reply({ content: "Error occurred.", ephemeral: true });
+    }
   }
 
   // 👇 ADD THIS MODAL HANDLING BLOCK DIRECTLY UNDERNEATH 👇
@@ -89,13 +83,14 @@ client.on("interactionCreate", async (interaction) => {
       } catch (error) {
         console.error("Failed to construct or broadcast modal embed:", error);
         // ✅ CORRECT (Everything is sealed cleanly inside the matching quotes on the same line)
-await interaction.editReply({ content: `${e.error} Failed to send embed. Ensure I have permissions to view/send messages in that ` });
+        await interaction.editReply({ content: `${e.error} Failed to send embed. Ensure I have permissions to view/send messages in that channel.` });
       }
     }
+  }
+});
 
-
-
-          client.on("messageCreate", async (message) => {
+// Move this OUTSIDE the interactionCreate handler
+client.on("messageCreate", async (message) => {
   // 1. Ignore DMs and other bots completely
   if (!message.guild || message.author.bot) return;
 
@@ -130,8 +125,6 @@ await interaction.editReply({ content: `${e.error} Failed to send embed. Ensure 
   }
 });
 
-
-
 const { welcomeCard } = require("./canvas/welcome");
 const { leaveCard } = require("./canvas/leave");
 
@@ -145,6 +138,7 @@ client.on("guildMemberAdd", async (member) => {
   const img = await welcomeCard(member.user, member.guild);
   channel.send({ files: [{ attachment: img, name: "welcome.png" }] });
 });
+
 client.once("clientReady", async () => {
   console.log(`${client.user.tag} online`);
 
@@ -178,4 +172,5 @@ client.once("clientReady", async () => {
   }
 });
 
+// Don't forget to login
 client.login(token);
