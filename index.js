@@ -88,35 +88,40 @@ client.on("interactionCreate", async (interaction) => {
 
       } catch (error) {
         console.error("Failed to construct or broadcast modal embed:", error);
-        await interaction.editReply({ content: "❌ Failed to send embed. Ensure I have permissions to view/send messages in that channel." });
-      }
-    }
-  }
-});
+        await interaction.editReply({ content: "❌ Failed to send embed. Ensure I have permissions to view/send messages in that 
 
-
-// Add this new listener right below your interactionCreate block
-client.on("messageCreate", async (message) => {
-  // 1. Ignore DMs and other bots
+          client.on("messageCreate", async (message) => {
+  // 1. Ignore DMs and other bots completely
   if (!message.guild || message.author.bot) return;
 
   try {
-    // 2. Fetch the counting channel ID from Redis
+    // 2. Pull the configured counting channel ID from your Redis storage
     const countingChannelId = await redis.get(`counting_channel:${message.guild.id}`);
 
-    // 3. If the message is in the counting channel, check it
+    // 3. Is the user chatting inside the locked counting zone?
     if (countingChannelId && message.channel.id === countingChannelId) {
       
-      // 👇 UPDATED SAFETY CHECK 👇
-      // Only process the message if it contains numbers OR math operators (+, -, *, /, ^)
-      if (!/[\d\+\-\*\/\^\(\)]/.test(message.content)) return; 
+      // Remove all spaces to accurately scan the core expression structure
+      const pureContent = message.content.replace(/\s+/g, "");
 
-      // Pull the new math-supported counting code and run it
+      // Strict Validation: Must ONLY contain digits, operators (+-*/^), or parentheses.
+      // If it has a letter (like "apple" or "2+2 equals 4"), this test returns false.
+      const isValidMathOrNumber = /^[0-9\+\-\*\/\^\(\)]+$/.test(pureContent);
+
+      // 👇 THE AUTO-DELETER AUTOMATION 👇
+      if (!isValidMathOrNumber) {
+        if (message.deletable) {
+          await message.delete().catch((err) => console.error("Failed to delete chat text:", err));
+        }
+        return; // HALT HERE! Protects the streak from exploding due to casual chat.
+      }
+
+      // If it passes the strict filter, hand it over to the counting engine rules
       const runCountingGame = require("./games/counting.js"); 
       await runCountingGame(message, redis);
     }
   } catch (error) {
-    console.error("Error in counting game message listener:", error);
+    console.error("Error inside counting game message listener pipeline:", error);
   }
 });
 
