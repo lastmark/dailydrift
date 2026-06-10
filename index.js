@@ -1,7 +1,7 @@
 const { Client, GatewayIntentBits, Partials, Collection } = require("discord.js");
 const { token, devId } = require("./config");
 const redis = require("./redis");
-const e = require("../emojis.js");
+const e = require("./emojis.js");
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
