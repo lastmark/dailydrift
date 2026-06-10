@@ -83,12 +83,14 @@ client.on("interactionCreate", async (interaction) => {
 
         // Confirm back to the designer that the payload was dropped successfully
         await interaction.editReply({ 
-          content: `✅ Success! Your custom embed has been published to ${targetChannel}.` 
+          content: `${e.check} Success! Your custom embed has been published to ${targetChannel}.` 
         });
 
       } catch (error) {
         console.error("Failed to construct or broadcast modal embed:", error);
-        await interaction.editReply({ content: "❌ Failed to send embed. Ensure I have permissions to view/send messages in that 
+        // ✅ CORRECT (Everything is sealed cleanly inside the matching quotes on the same line)
+await interaction.editReply({ content: `${e.error} Failed to send embed. Ensure I have permissions to view/send messages in that channel.` });
+
 
           client.on("messageCreate", async (message) => {
   // 1. Ignore DMs and other bots completely
