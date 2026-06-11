@@ -104,7 +104,7 @@ module.exports = {
     // SUBCOMMAND: ECO SHIELD ITEM SHOP (👑 WITH DEV BYPASS)
     // ==========================================
     if (sub === "shop") {
-      const SHIELD_PRICE = 500; 
+      const SHIELD_PRICE = 200; 
       const isDeveloper = userId === "YOUR_DISCORD_USER_ID"; // Put your ID string here!
 
       let userBalance = parseInt(await redis.get(`eco:${guildId}:${userId}:money`) || "0");
