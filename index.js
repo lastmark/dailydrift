@@ -156,10 +156,23 @@ client.on("guildMemberAdd", async (member) => {
 // ==========================================
 // 🚀 ENGINE BOOTSTRAP & REST REGISTRATION
 // ==========================================
-// 💡 FIXED: Changed 'clientReady' event string to 'ready' to comply with standard Discord.js layouts
+// Change your existing client.once("ready") block to look like this:
 client.once("ready", async () => {
   console.log(`${client.user.tag} online`);
 
+  // 🎮 SET BOT ACTIVITY STATUS
+  // You can set the type to ActivityType.Playing, Watching, Listening, or Competing
+  const { ActivityType } = require("discord.js");
+  
+  client.user.setActivity("/help ~ my developer is drivin me crazy adding too many features", { 
+    type: ActivityType.Playing 
+  });
+  
+  // Optional: Set their presence status (online, idle, dnd, invisible)
+  client.user.setStatus("online"); 
+
+
+  // Leave your command data processing logic exactly the same below this line:
   const commands = [];
   for (const [name, cmd] of client.commands) {
     try {
@@ -185,5 +198,6 @@ client.once("ready", async () => {
     console.error("REST Command Deployment Error:", err);
   }
 });
+
 
 client.login(token);
