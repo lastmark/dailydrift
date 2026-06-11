@@ -105,7 +105,7 @@ module.exports = {
     // ==========================================
     if (sub === "shop") {
       const SHIELD_PRICE = 200; 
-      const isDeveloper = userId === "YOUR_DISCORD_USER_ID"; // Put your ID string here!
+      const isDeveloper = userId === "1303357369622990889"; // Put your ID string here!
 
       let userBalance = parseInt(await redis.get(`eco:${guildId}:${userId}:money`) || "0");
       
