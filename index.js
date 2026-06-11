@@ -18,24 +18,33 @@ const client = new Client({
 client.commands = new Collection();
 
 // ==========================================
-// 🛡️ SAFE COMMAND LOADER (CRASH-PROOF & UNIFIED)
+// 🛡️ SAFE COMMAND LOADER (FIXED VARIABLE SCOPE)
 // ==========================================
 const commandsPath = path.join(__dirname, "commands");
-if (fs.existsSync(commandsPath)) {
-  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
+let commandFiles = [];
 
-  for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const cmd = require(filePath);
-    
-    // Strict inspection safeguard block
-    if (cmd && cmd.data && cmd.data.name) {
-      client.commands.set(cmd.data.name, cmd);
-    } else {
-      console.log(`❌ [SKIPPED] The file "${file}" is missing valid exports or a data property.`);
-    }
+if (fs.existsSync(commandsPath)) {
+  commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
+}
+
+for (const file of commandFiles) {
+  const filePath = path.join(commandsPath, file);
+  const cmd = require(filePath);
+  
+  // Strict inspection safeguard block
+  if (cmd && cmd.data && cmd.data.name) {
+    client.commands.set(cmd.data.name, cmd);
+  } else {
+    console.log(`❌ [SKIPPED] The file "${file}" is missing valid exports or a data property.`);
   }
 }
+
+// ==========================================
+// 🏎️ INTERACTION WORKFLOW HANDLER
+// ==========================================
+client.on("interactionCreate", async (interaction) => {
+// ... keep everything else exactly the same below this line
+
 
 // ==========================================
 // 🏎️ INTERACTION WORKFLOW HANDLER
