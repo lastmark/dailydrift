@@ -76,25 +76,36 @@ module.exports = {
     }
 
     // ==========================================
-    // SUBCOMMAND: ECO SHIELD ITEM SHOP
+    // SUBCOMMAND: ECO SHIELD ITEM SHOP (👑 WITH DEV BYPASS)
     // ==========================================
     if (sub === "shop") {
       const SHIELD_PRICE = 500; 
+      
+      // Grants immediate bypass clearance to server owner or you directly
+      const isDeveloper = userId === interaction.guild.ownerId || userId === "YOUR_DISCORD_USER_ID";
+
       let userBalance = parseInt(await redis.get(`eco:${guildId}:${userId}:money`) || "0");
       
-      if (userBalance < SHIELD_PRICE) {
+      if (!isDeveloper && userBalance < SHIELD_PRICE) {
         return await interaction.editReply({ 
           content: `${e.error || "❌"} **Insufficient funds!** A Counting Shield costs \`${SHIELD_PRICE}\` coins. You currently have \`${userBalance}\` ${e.money || "coins"}.` 
         });
       }
 
-      await redis.set(`eco:${guildId}:${userId}:money`, userBalance - SHIELD_PRICE);
+      if (!isDeveloper) {
+        await redis.set(`eco:${guildId}:${userId}:money`, userBalance - SHIELD_PRICE);
+      }
+
       await redis.incrby(`eco:${guildId}:${userId}:shield`, 1);
 
       const purchaseEmbed = new EmbedBuilder()
         .setColor(0x2ECC71)
         .setTitle(`${e.money || "🛒"} Purchase Successful!`)
-        .setDescription(`You successfully purchased **1 Counting Shield** for \`${SHIELD_PRICE}\` ${e.money || "coins"}!\n\n🛡️ This shield will automatically absorb your next mistake inside the counting channel to save your server's streak record.`);
+        .setDescription(
+          isDeveloper 
+            ? `👑 **Developer Bypass Activated!** You received **1 Counting Shield** completely free! \n└ *Your wallet balance was not touched.*`
+            : `You successfully purchased **1 Counting Shield** for \`${SHIELD_PRICE}\` ${e.money || "coins"}!\n\n🛡️ This shield will automatically absorb your next mistake inside the counting channel to save your server's streak record.`
+        );
 
       return await interaction.editReply({ embeds: [purchaseEmbed] });
     }
