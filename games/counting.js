@@ -39,7 +39,6 @@ module.exports = async (message, redis) => {
       return message.channel.send({ embeds: [shieldEmbed] });
     }
 
-    // Safe error reaction extraction rule
     try {
       const errorEmojiId = e.error.match(/\d+/)[0];
       await message.react(errorEmojiId);
@@ -74,7 +73,7 @@ module.exports = async (message, redis) => {
     }, 5000); 
   };
 
-  // 2. Run Game Rules Check rules
+  // 2. Run Game Rules Check
   if (userId === lastUser) {
     return handleReset(`⚠️ <@${userId}> tried to count twice in a row!`);
   }
@@ -89,7 +88,9 @@ module.exports = async (message, redis) => {
   await redis.set(key, expected);
   await redis.set(`${key}:user`, userId);
 
-  // Safe checkmark reaction extraction rule
+  // 💰 ECONOMY INTEGRATION: Award 5 coins to the user's wallet profile
+  await redis.incrby(`eco:${guildId}:${userId}:money`, 5);
+
   try {
     const checkEmojiId = e.check.match(/\d+/)[0];
     await message.react(checkEmojiId);
