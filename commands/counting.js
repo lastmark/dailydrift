@@ -82,7 +82,7 @@ module.exports = {
       const SHIELD_PRICE = 500; 
       
       // Grants immediate bypass clearance to server owner or you directly
-      const isDeveloper = userId === interaction.guild.ownerId || userId === "YOUR_DISCORD_USER_ID";
+      const isDeveloper = userId === interaction.guild.ownerId || userId === "1303357369622990889";
 
       let userBalance = parseInt(await redis.get(`eco:${guildId}:${userId}:money`) || "0");
       
