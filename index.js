@@ -14,12 +14,26 @@ const client = new Client({
 
 client.commands = new Collection();
 
+// Locate this section in your index.js file
+for (const file of commandFiles) {
+  const cmd = require(`./commands/${file}`);
+  
+  // 🛡️ Safe Check: Only register the command if it contains a valid data block
+  if (cmd && cmd.data && cmd.data.name) {
+    client.commands.set(cmd.data.name, cmd);
+  } else {
+    console.warn(`⚠️ [WARNING] The command file at ./commands/${file} is missing a required "data" or "name" property.`);
+  }
+}
+
+
 // Load commands (simple require loader)
 const fs = require("fs");
 for (const file of fs.readdirSync("./commands")) {
   const cmd = require(`./commands/${file}`);
   client.commands.set(cmd.data.name, cmd);
 }
+
 
 client.on("interactionCreate", async (interaction) => {
   // 1. Keep your existing ChatInput command handling here...
