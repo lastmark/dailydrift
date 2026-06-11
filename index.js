@@ -18,7 +18,7 @@ const client = new Client({
 client.commands = new Collection();
 
 // ==========================================
-// 🛡️ SAFE COMMAND LOADER (FIXED VARIABLE SCOPE)
+// 🛡️ SAFE COMMAND LOADER
 // ==========================================
 const commandsPath = path.join(__dirname, "commands");
 let commandFiles = [];
@@ -31,20 +31,12 @@ for (const file of commandFiles) {
   const filePath = path.join(commandsPath, file);
   const cmd = require(filePath);
   
-  // Strict inspection safeguard block
   if (cmd && cmd.data && cmd.data.name) {
     client.commands.set(cmd.data.name, cmd);
   } else {
     console.log(`❌ [SKIPPED] The file "${file}" is missing valid exports or a data property.`);
   }
 }
-
-// ==========================================
-// 🏎️ INTERACTION WORKFLOW HANDLER
-// ==========================================
-client.on("interactionCreate", async (interaction) => {
-// ... keep everything else exactly the same below this line
-
 
 // ==========================================
 // 🏎️ INTERACTION WORKFLOW HANDLER
@@ -165,23 +157,14 @@ client.on("guildMemberAdd", async (member) => {
 // ==========================================
 // 🚀 ENGINE BOOTSTRAP & REST REGISTRATION
 // ==========================================
-// Change your existing client.once("ready") block to look like this:
 client.once("ready", async () => {
   console.log(`${client.user.tag} online`);
 
   // 🎮 SET BOT ACTIVITY STATUS
-  // You can set the type to ActivityType.Playing, Watching, Listening, or Competing
   const { ActivityType } = require("discord.js");
-  
-  client.user.setActivity("/help ~ my developer is drivin me crazy adding too many features", { 
-    type: ActivityType.Playing 
-  });
-  
-  // Optional: Set their presence status (online, idle, dnd, invisible)
-  client.user.setStatus("online"); 
+  client.user.setActivity("counting game 🪙", { type: ActivityType.Playing });
+  client.user.setStatus("online");
 
-
-  // Leave your command data processing logic exactly the same below this line:
   const commands = [];
   for (const [name, cmd] of client.commands) {
     try {
@@ -208,5 +191,5 @@ client.once("ready", async () => {
   }
 });
 
-
+// Run it!
 client.login(token);
