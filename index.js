@@ -137,6 +137,77 @@ client.on("messageCreate", async (message) => {
   }
 });
 
+// ===================================================
+// 👑 GLOBAL TIME-BOUND PREMIUM CONTROLLER (DEV ONLY)
+// ===================================================
+client.on("messageCreate", async (message) => {
+  const prefix = "!"; 
+  if (!message.content.startsWith(prefix) || message.author.bot) return;
+
+  const args = message.content.slice(prefix.length).trim().split(/ +/);
+  const command = args.shift().toLowerCase();
+
+  const DEVELOPER_ID = "1303357369622990889";
+
+  if (command === "premium") {
+    if (message.author.id !== DEVELOPER_ID) return; 
+
+    const action = args[0]?.toLowerCase(); // "add" or "remove"
+    const targetUser = message.mentions.users.first() || await client.users.fetch(args[1]).catch(() => null);
+
+    if (!targetUser) {
+      return message.reply("❌ **Usage:** `!premium add <@user/ID> <duration>` or `!premium remove <@user/ID>`\n💡 *Durations: 1m (1 month), 3m (3 months), 1y (1 year), perm (Permanent)*");
+    }
+
+    const premiumKey = `premium:user:${targetUser.id}`;
+
+    // ─── ACTION: ADD PREMIUM WITH TIME LIMITS ───
+    if (action === "add") {
+      const durationInput = args[2]?.toLowerCase();
+      if (!durationInput) {
+        return message.reply("❌ **Error:** Please specify a duration framework. Example: `!premium add @user 1m` (Values: `1m`, `3m`, `1y`, `perm`)");
+      }
+
+      let durationSeconds = 0;
+      let timeString = "";
+
+      // Convert months and years into precise structural seconds
+      if (durationInput === "1m") {
+        durationSeconds = 30 * 24 * 60 * 60; // 30 Days
+        timeString = "30 Days (1 Month)";
+      } else if (durationInput === "3m") {
+        durationSeconds = 90 * 24 * 60 * 60; // 90 Days
+        timeString = "90 Days (3 Months)";
+      } else if (durationInput === "1y") {
+        durationSeconds = 365 * 24 * 60 * 60; // 365 Days
+        timeString = "365 Days (1 Year)";
+      } else if (durationInput === "perm") {
+        durationSeconds = -1; // Permanent flag identifier
+        timeString = "Permanent (Lifetime Access)";
+      } else {
+        return message.reply("❌ **Invalid Duration:** Use `1m` (1 month), `3m` (3 months), `1y` (1 year), or `perm` (Permanent).");
+      }
+
+      if (durationSeconds === -1) {
+        // Infinite key injection
+        await redis.set(premiumKey, "true");
+      } else {
+        // Key injection bound with an automatic expiration TTL ticker
+        await redis.setex(premiumKey, durationSeconds, "true");
+      }
+
+      return message.reply(`👑 **Global Premium Activated:**\n👤 **User:** ${targetUser.username} (\`${targetUser.id}\`)\n⏳ **Duration:** \`${timeString}\``);
+    }
+
+    // ─── ACTION: REMOVE PREMIUM ───
+    if (action === "remove") {
+      await redis.del(premiumKey);
+      return message.reply(`🗑️ **Global Premium Revoked:** ${targetUser.username} has been manually stripped of network premium permissions.`);
+    }
+  }
+});
+
+
 // ==========================================
 // 👑 DEVELOPER PREFERRED TEXT COMMAND ENGINE
 // ==========================================
