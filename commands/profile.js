@@ -25,7 +25,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("upload")
-        .setDescription("🖼️ Upload a custom 800x300 background image attachment.")
+        .setDescription("🖼️ Upload a custom 800x300 background image attachment (Premium Only).")
         .addAttachmentOption(opt => opt.setName("image").setDescription("Your custom background profile image").setRequired(true))
     )
     .addSubcommand(sub =>
@@ -38,6 +38,9 @@ module.exports = {
     const userId = interaction.user.id;
     const DEVELOPER_ID = "1303357369622990889"; 
 
+    // ==========================================
+    // 📝 SUBCOMMAND: SET BIO
+    // ==========================================
     if (subcommand === "setbio") {
       const bioText = interaction.options.getString("text");
       if (bioText.length > 80) return await interaction.reply({ content: "❌ Bio text must be 80 characters or less.", ephemeral: true });
@@ -45,45 +48,72 @@ module.exports = {
       return await interaction.reply({ content: "✅ Biography updated.", ephemeral: true });
     }
 
+    // ==========================================
+    // 🖼️ SUBCOMMAND: UPLOAD BACKGROUND (GLOBAL GATE)
+    // ==========================================
     if (subcommand === "upload") {
-      const PREMIUM_ROLE_ID = "YOUR_PREMIUM_ROLE_ID_HERE"; 
-      const hasPremium = interaction.member.roles.cache.has(PREMIUM_ROLE_ID);
+      const isPremiumUser = await redis.get(`premium:user:${userId}`);
 
-      if (interaction.user.id !== DEVELOPER_ID && !hasPremium) {
-        return await interaction.reply({ content: "❌ This feature is locked to Core Developers and Premium Subscribers.", ephemeral: true });
+      if (interaction.user.id !== DEVELOPER_ID && !isPremiumUser) {
+        return await interaction.reply({ 
+          content: "❌ **Access Denied:** Custom image uploads are reserved for Global Premium Subscribers. Support the bot to unlock this feature!", 
+          ephemeral: true 
+        });
       }
 
       const attachment = interaction.options.getAttachment("image");
       if (!attachment.contentType || !attachment.contentType.startsWith("image/")) {
-        return await interaction.reply({ content: "❌ File must be an image (PNG/JPG).", ephemeral: true });
+        return await interaction.reply({ content: "❌ File must be a valid image (PNG/JPG).", ephemeral: true });
       }
 
       await redis.hset(`profile:${userId}`, "custom_bg", attachment.url);
-      return await interaction.reply({ content: "✅ Background uploaded successfully.", ephemeral: true });
+      return await interaction.reply({ content: "✅ Custom background applied successfully across the network!", ephemeral: true });
     }
 
+    // ==========================================
+    // 🔄 SUBCOMMAND: RESET BACKGROUND
+    // ==========================================
     if (subcommand === "reset") {
       await redis.hdel(`profile:${userId}`, "custom_bg");
       return await interaction.reply({ content: "🔄 Custom background removed.", ephemeral: true });
     }
 
+    // ==========================================
+    // 🎨 SUBCOMMAND: VIEW PROFILE
+    // ==========================================
     if (subcommand === "view") {
       await interaction.deferReply();
       const targetUser = interaction.options.getUser("target") || interaction.user;
       const isDev = targetUser.id === DEVELOPER_ID;
 
-      // Fetch Profile Data Matrix
+      // Fetch Profile & Leveling Data
       const profileData = await redis.hgetall(`profile:${targetUser.id}`) || {};
       const bio = profileData.bio || "No biography recorded yet. Use /profile setbio";
       const customBgUrl = profileData.custom_bg;
       const equippedBg = profileData.equipped || "classic";
       
-      // Fetch Leveling Data Fields
       const level = parseInt(profileData.level) || 1;
       const currentXp = parseInt(profileData.xp) || 0;
       const xpNeeded = Math.floor(100 * Math.pow(level, 1.8));
 
-      // Canvas Initialization Setup
+      // ⏳ Fetch Premium Status & Expiration Time remaining
+      const premiumKey = `premium:user:${targetUser.id}`;
+      const isPremiumUser = await redis.get(premiumKey);
+      const ttlSeconds = await redis.ttl(premiumKey); // Returns remaining seconds, -1 if permanent, -2 if missing
+
+      let premiumStatusText = null;
+      if (isDev) {
+        premiumStatusText = "👑 CORE DEVELOPER";
+      } else if (isPremiumUser) {
+        if (ttlSeconds === -1) {
+          premiumStatusText = "✨ PREMIUM (Lifetime)";
+        } else if (ttlSeconds > 0) {
+          const daysLeft = Math.ceil(ttlSeconds / (24 * 60 * 60));
+          premiumStatusText = `✨ PREMIUM (${daysLeft} Days Left)`;
+        }
+      }
+
+      // Initialize Canvas
       const canvas = createCanvas(800, 300);
       const ctx = canvas.getContext("2d");
 
@@ -105,8 +135,11 @@ module.exports = {
       ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Card Accents
-      const themeColor = isDev ? "#00FFFF" : "#5865F2";
+      // Card Highlight Colors (Gold frame for Premium Users, Neon Cyan for Dev, Purple for Normal)
+      let themeColor = "#5865F2"; // Default Blurple
+      if (isDev) themeColor = "#00FFFF"; // Developer Cyan
+      else if (isPremiumUser) themeColor = "#FFD700"; // Premium Gold
+
       ctx.strokeStyle = themeColor;
       ctx.lineWidth = 8;
       ctx.strokeRect(0, 0, canvas.width, canvas.height);
@@ -127,49 +160,55 @@ module.exports = {
       ctx.lineWidth = 3;
       ctx.stroke();
 
-      // Typography Configuration
+      // Typography Name Grid Layout
       ctx.fillStyle = "#ffffff";
       ctx.font = "32px CustomFont";
       
-      // Draw Identity Layout Strings
+      let nameX = 220;
+      let nameY = 85;
+
       if (isDev) {
         ctx.fillStyle = "#00FFFF";
-        ctx.fillText("👑 [DEV]", 220, 95);
+        ctx.fillText("👑 [DEV]", nameX, nameY);
         ctx.fillStyle = "#ffffff";
-        ctx.fillText(targetUser.username, 375, 95);
+        ctx.fillText(targetUser.username, nameX + 155, nameY);
       } else {
-        ctx.fillText(targetUser.username, 220, 95);
+        ctx.fillText(targetUser.username, nameX, nameY);
+      }
+
+      // Draw Sub-Tier Premium Expiration Tag underneath name if active
+      if (premiumStatusText) {
+        ctx.font = "bold 14px CustomFont";
+        ctx.fillStyle = isDev ? "#00FFFF" : "#FFD700";
+        ctx.fillText(premiumStatusText, 220, 112);
       }
 
       // Draw Level Counter text Right-Aligned
       ctx.font = "bold 28px CustomFont";
       ctx.fillStyle = themeColor;
       const levelText = `LVL ${level}`;
-      ctx.fillText(levelText, 760 - ctx.measureText(levelText).width, 95);
+      ctx.fillText(levelText, 760 - ctx.measureText(levelText).width, 85);
 
       // Draw User Biography line
       ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
       ctx.font = "20px CustomFont";
-      ctx.fillText(bio, 220, 145);
+      ctx.fillText(bio, 220, 155);
 
-      // DRAW DYNAMIC PROGRESSION EXPERIENCE LOADING BAR
+      // Progression Loading Bar Layout Parameters
       const barX = 220;
       const barY = 205;
       const barWidth = 540;
       const barHeight = 22;
       const radius = 11;
 
-      // Calculate fill width safely based on current progress percentage
       const percentage = Math.min(currentXp / xpNeeded, 1);
       const progressWidth = barWidth * percentage;
 
-      // Background Empty Track Container Tube
       ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
       ctx.beginPath();
       ctx.roundRect(barX, barY, barWidth, barHeight, radius);
       ctx.fill();
 
-      // Active Experience Fill Tube
       if (progressWidth > 0) {
         ctx.fillStyle = themeColor;
         ctx.beginPath();
@@ -177,7 +216,6 @@ module.exports = {
         ctx.fill();
       }
 
-      // Experience Numerical Strings Overlay Subtext
       ctx.fillStyle = "#ffffff";
       ctx.font = "14px CustomFont";
       const xpString = `${currentXp.toLocaleString()} / ${xpNeeded.toLocaleString()} XP`;
