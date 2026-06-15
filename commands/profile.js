@@ -164,7 +164,7 @@ module.exports = {
       // 9. Render Typography System Footprints
       ctx.fillStyle = isDev ? "#00FFFF" : "rgba(255, 255, 255, 0.4)";
       ctx.font = "14px CustomFont";
-      const statusText = isDev ? "SYSTEM ACCESS: ROOT ADMINISTRATOR" : `USER ID: ${targetUser.id}`;
+      const statusText = isDev ? "So you are my Owner huh" : `USER ID: ${targetUser.id}`;
       ctx.fillText(statusText, 220, 235);
 
       // 10. Compile buffer array payloads and pipe to channel gateway
