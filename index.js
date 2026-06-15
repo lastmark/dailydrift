@@ -9,7 +9,7 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent, // 👈 REQUIRED: Allows your XP tracker to read chat activity
+    GatewayIntentBits.MessageContent, 
     GatewayIntentBits.GuildMembers
   ],
   partials: [Partials.Channel]
@@ -33,7 +33,6 @@ for (const file of eventFiles) {
   
   if (event && event.name) {
     if (event.once) {
-      // Safely pass downstream client and redis pointers into execution hooks
       client.once(event.name, (...args) => event.execute(...args, client, redis));
     } else {
       client.on(event.name, (...args) => event.execute(...args, client, redis));
@@ -177,7 +176,7 @@ client.on("messageCreate", async (message) => {
   if (command === "premium") {
     if (message.author.id !== DEVELOPER_ID) return; 
 
-    const action = args[0]?.toLowerCase(); // "add" or "remove"
+    const action = args[0]?.toLowerCase(); 
     const targetUser = message.mentions.users.first() || await client.users.fetch(args[1]).catch(() => null);
 
     if (!targetUser) {
@@ -298,10 +297,58 @@ client.on("guildMemberAdd", async (member) => {
 client.once("ready", async () => {
   console.log(`${client.user.tag} online`);
 
-  const { ActivityType } = require("discord.js");
+  const { ActivityType, EmbedBuilder } = require("discord.js");
   client.user.setActivity("counting game 🪙", { type: ActivityType.Playing });
   client.user.setStatus("online");
 
+  // ===================================================
+  // 🎂 AUTOMATED MIDNIGHT BIRTHDAY CRON CHECK ENGINE
+  // ===================================================
+  setInterval(async () => {
+    const now = new Date();
+    // Only fire when the local time hits midnight (Hour 00, Minute 00)
+    if (now.getHours() === 0 && now.getMinutes() === 0) {
+      
+      const todayStr = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      console.log(`🎂 [BIRTHDAY CRON] Running automated sweeps for date: ${todayStr}...`);
+
+      const userIds = await redis.smembers(`birthdays:date:${todayStr}`);
+      if (!userIds || userIds.length === 0) return;
+
+      for (const guild of client.guilds.cache.values()) {
+        try {
+          const channelId = await redis.get(`birthday_channel:${guild.id}`);
+          if (!channelId) continue; 
+
+          const channel = await guild.channels.fetch(channelId).catch(() => null);
+          if (!channel) continue;
+
+          const birthdayMembersInGuild = [];
+          for (const id of userIds) {
+            const hasMember = await guild.members.fetch(id).catch(() => null);
+            if (hasMember) birthdayMembersInGuild.push(id);
+          }
+
+          if (birthdayMembersInGuild.length > 0) {
+            const mentions = birthdayMembersInGuild.map(id => `<@${id}>`).join(", ");
+            
+            const bdayEmbed = new EmbedBuilder()
+              .setColor("#FF69B4")
+              .setTitle("🎉 Happy Birthday! 🎉")
+              .setDescription(`✨ Today we celebrate the wonderful day of birth for our amazing members:\n\n${mentions}\n\nDrop some love in the chat and wish them a legendary day! 🎂🎈`)
+              .setThumbnail(client.user.displayAvatarURL())
+              .setTimestamp();
+
+            await channel.send({ content: mentions, embeds: [bdayEmbed] }).catch(() => null);
+          }
+        } catch (guildError) {
+          console.error(`Error processing birthday cycle for guild ${guild.id}:`, guildError);
+        }
+      }
+    }
+  }, 60000); // Scans the system clock once every 60 seconds safely
+
+  // Sync all application slash entries to Discord gateway API
   const commands = [];
   for (const [name, cmd] of client.commands) {
     try {
