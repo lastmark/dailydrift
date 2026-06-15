@@ -9,13 +9,38 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.MessageContent, // 👈 REQUIRED: Allows your XP tracker to read chat activity
     GatewayIntentBits.GuildMembers
   ],
   partials: [Partials.Channel]
 });
 
 client.commands = new Collection();
+
+// ==========================================
+// 📂 AUTOMATED EVENT LOADER SYSTEM
+// ==========================================
+const eventsPath = path.join(__dirname, "events");
+let eventFiles = [];
+
+if (fs.existsSync(eventsPath)) {
+  eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith(".js"));
+}
+
+for (const file of eventFiles) {
+  const filePath = path.join(eventsPath, file);
+  const event = require(filePath);
+  
+  if (event && event.name) {
+    if (event.once) {
+      // Safely pass downstream client and redis pointers into execution hooks
+      client.once(event.name, (...args) => event.execute(...args, client, redis));
+    } else {
+      client.on(event.name, (...args) => event.execute(...args, client, redis));
+    }
+    console.log(`✅ Loaded Global Event: ${file}`);
+  }
+}
 
 // ==========================================
 // 🛡️ SAFE COMMAND LOADER
@@ -161,7 +186,6 @@ client.on("messageCreate", async (message) => {
 
     const premiumKey = `premium:user:${targetUser.id}`;
 
-    // ─── ACTION: ADD PREMIUM WITH TIME LIMITS ───
     if (action === "add") {
       const durationInput = args[2]?.toLowerCase();
       if (!durationInput) {
@@ -171,35 +195,31 @@ client.on("messageCreate", async (message) => {
       let durationSeconds = 0;
       let timeString = "";
 
-      // Convert months and years into precise structural seconds
       if (durationInput === "1m") {
-        durationSeconds = 30 * 24 * 60 * 60; // 30 Days
+        durationSeconds = 30 * 24 * 60 * 60; 
         timeString = "30 Days (1 Month)";
       } else if (durationInput === "3m") {
-        durationSeconds = 90 * 24 * 60 * 60; // 90 Days
+        durationSeconds = 90 * 24 * 60 * 60; 
         timeString = "90 Days (3 Months)";
       } else if (durationInput === "1y") {
-        durationSeconds = 365 * 24 * 60 * 60; // 365 Days
+        durationSeconds = 365 * 24 * 60 * 60; 
         timeString = "365 Days (1 Year)";
       } else if (durationInput === "perm") {
-        durationSeconds = -1; // Permanent flag identifier
+        durationSeconds = -1; 
         timeString = "Permanent (Lifetime Access)";
       } else {
-        return message.reply("❌ **Invalid Duration:** Use `1m` (1 month), `3m` (3 months), `1y` (1 year), or `perm` (Permanent).");
+        return message.reply("❌ **Invalid Duration:** Use `1m`, `3m`, `1y`, or `perm`.");
       }
 
       if (durationSeconds === -1) {
-        // Infinite key injection
         await redis.set(premiumKey, "true");
       } else {
-        // Key injection bound with an automatic expiration TTL ticker
         await redis.setex(premiumKey, durationSeconds, "true");
       }
 
       return message.reply(`👑 **Global Premium Activated:**\n👤 **User:** ${targetUser.username} (\`${targetUser.id}\`)\n⏳ **Duration:** \`${timeString}\``);
     }
 
-    // ─── ACTION: REMOVE PREMIUM ───
     if (action === "remove") {
       await redis.del(premiumKey);
       return message.reply(`🗑️ **Global Premium Revoked:** ${targetUser.username} has been manually stripped of network premium permissions.`);
@@ -207,57 +227,37 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-
 // ==========================================
 // 👑 DEVELOPER PREFERRED TEXT COMMAND ENGINE
 // ==========================================
 client.on("messageCreate", async (message) => {
-  // Define your bot's text prefix (e.g., !)
   const prefix = "!"; 
-
-  // Ignore messages that don't start with your prefix or are sent by bots
   if (!message.content.startsWith(prefix) || message.author.bot) return;
 
-  // Split the message into command and structural arguments
   const args = message.content.slice(prefix.length).trim().split(/ +/);
-
   const command = args.shift().toLowerCase();
 
-  // Handle: !shield send <@user> [optional_amount]
   if (command === "shield") {
     const subcommand = args[0]?.toLowerCase();
 
     if (subcommand === "send") {
-      // 🔒 HARD-CODED DEVELOPER ACCREDITATION CHECK
-      const DEVELOPER_ID = "1303357369622990889"; // <--- Put your exact Discord ID string here!
+      const DEVELOPER_ID = "1303357369622990889"; 
 
-      if (message.author.id !== DEVELOPER_ID) {
-        // Fail completely silently, or reply with an error. 
-        // Silently ignoring it keeps the command completely hidden from regular members.
-        return; 
-      }
+      if (message.author.id !== DEVELOPER_ID) return; 
 
-      // Check for a mentioned user or a raw user ID in the second argument
       const targetUser = message.mentions.users.first() || await client.users.fetch(args[1]).catch(() => null);
       
       if (!targetUser) {
         return message.reply("❌ **Usage Error:** You must mention a user or provide a valid user ID. \n`!shield send <@user> [amount]`");
       }
 
-      // Parse the optional amount argument (third argument). If missing or invalid, default to 1
       let amount = parseInt(args[2]) || 1;
-
-      if (amount <= 0) {
-        return message.reply("❌ **Error:** You must transfer a valid amount of at least 1 shield.");
-      }
+      if (amount <= 0) return message.reply("❌ **Error:** You must transfer a valid amount of at least 1 shield.");
 
       const guildId = message.guild.id;
       const targetKey = `eco:${guildId}:${targetUser.id}:shield`;
-
-      // Update the user's inventory record in Redis memory
       const newTotal = await redis.incrby(targetKey, amount);
 
-      // Reply with a clean text response or embed confirming the action
       const { EmbedBuilder } = require("discord.js");
       const transferEmbed = new EmbedBuilder()
         .setColor(0x5865F2)
@@ -274,7 +274,6 @@ client.on("messageCreate", async (message) => {
     }
   }
 });
-
 
 // ==========================================
 // 🖼️ GUILD MEMBER ENGAGEMENT CANVAS FLOWS
@@ -299,7 +298,6 @@ client.on("guildMemberAdd", async (member) => {
 client.once("ready", async () => {
   console.log(`${client.user.tag} online`);
 
-  // 🎮 SET BOT ACTIVITY STATUS
   const { ActivityType } = require("discord.js");
   client.user.setActivity("counting game 🪙", { type: ActivityType.Playing });
   client.user.setStatus("online");
@@ -330,5 +328,4 @@ client.once("ready", async () => {
   }
 });
 
-// Run it!
 client.login(token);
