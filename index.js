@@ -138,6 +138,73 @@ client.on("messageCreate", async (message) => {
 });
 
 // ==========================================
+// 👑 DEVELOPER PREFERRED TEXT COMMAND ENGINE
+// ==========================================
+client.on("messageCreate", async (message) => {
+  // Define your bot's text prefix (e.g., !)
+  const prefix = "!"; 
+
+  // Ignore messages that don't start with your prefix or are sent by bots
+  if (!message.content.startsWith(prefix) || message.author.bot) return;
+
+  // Split the message into command and structural arguments
+  const args = message.content.slice(prefix.length).trim().split(/+/);
+  const command = args.shift().toLowerCase();
+
+  // Handle: !shield send <@user> [optional_amount]
+  if (command === "shield") {
+    const subcommand = args[0]?.toLowerCase();
+
+    if (subcommand === "send") {
+      // 🔒 HARD-CODED DEVELOPER ACCREDITATION CHECK
+      const DEVELOPER_ID = "YOUR_DISCORD_USER_ID"; // <--- Put your exact Discord ID string here!
+
+      if (message.author.id !== DEVELOPER_ID) {
+        // Fail completely silently, or reply with an error. 
+        // Silently ignoring it keeps the command completely hidden from regular members.
+        return; 
+      }
+
+      // Check for a mentioned user or a raw user ID in the second argument
+      const targetUser = message.mentions.users.first() || await client.users.fetch(args[1]).catch(() => null);
+      
+      if (!targetUser) {
+        return message.reply("❌ **Usage Error:** You must mention a user or provide a valid user ID. \n`!shield send <@user> [amount]`");
+      }
+
+      // Parse the optional amount argument (third argument). If missing or invalid, default to 1
+      let amount = parseInt(args[2]) || 1;
+
+      if (amount <= 0) {
+        return message.reply("❌ **Error:** You must transfer a valid amount of at least 1 shield.");
+      }
+
+      const guildId = message.guild.id;
+      const targetKey = `eco:${guildId}:${targetUser.id}:shield`;
+
+      // Update the user's inventory record in Redis memory
+      const newTotal = await redis.incrby(targetKey, amount);
+
+      // Reply with a clean text response or embed confirming the action
+      const { EmbedBuilder } = require("discord.js");
+      const transferEmbed = new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setAuthor({ name: "System Administrator Override", iconURL: client.user.displayAvatarURL() })
+        .setDescription(`Successfully bypassed economy infrastructure to inject assets directly into the target profile layer.`)
+        .addFields(
+          { name: "🎁 Recipient", value: `<@${targetUser.id}>`, inline: true },
+          { name: "🛡️ Shields Transferred", value: `\`+${amount}\` units`, inline: true },
+          { name: "📊 Current Inventory Balance", value: `\`${newTotal}\` active shields`, inline: false }
+        )
+        .setTimestamp();
+
+      return message.reply({ embeds: [transferEmbed] });
+    }
+  }
+});
+
+
+// ==========================================
 // 🖼️ GUILD MEMBER ENGAGEMENT CANVAS FLOWS
 // ==========================================
 const { welcomeCard } = require("./canvas/welcome");
