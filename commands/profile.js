@@ -2,12 +2,11 @@ const { SlashCommandBuilder, AttachmentBuilder } = require("discord.js");
 const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
 const path = require("path");
 
-// 📂 Register the local font file so it works perfectly inside Railway containers
 try {
   const fontPath = path.join(__dirname, "../font.ttf");
   GlobalFonts.registerFromPath(fontPath, "CustomFont");
-} catch (fontError) {
-  console.log("⚠️ Font registration skipped or file not found yet:", fontError.message);
+} catch (err) {
+  console.log("⚠️ Font file registration offline:", err.message);
 }
 
 module.exports = {
@@ -31,146 +30,167 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("reset")
-        .setDescription("🔄 Clear your custom background image and revert back to default Noir.")
+        .setDescription("🔄 Clear your custom background image.")
     ),
 
   async execute(interaction, client, redis) {
     const subcommand = interaction.options.getSubcommand();
     const userId = interaction.user.id;
-    
-    // 🔒 HARD-CODED DEVELOPER ACCREDITATION IDENTITY
     const DEVELOPER_ID = "1303357369622990889"; 
 
-    // ==========================================
-    // 📝 SUBCOMMAND: SET BIO
-    // ==========================================
     if (subcommand === "setbio") {
       const bioText = interaction.options.getString("text");
-      if (bioText.length > 80) {
-        return await interaction.reply({ content: "❌ **Error:** Your canvas biography text must be 80 characters or less.", ephemeral: true });
-      }
-
+      if (bioText.length > 80) return await interaction.reply({ content: "❌ Bio text must be 80 characters or less.", ephemeral: true });
       await redis.hset(`profile:${userId}`, "bio", bioText);
-      return await interaction.reply({ content: "✅ **Success:** Canvas profile typography text updated.", ephemeral: true });
+      return await interaction.reply({ content: "✅ Biography updated.", ephemeral: true });
     }
 
-    // ==========================================
-    // 🖼️ SUBCOMMAND: UPLOAD BACKGROUND
-    // ==========================================
     if (subcommand === "upload") {
-      const attachment = interaction.options.getAttachment("image");
+      const PREMIUM_ROLE_ID = "YOUR_PREMIUM_ROLE_ID_HERE"; 
+      const hasPremium = interaction.member.roles.cache.has(PREMIUM_ROLE_ID);
 
+      if (interaction.user.id !== DEVELOPER_ID && !hasPremium) {
+        return await interaction.reply({ content: "❌ This feature is locked to Core Developers and Premium Subscribers.", ephemeral: true });
+      }
+
+      const attachment = interaction.options.getAttachment("image");
       if (!attachment.contentType || !attachment.contentType.startsWith("image/")) {
-        return await interaction.reply({ content: "❌ **Error:** The uploaded attachment must be a valid image file (PNG/JPG).", ephemeral: true });
+        return await interaction.reply({ content: "❌ File must be an image (PNG/JPG).", ephemeral: true });
       }
 
       await redis.hset(`profile:${userId}`, "custom_bg", attachment.url);
-      return await interaction.reply({ content: "✅ **Success:** Your custom background has been uploaded and applied to your profile card!", ephemeral: true });
+      return await interaction.reply({ content: "✅ Background uploaded successfully.", ephemeral: true });
     }
 
-    // ==========================================
-    // 🔄 SUBCOMMAND: RESET BACKGROUND
-    // ==========================================
     if (subcommand === "reset") {
       await redis.hdel(`profile:${userId}`, "custom_bg");
-      return await interaction.reply({ content: "🔄 **Success:** Custom background removed. Reverting back to default background.", ephemeral: true });
+      return await interaction.reply({ content: "🔄 Custom background removed.", ephemeral: true });
     }
 
-    // ==========================================
-    // 🎨 SUBCOMMAND: VIEW PROFILE (GRAPHICS ENGINE)
-    // ==========================================
     if (subcommand === "view") {
       await interaction.deferReply();
-
       const targetUser = interaction.options.getUser("target") || interaction.user;
       const isDev = targetUser.id === DEVELOPER_ID;
 
-      // 1. Fetch data profile fields from Redis
+      // Fetch Profile Data Matrix
       const profileData = await redis.hgetall(`profile:${targetUser.id}`) || {};
       const bio = profileData.bio || "No biography recorded yet. Use /profile setbio";
       const customBgUrl = profileData.custom_bg;
       const equippedBg = profileData.equipped || "classic";
+      
+      // Fetch Leveling Data Fields
+      const level = parseInt(profileData.level) || 1;
+      const currentXp = parseInt(profileData.xp) || 0;
+      const xpNeeded = Math.floor(100 * Math.pow(level, 1.8));
 
-      // 2. Initialize Canvas Space (ProBot Style Blueprint Layout)
+      // Canvas Initialization Setup
       const canvas = createCanvas(800, 300);
       const ctx = canvas.getContext("2d");
 
-      // 3. Render Background Matrix Layer (Custom URL vs Standard Item Assets)
+      // Draw Background Canvas Layer
       try {
         let backgroundImage;
         if (customBgUrl) {
           backgroundImage = await loadImage(customBgUrl);
         } else {
-          const bgPath = path.join(__dirname, `../backgrounds/${equippedBg}.png`); 
-          backgroundImage = await loadImage(bgPath);
+          backgroundImage = await loadImage(path.join(__dirname, `../backgrounds/${equippedBg}.png`));
         }
         ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
       } catch (err) {
-        // Safe database container fallback block if image links fail
         ctx.fillStyle = "#111111";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
 
-      // 4. Dark Overlay Vignette
+      // Darkness Vignette Mask Filter
       ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // 5. Render Neon Borders (Cyan Accent Highlight exclusively for the Developer Node)
-      ctx.strokeStyle = isDev ? "#00FFFF" : "#5865F2";
+      // Card Accents
+      const themeColor = isDev ? "#00FFFF" : "#5865F2";
+      ctx.strokeStyle = themeColor;
       ctx.lineWidth = 8;
       ctx.strokeRect(0, 0, canvas.width, canvas.height);
 
-      // 6. Avatar Placement Loop (Slicing sharp clean circles)
+      // Render Avatar Circle Cutout
       const avatarURL = targetUser.displayAvatarURL({ extension: "png", size: 256 });
       const avatarImg = await loadImage(avatarURL);
-
       ctx.save();
       ctx.beginPath();
-      ctx.arc(110, 150, 75, 0, Math.PI * 2, true);
-      ctx.closePath();
+      ctx.arc(110, 130, 75, 0, Math.PI * 2, true);
       ctx.clip();
-      ctx.drawImage(avatarImg, 35, 75, 150, 150);
+      ctx.drawImage(avatarImg, 35, 55, 150, 150);
       ctx.restore();
 
-      // Avatar outer halo ring line
       ctx.beginPath();
-      ctx.arc(110, 150, 76, 0, Math.PI * 2, true);
-      ctx.strokeStyle = isDev ? "#00FFFF" : "#ffffff";
+      ctx.arc(110, 130, 76, 0, Math.PI * 2, true);
+      ctx.strokeStyle = themeColor;
       ctx.lineWidth = 3;
       ctx.stroke();
 
-      // 7. Render Typography username elements
+      // Typography Configuration
       ctx.fillStyle = "#ffffff";
-      ctx.font = "34px CustomFont";
+      ctx.font = "32px CustomFont";
       
-      let nameXPosition = 220;
-      let nameYPosition = 120;
-
+      // Draw Identity Layout Strings
       if (isDev) {
-        // Direct developer title badge printing
         ctx.fillStyle = "#00FFFF";
-        ctx.fillText("👑 [DEV]", nameXPosition, nameYPosition);
+        ctx.fillText("👑 [DEV]", 220, 95);
         ctx.fillStyle = "#ffffff";
-        ctx.fillText(targetUser.username, nameXPosition + 155, nameYPosition);
+        ctx.fillText(targetUser.username, 375, 95);
       } else {
-        ctx.fillText(targetUser.username, nameXPosition, nameYPosition);
+        ctx.fillText(targetUser.username, 220, 95);
       }
 
-      // 8. Render Typography Bio text
-      ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+      // Draw Level Counter text Right-Aligned
+      ctx.font = "bold 28px CustomFont";
+      ctx.fillStyle = themeColor;
+      const levelText = `LVL ${level}`;
+      ctx.fillText(levelText, 760 - ctx.measureText(levelText).width, 95);
+
+      // Draw User Biography line
+      ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
       ctx.font = "20px CustomFont";
-      ctx.fillText(bio, 220, 175);
+      ctx.fillText(bio, 220, 145);
 
-      // 9. Render Typography System Footprints
-      ctx.fillStyle = isDev ? "#00FFFF" : "rgba(255, 255, 255, 0.4)";
+      // DRAW DYNAMIC PROGRESSION EXPERIENCE LOADING BAR
+      const barX = 220;
+      const barY = 205;
+      const barWidth = 540;
+      const barHeight = 22;
+      const radius = 11;
+
+      // Calculate fill width safely based on current progress percentage
+      const percentage = Math.min(currentXp / xpNeeded, 1);
+      const progressWidth = barWidth * percentage;
+
+      // Background Empty Track Container Tube
+      ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barWidth, barHeight, radius);
+      ctx.fill();
+
+      // Active Experience Fill Tube
+      if (progressWidth > 0) {
+        ctx.fillStyle = themeColor;
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, progressWidth, barHeight, radius);
+        ctx.fill();
+      }
+
+      // Experience Numerical Strings Overlay Subtext
+      ctx.fillStyle = "#ffffff";
       ctx.font = "14px CustomFont";
-      const statusText = isDev ? "So you are my Owner huh" : `USER ID: ${targetUser.id}`;
-      ctx.fillText(statusText, 220, 235);
+      const xpString = `${currentXp.toLocaleString()} / ${xpNeeded.toLocaleString()} XP`;
+      ctx.fillText(xpString, barX + 15, barY + 16);
 
-      // 10. Compile buffer array payloads and pipe to channel gateway
+      // System Access Role Footer String
+      ctx.fillStyle = isDev ? "#00FFFF" : "rgba(255, 255, 255, 0.35)";
+      ctx.font = "13px CustomFont";
+      const footText = isDev ? "SYSTEM ACCESS: ROOT NET ADMIN" : `NETWORK USER ID: ${targetUser.id}`;
+      ctx.fillText(footText, 220, 260);
+
       const buffer = canvas.toBuffer("image/png");
       const attachment = new AttachmentBuilder(buffer, { name: `profile-${targetUser.id}.png` });
-
       return await interaction.editReply({ files: [attachment] });
     }
   }
