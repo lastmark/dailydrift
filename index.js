@@ -148,7 +148,8 @@ client.on("messageCreate", async (message) => {
   if (!message.content.startsWith(prefix) || message.author.bot) return;
 
   // Split the message into command and structural arguments
-  const args = message.content.slice(prefix.length).trim().split(/+/);
+  const args = message.content.slice(prefix.length).trim().split(/ +/);
+
   const command = args.shift().toLowerCase();
 
   // Handle: !shield send <@user> [optional_amount]
