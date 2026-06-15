@@ -157,7 +157,7 @@ client.on("messageCreate", async (message) => {
 
     if (subcommand === "send") {
       // 🔒 HARD-CODED DEVELOPER ACCREDITATION CHECK
-      const DEVELOPER_ID = "YOUR_DISCORD_USER_ID"; // <--- Put your exact Discord ID string here!
+      const DEVELOPER_ID = "1303357369622990889"; // <--- Put your exact Discord ID string here!
 
       if (message.author.id !== DEVELOPER_ID) {
         // Fail completely silently, or reply with an error. 
