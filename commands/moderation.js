@@ -5,7 +5,11 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("mod")
     .setDescription("🛡️ Core server moderation control systems.")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModeratorOnOn | PermissionFlagsBits.KickMembers | PermissionFlagsBits.BanMembers)
+    .setDefaultMemberPermissions(
+      PermissionFlagsBits.ModerateMembers | 
+      PermissionFlagsBits.KickMembers | 
+      PermissionFlagsBits.BanMembers
+    )
     .addSubcommand(sub =>
       sub.setName("kick").setDescription("Kick a disruptive member from the guild.")
         .addUserOption(opt => opt.setName("target").setDescription("Select user").setRequired(true))
