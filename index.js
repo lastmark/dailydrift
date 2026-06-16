@@ -178,6 +178,7 @@ client.on("messageCreate", async (message) => {
     const action = args[0]?.toLowerCase(); // "add" or "remove"
     const type = args[1]?.toLowerCase();   // "user" or "guild"
 
+    // Verify layout matrix structure
     if (!action || !["add", "remove"].includes(action) || !type || !["user", "guild"].includes(type)) {
       return message.reply(
         "❌ **Usage Commands:**\n" +
@@ -191,15 +192,15 @@ client.on("messageCreate", async (message) => {
 
     let targetId = "";
     let targetName = "";
-    let dmTarget = null; // Storing who we need to message directly
+    let dmTarget = null;
 
-    // ─── TARGET PARSING VECTOR ───
+    // ─── ALIGNED ARGS TARGETS (args[2] is the User/Guild identifier) ───
     if (type === "user") {
       const targetUser = message.mentions.users.first() || await client.users.fetch(args[2]).catch(() => null);
-      if (!targetUser) return message.reply("❌ **Error:** Unable to resolve that target user.");
+      if (!targetUser) return message.reply("❌ **Error:** Unable to resolve that target user or valid user ID string.");
       targetId = targetUser.id;
       targetName = targetUser.username;
-      dmTarget = targetUser; // DM the user directly
+      dmTarget = targetUser; 
     } else if (type === "guild") {
       const targetGuildId = args[2];
       if (!targetGuildId) return message.reply("❌ **Error:** Please specify a valid Guild ID string.");
@@ -208,7 +209,7 @@ client.on("messageCreate", async (message) => {
       targetName = targetGuild ? targetGuild.name : `Guild ID: ${targetGuildId}`;
       
       if (targetGuild) {
-        dmTarget = await client.users.fetch(targetGuild.ownerId).catch(() => null); // DM the server owner
+        dmTarget = await client.users.fetch(targetGuild.ownerId).catch(() => null); 
       }
     }
 
@@ -216,8 +217,8 @@ client.on("messageCreate", async (message) => {
 
     // ─── ACTION: ADD PREMIUM ───
     if (action === "add") {
-      const durationInput = args[3]?.toLowerCase();
-      if (!durationInput) return message.reply(`❌ **Error:** Please specify duration.`);
+      const durationInput = args[3]?.toLowerCase(); // Duration shifts to args[3]
+      if (!durationInput) return message.reply(`❌ **Error:** Please specify a duration framework. Example: \`!premium add ${type} ${targetId} 1m\``);
 
       let durationSeconds = 0;
       let timeString = "";
@@ -238,7 +239,7 @@ client.on("messageCreate", async (message) => {
         return message.reply("❌ **Invalid Duration:** Use `1m`, `3m`, `1y`, or `perm`.");
       }
 
-      // Save into Redis Memory Core
+      // Save configurations to storage cache
       if (durationSeconds === -1) {
         await redis.set(premiumKey, "perm");
       } else {
@@ -249,7 +250,7 @@ client.on("messageCreate", async (message) => {
         await redis.set(`antispam:toggle:${targetId}`, "true");
       }
 
-      // ─── DISPATCH NOTIFICATION EMBED VIA DM ───
+      // ─── STEP A: DISPATCH DIRECT MESSAGE EMBED ───
       let dmSentStatus = "";
       if (dmTarget) {
         const premiumDmEmbed = new EmbedBuilder()
@@ -273,6 +274,7 @@ client.on("messageCreate", async (message) => {
         dmSentStatus = dmSuccess ? "\n📥 **DM Alert:** Dispatched confirmation directly to client." : "\n⚠️ **DM Alert:** Failed to message client (DMs closed).";
       }
 
+      // ─── STEP B: SEND RESPONSE TO THE CHAT CHANNEL ───
       return message.reply(`👑 **Global ${type.toUpperCase()} Premium Activated:**\n🎯 **Target:** ${targetName} (\`${targetId}\`)\n⏳ **Duration:** \`${timeString}\`${dmSentStatus}`);
     }
 
@@ -281,12 +283,11 @@ client.on("messageCreate", async (message) => {
       await redis.del(premiumKey);
       if (type === "guild") await redis.del(`antispam:toggle:${targetId}`);
       
-      // Optional: Send a notification DM about the expiration
       if (dmTarget) {
         const expireDmEmbed = new EmbedBuilder()
           .setColor("#FF3366")
           .setAuthor({ name: "Subscription License Terminated", iconURL: client.user.displayAvatarURL() })
-          .setDescription(`🔴 Your Premium subscription tier for **${targetName}** has officially ended or been manually removed by the developer. \n\nIf you believe this was an error or you would like to renew your allocation stream, contact the bot developer.`);
+          .setDescription(`🔴 Your Premium subscription tier for **${targetName}** has officially ended or been manually removed by the developer.\n\nIf you believe this was an error or you would like to renew your allocation stream, contact the bot developer.`);
         
         await dmTarget.send({ embeds: [expireDmEmbed] }).catch(() => null);
       }
@@ -295,7 +296,6 @@ client.on("messageCreate", async (message) => {
     }
   }
 });
-
 
 // ==========================================
 // 👑 DEVELOPER PREFERRED TEXT COMMAND ENGINE
