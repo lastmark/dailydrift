@@ -151,7 +151,225 @@ module.exports = {
         await interaction.editReply({ components: [offRow] }).catch(() => null);
       });
     }
+// ─── MINI-GAME: TIC TAC TOE ───
+if (subcommand === "tictactoe") {
+  const opponent = interaction.options.getUser("opponent");
 
+  if (opponent?.bot) {
+    return interaction.reply({
+      content: `${e.error || "❌"} You cannot challenge bots.`,
+      flags: [MessageFlags.Ephemeral]
+    });
+  }
+
+  const board = Array(9).fill(null);
+  const botGame = !opponent;
+
+  let currentPlayer = interaction.user.id;
+  let gameEnded = false;
+
+  const createBoard = () => {
+    const rows = [];
+
+    for (let r = 0; r < 3; r++) {
+      rows.push(
+        new ActionRowBuilder().addComponents(
+          ...Array.from({ length: 3 }, (_, c) => {
+            const index = r * 3 + c;
+
+            return new ButtonBuilder()
+              .setCustomId(`ttt_${index}`)
+              .setLabel(board[index] || "‎")
+              .setStyle(
+                board[index] === "X"
+                  ? ButtonStyle.Danger
+                  : board[index] === "O"
+                  ? ButtonStyle.Primary
+                  : ButtonStyle.Secondary
+              )
+              .setDisabled(board[index] !== null || gameEnded);
+          })
+        )
+      );
+    }
+
+    return rows;
+  };
+
+  const winnerCheck = () => {
+    const wins = [
+      [0,1,2],[3,4,5],[6,7,8],
+      [0,3,6],[1,4,7],[2,5,8],
+      [0,4,8],[2,4,6]
+    ];
+
+    for (const [a,b,c] of wins) {
+      if (
+        board[a] &&
+        board[a] === board[b] &&
+        board[a] === board[c]
+      ) {
+        return board[a];
+      }
+    }
+
+    if (!board.includes(null)) return "draw";
+
+    return null;
+  };
+
+  const botMove = () => {
+    const free = board
+      .map((v, i) => (v === null ? i : null))
+      .filter(v => v !== null);
+
+    if (!free.length) return;
+
+    const pick = free[Math.floor(Math.random() * free.length)];
+
+    board[pick] = "O";
+  };
+
+  const embed = new EmbedBuilder()
+    .setColor("#2B2D31")
+    .setTitle("❌ Tic Tac Toe ⭕")
+    .setDescription(
+      botGame
+        ? `**${interaction.user.username} (X)** vs **Bot (O)**`
+        : `**${interaction.user.username} (X)** vs **${opponent.username} (O)**`
+    );
+
+  const response = await interaction.reply({
+    embeds: [embed],
+    components: createBoard(),
+    withResponse: true
+  });
+
+  const collector =
+    response.resource.message.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      time: 300000
+    });
+
+  collector.on("collect", async i => {
+    const index = Number(i.customId.split("_")[1]);
+
+    if (gameEnded) return;
+
+    if (botGame) {
+      if (i.user.id !== interaction.user.id) {
+        return i.reply({
+          content: "This isn't your game.",
+          flags: [MessageFlags.Ephemeral]
+        });
+      }
+
+      if (board[index] !== null) return;
+
+      board[index] = "X";
+
+      let result = winnerCheck();
+
+      if (!result) {
+        botMove();
+        result = winnerCheck();
+      }
+
+      if (result) {
+        gameEnded = true;
+
+        const endEmbed = new EmbedBuilder()
+          .setColor("#2B2D31")
+          .setTitle("❌ Tic Tac Toe ⭕")
+          .setDescription(
+            result === "draw"
+              ? "🤝 Draw!"
+              : result === "X"
+              ? "🏆 You Win!"
+              : "🤖 Bot Wins!"
+          );
+
+        return i.update({
+          embeds: [endEmbed],
+          components: createBoard()
+        });
+      }
+
+      return i.update({
+        components: createBoard()
+      });
+    }
+
+    if (
+      (currentPlayer === interaction.user.id &&
+        i.user.id !== interaction.user.id) ||
+      (currentPlayer === opponent.id &&
+        i.user.id !== opponent.id)
+    ) {
+      return i.reply({
+        content: "It's not your turn.",
+        flags: [MessageFlags.Ephemeral]
+      });
+    }
+
+    if (board[index] !== null) return;
+
+    board[index] =
+      currentPlayer === interaction.user.id ? "X" : "O";
+
+    const result = winnerCheck();
+
+    if (result) {
+      gameEnded = true;
+
+      let text;
+
+      if (result === "draw") {
+        text = "🤝 Draw!";
+      } else if (result === "X") {
+        text = `🏆 ${interaction.user} wins!`;
+      } else {
+        text = `🏆 ${opponent} wins!`;
+      }
+
+      return i.update({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#2B2D31")
+            .setTitle("❌ Tic Tac Toe ⭕")
+            .setDescription(text)
+        ],
+        components: createBoard()
+      });
+    }
+
+    currentPlayer =
+      currentPlayer === interaction.user.id
+        ? opponent.id
+        : interaction.user.id;
+
+    await i.update({
+      embeds: [
+        new EmbedBuilder()
+          .setColor("#2B2D31")
+          .setTitle("❌ Tic Tac Toe ⭕")
+          .setDescription(
+            `Turn: <@${currentPlayer}>`
+          )
+      ],
+      components: createBoard()
+    });
+  });
+
+  collector.on("end", async () => {
+    gameEnded = true;
+
+    await interaction.editReply({
+      components: createBoard()
+    }).catch(() => null);
+  });
+}
+    
     // ─── CONFIG: COUNTING SETUP ───
     if (subcommand === "counting") {
       if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
