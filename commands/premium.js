@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
-const e = require("../emojis.js");
 
 function formatTTL(ttlSeconds) {
   if (ttlSeconds === -1) return "♾️ **Permanent (Lifetime Access)**";
@@ -35,16 +34,16 @@ module.exports = {
     const statusEmbed = new EmbedBuilder()
       .setColor("#2B2D31")
       .setAuthor({ name: "System Premium Verification Ledger", iconURL: interaction.user.displayAvatarURL() })
-      .setDescription("Live network data status for subscriptions associated with this workspace context:")
+      .setDescription("Live network data subscription status associated with this active context:")
       .addFields(
         { 
           name: `👤 Personal Account (${interaction.user.username})`, 
-          value: userValue ? `${e.premium || "💎"} **Active Premium Tier**\n${formatTTL(userTTL)}` : "❌ No active subscription layer.", 
+          value: userValue ? `💎 **Active Premium Tier**\n${formatTTL(userTTL)}` : "❌ No active subscription layer.", 
           inline: false 
         },
         { 
           name: `🏢 Guild Server (${interaction.guild.name})`, 
-          value: guildValue ? `${e.premium || "💎"} **Active Server Premium**\n${formatTTL(guildTTL)}` : "❌ Server running on Standard allocation layer.", 
+          value: guildValue ? `💎 **Active Server Premium**\n${formatTTL(guildTTL)}` : "❌ Server running on Standard allocation layer.", 
           inline: false 
         }
       )
