@@ -1,17 +1,33 @@
 module.exports = {
+  // System Icons
   announcement: "<:announcement:1513533499607351356>",
   bot: "<:bot:1513533291385458708>",
-  check: "<:check:1514265862159470643>",
-  coin: "<:coin_flip:1513532556140744856>",
+  info: "<:info:1516446034627395745>",
   error: "<:error:1513532700202631240>",
-  join: "<:memberadd:1513532586998239335>",
-  leave: "<:memberleave:1513532632992845965>",
-  message: "<:message:1513533207037874196>",
-  money: "<:money:1513532519599964270>",
-  paper: "<:paper:1513532786445783151>",
-  rock: "<:rock:1513532823301259446>",
-  scissors: "<:scissor:1513532752669053090>",
   search: "<:search:1513533580087787530>",
-  settings: "<:setting:1513533096740257993>",
-  user: "<:user:1513533036472307814>"
+  check: "<:welcome:1516445441288306718>", // Reusing welcome icon as a green-style checkmark fallback
+
+  // Profile, Premium, and Economy Icons
+  profile: "<:bot:1513533291385458708>", 
+  premium: "<:emoji_33:1516445937273147415>", 
+  money: "<:money:1513532519599964270>",
+  birthday: "<:emoji_33:1516445937273147415>", // Using emoji_33 as your clean sparkling theme asset
+
+  // Moderation Icons
+  mod: "<:lock:1516445856830722078>",
+  kick: "<:kick:1516445993502117928>",
+  ban: "<:ban:1516445614727233727>",
+  unban: "<:unban:1516445717164589156>",
+  lock: "<:lock:1516445856830722078>",
+
+  // Games & Engagement Icons
+  games: "<:counting:1516445812119441468>",
+  counting: "<:counting:1516445812119441468>",
+  rock: "<:rock:1513532823301259446>",
+  paper: "<:paper:1513532786445783151>",
+  scissors: "<:scissor:1513532752669053090>",
+
+  // Server Utilities
+  welcome: "<:welcome:1516445441288306718>",
+  leave: "<:leave:1516445558389342269>"
 };
