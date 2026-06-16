@@ -162,8 +162,7 @@ client.on("messageCreate", async (message) => {
 });
 
 // ===================================================
-// 👑 GLOBAL TIME-BOUND PREMIUM CONTROLLER (DEV ONLY)
-// ===================================================
+
 client.on("messageCreate", async (message) => {
   const prefix = "!"; 
   if (!message.content.startsWith(prefix) || message.author.bot) return;
@@ -186,26 +185,31 @@ client.on("messageCreate", async (message) => {
         "🔹 `!premium add guild <Guild_ID> <duration>`\n" +
         "🔹 `!premium remove user <@user/ID>`\n" +
         "🔹 `!premium remove guild <Guild_ID>`\n\n" +
-        "💡 *Durations: 1m (1 month), 3m (3 months), 1y (1 year), perm (Permanent)*"
+        "💡 *Durations: 1m, 3m, 1y, perm*"
       );
     }
 
     let targetId = "";
     let targetName = "";
+    let dmTarget = null; // Storing who we need to message directly
 
     // ─── TARGET PARSING VECTOR ───
     if (type === "user") {
       const targetUser = message.mentions.users.first() || await client.users.fetch(args[2]).catch(() => null);
-      if (!targetUser) return message.reply("❌ **Error:** Unable to resolve that target user or valid ID.");
+      if (!targetUser) return message.reply("❌ **Error:** Unable to resolve that target user.");
       targetId = targetUser.id;
       targetName = targetUser.username;
+      dmTarget = targetUser; // DM the user directly
     } else if (type === "guild") {
       const targetGuildId = args[2];
       if (!targetGuildId) return message.reply("❌ **Error:** Please specify a valid Guild ID string.");
-      
       const targetGuild = await client.guilds.fetch(targetGuildId).catch(() => null);
       targetId = targetGuildId;
       targetName = targetGuild ? targetGuild.name : `Guild ID: ${targetGuildId}`;
+      
+      if (targetGuild) {
+        dmTarget = await client.users.fetch(targetGuild.ownerId).catch(() => null); // DM the server owner
+      }
     }
 
     const premiumKey = `premium:${type}:${targetId}`;
@@ -213,9 +217,7 @@ client.on("messageCreate", async (message) => {
     // ─── ACTION: ADD PREMIUM ───
     if (action === "add") {
       const durationInput = args[3]?.toLowerCase();
-      if (!durationInput) {
-        return message.reply(`❌ **Error:** Please specify a duration framework. Example: \`!premium add ${type} <id> 1m\``);
-      }
+      if (!durationInput) return message.reply(`❌ **Error:** Please specify duration.`);
 
       let durationSeconds = 0;
       let timeString = "";
@@ -236,30 +238,60 @@ client.on("messageCreate", async (message) => {
         return message.reply("❌ **Invalid Duration:** Use `1m`, `3m`, `1y`, or `perm`.");
       }
 
-      // Commit to Redis storage
+      // Save into Redis Memory Core
       if (durationSeconds === -1) {
-        await redis.set(premiumKey, "true");
+        await redis.set(premiumKey, "perm");
       } else {
         await redis.setex(premiumKey, durationSeconds, "true");
       }
 
-      // If it's a guild, automatically initialize the high-speed anti-spam toggle
       if (type === "guild") {
         await redis.set(`antispam:toggle:${targetId}`, "true");
       }
 
-      return message.reply(`👑 **Global ${type.toUpperCase()} Premium Activated:**\n🎯 **Target:** ${targetName} (\`${targetId}\`)\n⏳ **Duration:** \`${timeString}\``);
+      // ─── DISPATCH NOTIFICATION EMBED VIA DM ───
+      let dmSentStatus = "";
+      if (dmTarget) {
+        const premiumDmEmbed = new EmbedBuilder()
+          .setColor("#00FFAC")
+          .setAuthor({ name: "Premium License Activated Successfully", iconURL: client.user.displayAvatarURL() })
+          .setTitle(type === "user" ? "💎 Your Personal Premium is Live!" : "🏢 Server Guild Premium Activated!")
+          .setDescription(
+            `Thank you for your purchase, bro! Your payment has been completely verified, and your premium capabilities have been activated.\n\n` +
+            `📦 **Subscription Plan Details:**\n` +
+            `• **License Type:** \`${type.toUpperCase()} Tier\`\n` +
+            `• **Assigned To:** **${targetName}** (\`${targetId}\`)\n` +
+            `• **Time Frame:** \`${timeString}\`\n\n` +
+            `${type === "guild" 
+              ? "⚡ **What's Next?** Your server now has full access to the ultra-fast, high-speed Anti-Spam protection engine! Use `/premium-set` inside your server to manage your features." 
+              : "✨ **What's Next?** Your personal global profile assets have been unlocked successfully across the network!"}`
+          )
+          .setFooter({ text: "Thank you for supporting the application development core!" })
+          .setTimestamp();
+
+        const dmSuccess = await dmTarget.send({ embeds: [premiumDmEmbed] }).catch(() => null);
+        dmSentStatus = dmSuccess ? "\n📥 **DM Alert:** Dispatched confirmation directly to client." : "\n⚠️ **DM Alert:** Failed to message client (DMs closed).";
+      }
+
+      return message.reply(`👑 **Global ${type.toUpperCase()} Premium Activated:**\n🎯 **Target:** ${targetName} (\`${targetId}\`)\n⏳ **Duration:** \`${timeString}\`${dmSentStatus}`);
     }
 
     // ─── ACTION: REMOVE PREMIUM ───
     if (action === "remove") {
       await redis.del(premiumKey);
+      if (type === "guild") await redis.del(`antispam:toggle:${targetId}`);
       
-      if (type === "guild") {
-        await redis.del(`antispam:toggle:${targetId}`);
+      // Optional: Send a notification DM about the expiration
+      if (dmTarget) {
+        const expireDmEmbed = new EmbedBuilder()
+          .setColor("#FF3366")
+          .setAuthor({ name: "Subscription License Terminated", iconURL: client.user.displayAvatarURL() })
+          .setDescription(`🔴 Your Premium subscription tier for **${targetName}** has officially ended or been manually removed by the developer. \n\nIf you believe this was an error or you would like to renew your allocation stream, contact the bot developer.`);
+        
+        await dmTarget.send({ embeds: [expireDmEmbed] }).catch(() => null);
       }
 
-      return message.reply(`🗑️ **Global ${type.toUpperCase()} Premium Revoked:** **${targetName}** has been manually stripped of premium features.`);
+      return message.reply(`🗑️ **Global ${type.toUpperCase()} Premium Revoked for: ${targetName}**.`);
     }
   }
 });
