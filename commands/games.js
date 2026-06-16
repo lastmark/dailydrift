@@ -6,7 +6,8 @@ const {
   ActionRowBuilder, 
   ButtonBuilder, 
   ButtonStyle,
-  ComponentType
+  ComponentType,
+  MessageFlags
 } = require("discord.js");
 const e = require("../emojis.js");
 
@@ -31,9 +32,7 @@ module.exports = {
   async execute(interaction, client, redis) {
     const subcommand = interaction.options.getSubcommand();
 
-    // ==========================================
-    // 🥊 MINI-GAME: ROCK, PAPER, SCISSORS (RPS)
-    // ==========================================
+    // ─── MINI-GAME: ROCK, PAPER, SCISSORS (RPS) ───
     if (subcommand === "rps") {
       const initialEmbed = new EmbedBuilder()
         .setColor("#2B2D31")
@@ -46,12 +45,12 @@ module.exports = {
         new ButtonBuilder().setCustomId("rps_scissors").setLabel("Scissors").setEmoji(e.scissors || "✂️").setStyle(ButtonStyle.Danger)
       );
 
-      const response = await interaction.reply({ embeds: [initialEmbed], components: [row], fetchReply: true });
-      const collector = response.createMessageComponentCollector({ componentType: ComponentType.Button, time: 30000 });
+      const response = await interaction.reply({ embeds: [initialEmbed], components: [row], withResponse: true });
+      const collector = response.resource.message.createMessageComponentCollector({ componentType: ComponentType.Button, time: 30000 });
 
       collector.on("collect", async (i) => {
         if (i.user.id !== interaction.user.id) {
-          return await i.reply({ content: `${e.error || "❌"} This is not your match. Start your own duel using '/game rps'.`, ephemeral: true });
+          return await i.reply({ content: `${e.error || "❌"} This is not your match. Start your own duel using '/game rps'.`, flags: [MessageFlags.Ephemeral] });
         }
 
         const userChoice = i.customId.split("_")[1];
@@ -91,9 +90,7 @@ module.exports = {
       });
     }
 
-    // ==========================================
-    // 🪙 MINI-GAME: COINFLIP
-    // ==========================================
+    // ─── MINI-GAME: COINFLIP ───
     if (subcommand === "coinflip") {
       const executeFlip = () => Math.random() > 0.5 ? "HEADS" : "TAILS";
 
@@ -105,11 +102,11 @@ module.exports = {
         new ButtonBuilder().setCustomId("flip_again").setLabel("Flip Again").setEmoji(e.money || "🪙").setStyle(ButtonStyle.Secondary)
       );
 
-      const response = await interaction.reply({ embeds: [flipEmbed], components: [row], fetchReply: true });
-      const collector = response.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
+      const response = await interaction.reply({ embeds: [flipEmbed], components: [row], withResponse: true });
+      const collector = response.resource.message.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
 
       collector.on("collect", async (i) => {
-        if (i.user.id !== interaction.user.id) return await i.reply({ content: `${e.error || "❌"} Run \`/game coinflip\` to spin your own coin.`, ephemeral: true });
+        if (i.user.id !== interaction.user.id) return await i.reply({ content: `${e.error || "❌"} Run \`/game coinflip\` to spin your own coin.`, flags: [MessageFlags.Ephemeral] });
 
         const newFlipEmbed = new EmbedBuilder()
           .setColor("#2B2D31")
@@ -124,9 +121,7 @@ module.exports = {
       });
     }
 
-    // ==========================================
-    // 🎲 MINI-GAME: DICE ROLL
-    // ==========================================
+    // ─── MINI-GAME: DICE ROLL ───
     if (subcommand === "dice") {
       const executeRoll = () => Math.floor(Math.random() * 6) + 1;
 
@@ -138,11 +133,11 @@ module.exports = {
         new ButtonBuilder().setCustomId("roll_again").setLabel("Roll Again").setEmoji("🎲").setStyle(ButtonStyle.Secondary)
       );
 
-      const response = await interaction.reply({ embeds: [diceEmbed], components: [row], fetchReply: true });
-      const collector = response.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
+      const response = await interaction.reply({ embeds: [diceEmbed], components: [row], withResponse: true });
+      const collector = response.resource.message.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
 
       collector.on("collect", async (i) => {
-        if (i.user.id !== interaction.user.id) return await i.reply({ content: `${e.error || "❌"} Run \`/game dice\` to cast your own die.`, ephemeral: true });
+        if (i.user.id !== interaction.user.id) return await i.reply({ content: `${e.error || "❌"} Run \`/game dice\` to cast your own die.`, flags: [MessageFlags.Ephemeral] });
 
         const newDiceEmbed = new EmbedBuilder()
           .setColor("#2B2D31")
@@ -157,12 +152,10 @@ module.exports = {
       });
     }
 
-    // ==========================================
-    // ⚙️ SYSTEM CONFIGURATION: COUNTING GAME
-    // ==========================================
+    // ─── CONFIG: COUNTING SETUP ───
     if (subcommand === "counting") {
       if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-        return interaction.reply({ content: `${e.error || "❌"} **Access Denied:** You need \`Manage Server\` permissions to set up gaming modules.`, ephemeral: true });
+        return interaction.reply({ content: `${e.error || "❌"} **Access Denied:** You need \`Manage Server\` permissions to set up gaming modules.`, flags: [MessageFlags.Ephemeral] });
       }
       const channel = interaction.options.getChannel("channel");
       await redis.set(`counting_channel:${interaction.guild.id}`, channel.id);
