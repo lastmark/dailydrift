@@ -31,7 +31,9 @@ module.exports = {
   async execute(interaction, client, redis) {
     const subcommand = interaction.options.getSubcommand();
 
-    // ─── MINI-GAME: ROCK, PAPER, SCISSORS (RPS) ───
+    // ==========================================
+    // 🥊 MINI-GAME: ROCK, PAPER, SCISSORS (RPS)
+    // ==========================================
     if (subcommand === "rps") {
       const initialEmbed = new EmbedBuilder()
         .setColor("#2B2D31")
@@ -49,7 +51,7 @@ module.exports = {
 
       collector.on("collect", async (i) => {
         if (i.user.id !== interaction.user.id) {
-          return await i.reply({ content: `${e.error || "❌"} This is not your match. Start your own duel using `/game rps`.`, ephemeral: true });
+          return await i.reply({ content: `${e.error || "❌"} This is not your match. Start your own duel using '/game rps'.`, ephemeral: true });
         }
 
         const userChoice = i.customId.split("_")[1];
@@ -89,7 +91,9 @@ module.exports = {
       });
     }
 
-    // ─── MINI-GAME: COINFLIP ───
+    // ==========================================
+    // 🪙 MINI-GAME: COINFLIP
+    // ==========================================
     if (subcommand === "coinflip") {
       const executeFlip = () => Math.random() > 0.5 ? "HEADS" : "TAILS";
 
@@ -120,7 +124,9 @@ module.exports = {
       });
     }
 
-    // ─── MINI-GAME: DICE ROLL ───
+    // ==========================================
+    // 🎲 MINI-GAME: DICE ROLL
+    // ==========================================
     if (subcommand === "dice") {
       const executeRoll = () => Math.floor(Math.random() * 6) + 1;
 
@@ -151,7 +157,9 @@ module.exports = {
       });
     }
 
-    // ─── CONFIG: COUNTING SETUP ───
+    // ==========================================
+    // ⚙️ SYSTEM CONFIGURATION: COUNTING GAME
+    // ==========================================
     if (subcommand === "counting") {
       if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
         return interaction.reply({ content: `${e.error || "❌"} **Access Denied:** You need \`Manage Server\` permissions to set up gaming modules.`, ephemeral: true });
