@@ -1,33 +1,20 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ChannelType, MessageFlags } = require("discord.js");
+const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require("discord.js");
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName("premium-set")
-    .setDescription("💎 Premium Suite: Configure advanced premium metrics and server protections.")
+    .setName("stats")
+    .setDescription("📊 Setup completely free server performance statistics tracker channels.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
-      sub.setName("antispam")
-        .setDescription("⚡ Toggle high-speed anti-spam protection shield.")
-        .addStringOption(opt =>
-          opt.setName("status")
-            .setDescription("Turn the protection stream ON or OFF")
-            .setRequired(true)
-            .addChoices(
-              { name: "Enabled (Active Shielding)", value: "true" },
-              { name: "Disabled (Unprotected Stream)", value: "false" }
-            )
-        )
-    )
-    .addSubcommand(sub =>
-      sub.setName("setup-stats")
-        .setDescription("📊 Deploy premium analytics live tracker panels.")
+      sub.setName("setup")
+        .setDescription("🛠️ Instantly deploy live community traction boards.")
         .addStringOption(opt =>
           opt.setName("type")
-            .setDescription("Select the advanced tracking metric type.")
+            .setDescription("Select the public tracking metric type.")
             .setRequired(true)
             .addChoices(
-              { name: "🎙️ Peoples in Voices", value: "voice" },
-              { name: "📈 Members Joined Today", value: "today" }
+              { name: "👥 Total Members", value: "total" },
+              { name: "🟢 Online Users", value: "online" }
             )
         )
         .addChannelOption(opt => 
@@ -39,90 +26,58 @@ module.exports = {
     ),
 
   async execute(interaction, client, redis) {
+    await interaction.deferReply();
     const guildId = interaction.guildId;
-    const subcommand = interaction.options.getSubcommand();
+    const type = interaction.options.getString("type");
+    const targetChannel = interaction.options.getChannel("target_channel");
 
-    // Strict premium verification checking gate right at the entrypoint
-    const isGuildPremium = await redis.get(`premium:guild:${guildId}`);
-    if (!isGuildPremium || isGuildPremium === "false") {
-      const accessDeniedEmbed = new EmbedBuilder()
-        .setColor("#FF3366")
-        .setTitle("🔒 Premium License Required")
-        .setDescription("This system configuration utility belongs exclusively to **Premium Tier Guilds**.\n\n💰 Contact the application developer to activate a premium subscription.");
-      return interaction.reply({ embeds: [accessDeniedEmbed], flags: [MessageFlags.Ephemeral] });
+    let currentMetricValue = "0";
+    let defaultDesignName = "";
+
+    if (type === "total") {
+      currentMetricValue = interaction.guild.memberCount.toLocaleString();
+      defaultDesignName = "👥 ┃ Members";
+    } else if (type === "online") {
+      const onlineCount = interaction.guild.members.cache.filter(m => m.presence && m.presence.status !== "offline").size;
+      currentMetricValue = onlineCount.toLocaleString();
+      defaultDesignName = "🟢 ┃ Online";
     }
 
-    // ==========================================
-    // ⚡ SUBCOMMAND: ANTI-SPAM
-    // ==========================================
-    if (subcommand === "antispam") {
-      const statusValue = interaction.options.getString("status");
-      await redis.set(`antispam:toggle:${guildId}`, statusValue);
+    let activeChannelId = null;
+    let displayMessage = "";
 
-      const isEnabled = statusValue === "true";
-      const configEmbed = new EmbedBuilder()
-        .setColor(isEnabled ? "#00FFAC" : "#FF3366")
-        .setDescription(`**Anti-Spam State Updated:**\n• **System Status:** ${isEnabled ? "🟢 **MAXIMUM ACTIVE SHIELDING**" : "🔴 **INACTIVE**"}`);
-      return interaction.reply({ embeds: [configEmbed] });
-    }
+    // 🔄 CASE 1: User provided an existing directory channel
+    if (targetChannel) {
+      activeChannelId = targetChannel.id;
+      displayMessage = `✅ **Free Data Sync Completed:** Connected to channel ${targetChannel}. It will now track public **${type.toUpperCase()}** metrics.`;
+      
+      const customName = targetChannel.name.split("•")[0] || `${defaultDesignName} `;
+      await targetChannel.setName(`${customName}• ${currentMetricValue}`).catch(() => null);
+    } 
+    // 🛠️ CASE 2: Auto-Create using our clean default structural layout
+    else {
+      const botDesignedName = `${defaultDesignName} • ${currentMetricValue}`;
+      
+      const newChannel = await interaction.guild.channels.create({
+        name: botDesignedName,
+        type: ChannelType.GuildVoice,
+        permissionOverwrites: [
+          {
+            id: interaction.guild.roles.everyone.id,
+            deny: [PermissionFlagsBits.Connect], // Locks channel sidebar visual flow
+          },
+        ],
+      }).catch(() => null);
 
-    // ==========================================
-    // 📊 SUBCOMMAND: SETUP STATS (PREMIUM MODULES)
-    // ==========================================
-    if (subcommand === "setup-stats") {
-      await interaction.deferReply();
-
-      const type = interaction.options.getString("type");
-      const targetChannel = interaction.options.getChannel("target_channel");
-
-      let currentMetricValue = "0";
-      let defaultDesignName = "";
-
-      if (type === "voice") {
-        const voiceChannels = interaction.guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice);
-        let voiceCount = 0;
-        voiceChannels.forEach(ch => voiceCount += ch.members.size);
-        currentMetricValue = voiceCount.toLocaleString();
-        defaultDesignName = "🎙️ ┃ In Voices";
-      } else if (type === "today") {
-        const joinedTodayCount = await redis.get(`stats:joinedtoday:${guildId}`) || "0";
-        currentMetricValue = parseInt(joinedTodayCount).toLocaleString();
-        defaultDesignName = "📈 ┃ Joined Today";
+      if (!newChannel) {
+        return interaction.editReply({ content: "❌ **Permissions Error:** Unsuccessful creating channel asset. Ensure my application roles have channel generation rights." });
       }
 
-      let activeChannelId = null;
-      let displayMessage = "";
-
-      if (targetChannel) {
-        activeChannelId = targetChannel.id;
-        displayMessage = `✅ **Premium Data Sync Completed:** Connected to channel ${targetChannel}. It will now track advanced **${type.toUpperCase()}** metrics.`;
-        
-        const customName = targetChannel.name.split("•")[0] || `${defaultDesignName} `;
-        await targetChannel.setName(`${customName}• ${currentMetricValue}`).catch(() => null);
-      } else {
-        const botDesignedName = `${defaultDesignName} • ${currentMetricValue}`;
-        
-        const newChannel = await interaction.guild.channels.create({
-          name: botDesignedName,
-          type: ChannelType.GuildVoice,
-          permissionOverwrites: [
-            {
-              id: interaction.guild.roles.everyone.id,
-              deny: [PermissionFlagsBits.Connect],
-            },
-          ],
-        }).catch(() => null);
-
-        if (!newChannel) {
-          return interaction.editReply({ content: "❌ **Permissions Error:** Unsuccessful creating channel asset. Ensure my application roles have channel generation rights." });
-        }
-
-        activeChannelId = newChannel.id;
-        displayMessage = `🛠️ **Premium Channel Deployed:** Successfully generated brand new voice asset <#${newChannel.id}> using premium design parameters. *(You can rename it inside Discord anytime, just keep the \`•\` symbol intact!)*`;
-      }
-
-      await redis.set(`stats:channel:${type}:${guildId}`, activeChannelId);
-      return interaction.editReply({ content: displayMessage });
+      activeChannelId = newChannel.id;
+      displayMessage = `🛠️ **Public Counter Deployed:** Successfully generated brand new free voice asset <#${newChannel.id}>. *(You can edit its name inside Discord anytime, just keep the \`•\` symbol intact!)*`;
     }
+
+    await redis.set(`stats:channel:${type}:${guildId}`, activeChannelId);
+    return interaction.editReply({ content: displayMessage });
   }
 };
