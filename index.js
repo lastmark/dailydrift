@@ -176,19 +176,45 @@ client.on("messageCreate", async (message) => {
   if (command === "premium") {
     if (message.author.id !== DEVELOPER_ID) return; 
 
-    const action = args[0]?.toLowerCase(); 
-    const targetUser = message.mentions.users.first() || await client.users.fetch(args[1]).catch(() => null);
+    const action = args[0]?.toLowerCase(); // "add" or "remove"
+    const type = args[1]?.toLowerCase();   // "user" or "guild"
 
-    if (!targetUser) {
-      return message.reply("❌ **Usage:** `!premium add <@user/ID> <duration>` or `!premium remove <@user/ID>`\n💡 *Durations: 1m (1 month), 3m (3 months), 1y (1 year), perm (Permanent)*");
+    if (!action || !["add", "remove"].includes(action) || !type || !["user", "guild"].includes(type)) {
+      return message.reply(
+        "❌ **Usage Commands:**\n" +
+        "🔹 `!premium add user <@user/ID> <duration>`\n" +
+        "🔹 `!premium add guild <Guild_ID> <duration>`\n" +
+        "🔹 `!premium remove user <@user/ID>`\n" +
+        "🔹 `!premium remove guild <Guild_ID>`\n\n" +
+        "💡 *Durations: 1m (1 month), 3m (3 months), 1y (1 year), perm (Permanent)*"
+      );
     }
 
-    const premiumKey = `premium:user:${targetUser.id}`;
+    let targetId = "";
+    let targetName = "";
 
+    // ─── TARGET PARSING VECTOR ───
+    if (type === "user") {
+      const targetUser = message.mentions.users.first() || await client.users.fetch(args[2]).catch(() => null);
+      if (!targetUser) return message.reply("❌ **Error:** Unable to resolve that target user or valid ID.");
+      targetId = targetUser.id;
+      targetName = targetUser.username;
+    } else if (type === "guild") {
+      const targetGuildId = args[2];
+      if (!targetGuildId) return message.reply("❌ **Error:** Please specify a valid Guild ID string.");
+      
+      const targetGuild = await client.guilds.fetch(targetGuildId).catch(() => null);
+      targetId = targetGuildId;
+      targetName = targetGuild ? targetGuild.name : `Guild ID: ${targetGuildId}`;
+    }
+
+    const premiumKey = `premium:${type}:${targetId}`;
+
+    // ─── ACTION: ADD PREMIUM ───
     if (action === "add") {
-      const durationInput = args[2]?.toLowerCase();
+      const durationInput = args[3]?.toLowerCase();
       if (!durationInput) {
-        return message.reply("❌ **Error:** Please specify a duration framework. Example: `!premium add @user 1m` (Values: `1m`, `3m`, `1y`, `perm`)");
+        return message.reply(`❌ **Error:** Please specify a duration framework. Example: \`!premium add ${type} <id> 1m\``);
       }
 
       let durationSeconds = 0;
@@ -210,21 +236,34 @@ client.on("messageCreate", async (message) => {
         return message.reply("❌ **Invalid Duration:** Use `1m`, `3m`, `1y`, or `perm`.");
       }
 
+      // Commit to Redis storage
       if (durationSeconds === -1) {
         await redis.set(premiumKey, "true");
       } else {
         await redis.setex(premiumKey, durationSeconds, "true");
       }
 
-      return message.reply(`👑 **Global Premium Activated:**\n👤 **User:** ${targetUser.username} (\`${targetUser.id}\`)\n⏳ **Duration:** \`${timeString}\``);
+      // If it's a guild, automatically initialize the high-speed anti-spam toggle
+      if (type === "guild") {
+        await redis.set(`antispam:toggle:${targetId}`, "true");
+      }
+
+      return message.reply(`👑 **Global ${type.toUpperCase()} Premium Activated:**\n🎯 **Target:** ${targetName} (\`${targetId}\`)\n⏳ **Duration:** \`${timeString}\``);
     }
 
+    // ─── ACTION: REMOVE PREMIUM ───
     if (action === "remove") {
       await redis.del(premiumKey);
-      return message.reply(`🗑️ **Global Premium Revoked:** ${targetUser.username} has been manually stripped of network premium permissions.`);
+      
+      if (type === "guild") {
+        await redis.del(`antispam:toggle:${targetId}`);
+      }
+
+      return message.reply(`🗑️ **Global ${type.toUpperCase()} Premium Revoked:** **${targetName}** has been manually stripped of premium features.`);
     }
   }
 });
+
 
 // ==========================================
 // 👑 DEVELOPER PREFERRED TEXT COMMAND ENGINE
