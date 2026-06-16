@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require("discord.js");
 const e = require("../emojis.js");
 
 module.exports = {
@@ -51,46 +51,65 @@ module.exports = {
       await logChannel.send({ embeds: [logEmbed] }).catch(() => null);
     };
 
+    // ─── ROLE HIERARCHY PROTECTION GUARD ───
+    if (["kick", "ban", "timeout"].includes(subcommand)) {
+      const targetUser = interaction.options.getUser("target");
+      const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
+
+      if (targetMember) {
+        // Prevent modifying server owner
+        if (targetUser.id === guild.ownerId) {
+          return interaction.reply({ content: `${e.error || "❌"} Target is the server owner. Execution blocked.`, flags: [MessageFlags.Ephemeral] });
+        }
+        // Prevent modifying users with higher or equal role authority
+        if (targetMember.roles.highest.position >= guild.members.me.roles.highest.position) {
+          return interaction.reply({ content: `${e.error || "❌"} Execution blocked: Target user holds equal or greater hierarchy status than the bot application.`, flags: [MessageFlags.Ephemeral] });
+        }
+      }
+    }
+
+    // ─── ACTION: KICK ───
     if (subcommand === "kick") {
       const target = interaction.options.getUser("target");
       const reason = interaction.options.getString("reason") || "No explicit reason logged.";
       const member = await guild.members.fetch(target.id).catch(() => null);
 
-      if (!member || !member.kickable) return interaction.reply({ content: `${e.error || "❌"} Unable to kick this member. Check hierarchy permissions.`, ephemeral: true });
+      if (!member || !member.kickable) return interaction.reply({ content: `${e.error || "❌"} Unable to kick this member.`, flags: [MessageFlags.Ephemeral] });
       await member.kick(reason);
       await sendModLog("KICK", e.kick, target, reason);
       return interaction.reply({ content: `${e.kick || "✅"} **${target.username}** has been kicked from the server.` });
     }
 
+    // ─── ACTION: BAN ───
     if (subcommand === "ban") {
       const target = interaction.options.getUser("target");
       const reason = interaction.options.getString("reason") || "No explicit reason logged.";
-      const member = await guild.members.fetch(target.id).catch(() => null);
-
-      if (member && !member.bannable) return interaction.reply({ content: `${e.error || "❌"} Unable to ban this member. Check hierarchy permissions.`, ephemeral: true });
       await guild.members.ban(target.id, { reason });
       await sendModLog("BAN", e.ban, target, reason);
       return interaction.reply({ content: `${e.ban || "✅"} **${target.username}** has been permanently banned.` });
     }
 
+    // ─── ACTION: TIMEOUT ───
     if (subcommand === "timeout") {
       const target = interaction.options.getUser("target");
       const minutes = interaction.options.getInteger("minutes");
       const reason = interaction.options.getString("reason") || "No explicit reason logged.";
       const member = await guild.members.fetch(target.id).catch(() => null);
 
-      if (!member) return interaction.reply({ content: `${e.error || "❌"} Target user not found in this guild context.`, ephemeral: true });
+      if (!member) return interaction.reply({ content: `${e.error || "❌"} Target user not found.`, flags: [MessageFlags.Ephemeral] });
       await member.timeout(minutes * 60 * 1000, reason);
       await sendModLog(`TIMEOUT (${minutes}m)`, e.lock, target, reason);
       return interaction.reply({ content: `${e.lock || "✅"} **${target.username}** has been timed out for ${minutes} minutes.` });
     }
 
+    // ─── ACTION: LOCK ───
     if (subcommand === "lock") {
       await interaction.channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false });
       await sendModLog("CHANNEL LOCK", e.lock, null, `Channel: ${interaction.channel.name}`);
       return interaction.reply({ content: `${e.lock || "🔒"} **Channel Locked:** Standard sending permissions frozen inside this grid.` });
     }
 
+    // ─── ACTION: UNLOCK ───
     if (subcommand === "unlock") {
       await interaction.channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: null });
       await sendModLog("CHANNEL UNLOCK", e.unban, null, `Channel: ${interaction.channel.name}`);
