@@ -10,7 +10,10 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent, 
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMembers,   // Crucial for fetching member arrays
+    GatewayIntentBits.GuildPresences,  // 🌟 REQUIRED: Allows the bot to see who is online/offline
+    GatewayIntentBits.GuildVoiceStates // Required for your voice trackers
   ],
   partials: [Partials.Channel]
 });
