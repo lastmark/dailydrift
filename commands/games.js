@@ -25,6 +25,15 @@ module.exports = {
       sub.setName("dice").setDescription("Roll a standard six-sided cubic dice vector.")
     )
     .addSubcommand(sub =>
+  sub.setName("tictactoe")
+    .setDescription("Play Tic Tac Toe against a user or the bot.")
+    .addUserOption(opt =>
+      opt.setName("opponent")
+        .setDescription("Leave empty to play against the bot")
+        .setRequired(false)
+    )
+)
+    .addSubcommand(sub =>
       sub.setName("counting").setDescription("⚙️ Set up the arithmetic counting game room (Admins Only).")
         .addChannelOption(opt => opt.setName("channel").setDescription("Target game channel").setRequired(true).addChannelTypes(ChannelType.GuildText))
     ),
