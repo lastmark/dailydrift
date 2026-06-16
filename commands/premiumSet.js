@@ -5,7 +5,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("premium-set")
     .setDescription("💎 Premium Suite: Configure advanced server matrices.")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild) // Requires Server Admin/Manager access
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("antispam")
         .setDescription("⚡ Toggle the maximum performance high-speed anti-spam protection shield.")
@@ -24,9 +24,8 @@ module.exports = {
     const guildId = interaction.guildId;
     const subcommand = interaction.options.getSubcommand();
 
-    // ─── CRITICAL SECURITY HARD GUARD: PREMIUM LICENSE CHECK ───
     const isGuildPremium = await redis.get(`premium:guild:${guildId}`);
-    if (!isGuildPremium) {
+    if (!isGuildPremium || isGuildPremium === "false") {
       const accessDeniedEmbed = new EmbedBuilder()
         .setColor("#FF3366")
         .setTitle("🔒 Premium License Required")
@@ -39,11 +38,8 @@ module.exports = {
       return interaction.reply({ embeds: [accessDeniedEmbed], flags: [MessageFlags.Ephemeral] });
     }
 
-    // ─── SUBCOMMAND: ANTI-SPAM TOGGLE ───
     if (subcommand === "antispam") {
       const statusValue = interaction.options.getString("status");
-      
-      // Update the toggle switch in Redis memory storage
       await redis.set(`antispam:toggle:${guildId}`, statusValue);
 
       const isEnabled = statusValue === "true";
