@@ -1,105 +1,164 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
+const { 
+  SlashCommandBuilder, 
+  EmbedBuilder, 
+  ChannelType, 
+  PermissionFlagsBits, 
+  ActionRowBuilder, 
+  ButtonBuilder, 
+  ButtonStyle,
+  ComponentType
+} = require("discord.js");
 const e = require("../emojis.js");
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName("mod")
-    .setDescription("🛡️ Core server moderation control systems.")
-    .setDefaultMemberPermissions(
-      PermissionFlagsBits.ModerateMembers | 
-      PermissionFlagsBits.KickMembers | 
-      PermissionFlagsBits.BanMembers
+    .setName("game")
+    .setDescription("🪙 Play mini-games with interactive button panels.")
+    .addSubcommand(sub =>
+      sub.setName("rps").setDescription("Challenge the bot to an interactive Rock, Paper, Scissors match.")
     )
     .addSubcommand(sub =>
-      sub.setName("kick").setDescription("Kick a disruptive member from the guild.")
-        .addUserOption(opt => opt.setName("target").setDescription("Select user").setRequired(true))
-        .addStringOption(opt => opt.setName("reason").setDescription("Reason for kick").setRequired(false))
+      sub.setName("coinflip").setDescription("Flip a currency token using buttons.")
     )
     .addSubcommand(sub =>
-      sub.setName("ban").setDescription("Permanently ban a member from the guild.")
-        .addUserOption(opt => opt.setName("target").setDescription("Select user").setRequired(true))
-        .addStringOption(opt => opt.setName("reason").setDescription("Reason for ban").setRequired(false))
+      sub.setName("dice").setDescription("Roll a standard six-sided cubic dice vector.")
     )
     .addSubcommand(sub =>
-      sub.setName("timeout").setDescription("Place a member in a temporary timeout state.")
-        .addUserOption(opt => opt.setName("target").setDescription("Select user").setRequired(true))
-        .addIntegerOption(opt => opt.setName("minutes").setDescription("Duration in minutes").setRequired(true))
-        .addStringOption(opt => opt.setName("reason").setDescription("Reason for timeout").setRequired(false))
-    )
-    .addSubcommand(sub =>
-      sub.setName("lock").setDescription("Lock down the current text channel room.")
-    )
-    .addSubcommand(sub =>
-      sub.setName("unlock").setDescription("Restore standard talking permissions to the current channel room.")
+      sub.setName("counting").setDescription("⚙️ Set up the arithmetic counting game room (Admins Only).")
+        .addChannelOption(opt => opt.setName("channel").setDescription("Target game channel").setRequired(true).addChannelTypes(ChannelType.GuildText))
     ),
 
   async execute(interaction, client, redis) {
     const subcommand = interaction.options.getSubcommand();
-    const guild = interaction.guild;
-    
-    const sendModLog = async (action, icon, targetUser, reason) => {
-      const logChannelId = await redis.get(`modlog_channel:${guild.id}`);
-      if (!logChannelId) return;
-      const logChannel = await guild.channels.fetch(logChannelId).catch(() => null);
-      if (!logChannel) return;
 
-      const logEmbed = new EmbedBuilder()
-        .setColor("#FF0000")
-        .setAuthor({ name: "Security Audit Log", iconURL: targetUser?.displayAvatarURL() || guild.iconURL() })
-        .setDescription(`${icon} **Action:** ${action}\n${e.profile || "👤"} **Target:** ${targetUser ? `${targetUser.username} (\`${targetUser.id}\`)` : "Channel Matrix"}\n${e.info || "ℹ️"} **Moderator:** ${interaction.user.username}\n📝 **Reason:** ${reason || "None specified"}`)
-        .setTimestamp();
-      await logChannel.send({ embeds: [logEmbed] }).catch(() => null);
-    };
+    // ─── MINI-GAME: ROCK, PAPER, SCISSORS (RPS) ───
+    if (subcommand === "rps") {
+      const initialEmbed = new EmbedBuilder()
+        .setColor("#2B2D31")
+        .setAuthor({ name: "Rock, Paper, Scissors Duel", iconURL: client.user.displayAvatarURL() })
+        .setDescription(`${e.games || "🎮"} Select your choice weapon using the control grid below to match against the bot.`);
 
-    // ─── ACTION: KICK ───
-    if (subcommand === "kick") {
-      const target = interaction.options.getUser("target");
-      const reason = interaction.options.getString("reason") || "No explicit reason logged.";
-      const member = await guild.members.fetch(target.id).catch(() => null);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("rps_rock").setLabel("Rock").setEmoji(e.rock || "🪨").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("rps_paper").setLabel("Paper").setEmoji(e.paper || "📄").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("rps_scissors").setLabel("Scissors").setEmoji(e.scissors || "✂️").setStyle(ButtonStyle.Danger)
+      );
 
-      if (!member || !member.kickable) return interaction.reply({ content: `${e.error || "❌"} Unable to kick this member. Check hierarchy permissions.`, ephemeral: true });
-      await member.kick(reason);
-      await sendModLog("KICK", e.kick, target, reason);
-      return interaction.reply({ content: `${e.kick || "✅"} **${target.username}** has been kicked from the server.` });
+      const response = await interaction.reply({ embeds: [initialEmbed], components: [row], fetchReply: true });
+      const collector = response.createMessageComponentCollector({ componentType: ComponentType.Button, time: 30000 });
+
+      collector.on("collect", async (i) => {
+        if (i.user.id !== interaction.user.id) {
+          return await i.reply({ content: `${e.error || "❌"} This is not your match. Start your own duel using '/game rps'.`, ephemeral: true });
+        }
+
+        const userChoice = i.customId.split("_")[1];
+        const botOptions = ["rock", "paper", "scissors"];
+        const botChoice = botOptions[Math.floor(Math.random() * botOptions.length)];
+
+        let finalResult = "";
+        let finalIcon = e.info;
+        if (userChoice === botChoice) finalResult = "It's a complete structural draw! 🤝";
+        else if (
+          (userChoice === "rock" && botChoice === "scissors") ||
+          (userChoice === "paper" && botChoice === "rock") ||
+          (userChoice === "scissors" && botChoice === "paper")
+        ) {
+          finalResult = "🏆 **You win!** You systematically dismantled my selection.";
+          finalIcon = e.check;
+        } else {
+          finalResult = "🤖 **Bot wins!** Better luck next time, bro.";
+          finalIcon = e.error;
+        }
+
+        const updateEmbed = new EmbedBuilder()
+          .setColor("#2B2D31")
+          .setAuthor({ name: "Match Terminated", iconURL: i.user.displayAvatarURL() })
+          .setDescription(`${finalIcon || "🎯"} **Result:** ${finalResult}\n\n• **Your Play:** ${e[userChoice] || ""} \`${userChoice.toUpperCase()}\`\n• **Bot's Play:** ${e[botChoice] || ""} \`${botChoice.toUpperCase()}\``);
+
+        const disabledRow = new ActionRowBuilder().addComponents(row.components.map(btn => ButtonBuilder.from(btn).setDisabled(true)));
+        await i.update({ embeds: [updateEmbed], components: [disabledRow] });
+        collector.stop();
+      });
+
+      collector.on("end", async (collected, reason) => {
+        if (reason === "time") {
+          const timedOutRow = new ActionRowBuilder().addComponents(row.components.map(btn => ButtonBuilder.from(btn).setDisabled(true)));
+          await interaction.editReply({ content: `${e.error || "⏳"} Duel expired due to inactivity.`, components: [timedOutRow] }).catch(() => null);
+        }
+      });
     }
 
-    // ─── ACTION: BAN ───
-    if (subcommand === "ban") {
-      const target = interaction.options.getUser("target");
-      const reason = interaction.options.getString("reason") || "No explicit reason logged.";
-      const member = await guild.members.fetch(target.id).catch(() => null);
+    // ─── MINI-GAME: COINFLIP ───
+    if (subcommand === "coinflip") {
+      const executeFlip = () => Math.random() > 0.5 ? "HEADS" : "TAILS";
 
-      if (member && !member.bannable) return interaction.reply({ content: `${e.error || "❌"} Unable to ban this member. Check hierarchy permissions.`, ephemeral: true });
-      await guild.members.ban(target.id, { reason });
-      await sendModLog("BAN", e.ban, target, reason);
-      return interaction.reply({ content: `${e.ban || "✅"} **${target.username}** has been permanently banned.` });
+      const flipEmbed = new EmbedBuilder()
+        .setColor("#2B2D31")
+        .setDescription(`${e.money || "🪙"} The token spins through the air and lands squarely on: **${executeFlip()}**`);
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("flip_again").setLabel("Flip Again").setEmoji(e.money || "🪙").setStyle(ButtonStyle.Secondary)
+      );
+
+      const response = await interaction.reply({ embeds: [flipEmbed], components: [row], fetchReply: true });
+      const collector = response.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
+
+      collector.on("collect", async (i) => {
+        if (i.user.id !== interaction.user.id) return await i.reply({ content: `${e.error || "❌"} Run \`/game coinflip\` to spin your own coin.`, ephemeral: true });
+
+        const newFlipEmbed = new EmbedBuilder()
+          .setColor("#2B2D31")
+          .setDescription(`${e.money || "🪙"} The token spins through the air and lands squarely on: **${executeFlip()}**`);
+
+        await i.update({ embeds: [newFlipEmbed] });
+      });
+
+      collector.on("end", async () => {
+        const offRow = new ActionRowBuilder().addComponents(ButtonBuilder.from(row.components[0]).setDisabled(true));
+        await interaction.editReply({ components: [offRow] }).catch(() => null);
+      });
     }
 
-    // ─── ACTION: TIMEOUT ───
-    if (subcommand === "timeout") {
-      const target = interaction.options.getUser("target");
-      const minutes = interaction.options.getInteger("minutes");
-      const reason = interaction.options.getString("reason") || "No explicit reason logged.";
-      const member = await guild.members.fetch(target.id).catch(() => null);
+    // ─── MINI-GAME: DICE ROLL ───
+    if (subcommand === "dice") {
+      const executeRoll = () => Math.floor(Math.random() * 6) + 1;
 
-      if (!member) return interaction.reply({ content: `${e.error || "❌"} Target user not found in this guild context.`, ephemeral: true });
-      await member.timeout(minutes * 60 * 1000, reason);
-      await sendModLog(`TIMEOUT (${minutes}m)`, e.lock, target, reason);
-      return interaction.reply({ content: `${e.lock || "✅"} **${target.username}** has been timed out for ${minutes} minutes.` });
+      const diceEmbed = new EmbedBuilder()
+        .setColor("#2B2D31")
+        .setDescription(`${e.games || "🎲"} You cast the cubic dice and rolled a solid: **[ ${executeRoll()} ]**`);
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("roll_again").setLabel("Roll Again").setEmoji("🎲").setStyle(ButtonStyle.Secondary)
+      );
+
+      const response = await interaction.reply({ embeds: [diceEmbed], components: [row], fetchReply: true });
+      const collector = response.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
+
+      collector.on("collect", async (i) => {
+        if (i.user.id !== interaction.user.id) return await i.reply({ content: `${e.error || "❌"} Run \`/game dice\` to cast your own die.`, ephemeral: true });
+
+        const newDiceEmbed = new EmbedBuilder()
+          .setColor("#2B2D31")
+          .setDescription(`${e.games || "🎲"} You cast the cubic dice and rolled a solid: **[ ${executeRoll()} ]**`);
+
+        await i.update({ embeds: [newDiceEmbed] });
+      });
+
+      collector.on("end", async () => {
+        const offRow = new ActionRowBuilder().addComponents(ButtonBuilder.from(row.components[0]).setDisabled(true));
+        await interaction.editReply({ components: [offRow] }).catch(() => null);
+      });
     }
 
-    // ─── ACTION: LOCK ───
-    if (subcommand === "lock") {
-      await interaction.channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: false });
-      await sendModLog("CHANNEL LOCK", e.lock, null, `Channel: ${interaction.channel.name}`);
-      return interaction.reply({ content: `${e.lock || "🔒"} **Channel Locked:** Standard sending permissions frozen inside this grid.` });
-    }
-
-    // ─── ACTION: UNLOCK ───
-    if (subcommand === "unlock") {
-      await interaction.channel.permissionOverwrites.edit(guild.roles.everyone, { SendMessages: null });
-      await sendModLog("CHANNEL UNLOCK", e.unban, null, `Channel: ${interaction.channel.name}`);
-      return interaction.reply({ content: `${e.unban || "🔓"} **Channel Unlocked:** Standard communication lines restored.` });
+    // ─── CONFIG: COUNTING SETUP ───
+    if (subcommand === "counting") {
+      if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({ content: `${e.error || "❌"} **Access Denied:** You need \`Manage Server\` permissions to set up gaming modules.`, ephemeral: true });
+      }
+      const channel = interaction.options.getChannel("channel");
+      await redis.set(`counting_channel:${interaction.guild.id}`, channel.id);
+      return interaction.reply({ content: `${e.check || "✅"} ${e.counting || "🪙"} **Counting Game Active:** The counting stream has been locked onto channel ${channel}.` });
     }
   }
 };
