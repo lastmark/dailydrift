@@ -178,7 +178,6 @@ client.on("messageCreate", async (message) => {
     const action = args[0]?.toLowerCase(); // "add" or "remove"
     const type = args[1]?.toLowerCase();   // "user" or "guild"
 
-    // Verify layout matrix structure
     if (!action || !["add", "remove"].includes(action) || !type || !["user", "guild"].includes(type)) {
       return message.reply(
         "❌ **Usage Commands:**\n" +
@@ -194,19 +193,26 @@ client.on("messageCreate", async (message) => {
     let targetName = "";
     let dmTarget = null;
 
-    // ─── ALIGNED ARGS TARGETS (args[2] is the User/Guild identifier) ───
+    // Clean raw argument strings to strip out Discord mention tags (<@!ID>)
+    const rawTargetInput = args[2];
+    if (!rawTargetInput) return message.reply(`❌ **Error:** Please specify a target ${type} string identifier.`);
+    
+    // Pure numeric extraction regex
+    const cleanId = rawTargetInput.replace(/[<@!&>]/g, "");
+
+    // ─── TARGET PROCESSING ───
     if (type === "user") {
-      const targetUser = message.mentions.users.first() || await client.users.fetch(args[2]).catch(() => null);
-      if (!targetUser) return message.reply("❌ **Error:** Unable to resolve that target user or valid user ID string.");
+      // Direct resolution fallback from cache or network fetch via pure ID string
+      const targetUser = await client.users.fetch(cleanId).catch(() => null);
+      if (!targetUser) return message.reply("❌ **Error:** Unable to resolve that user target. Make sure the ID or mention is valid.");
+      
       targetId = targetUser.id;
       targetName = targetUser.username;
       dmTarget = targetUser; 
     } else if (type === "guild") {
-      const targetGuildId = args[2];
-      if (!targetGuildId) return message.reply("❌ **Error:** Please specify a valid Guild ID string.");
-      const targetGuild = await client.guilds.fetch(targetGuildId).catch(() => null);
-      targetId = targetGuildId;
-      targetName = targetGuild ? targetGuild.name : `Guild ID: ${targetGuildId}`;
+      const targetGuild = await client.guilds.fetch(cleanId).catch(() => null);
+      targetId = cleanId;
+      targetName = targetGuild ? targetGuild.name : `Guild ID: ${cleanId}`;
       
       if (targetGuild) {
         dmTarget = await client.users.fetch(targetGuild.ownerId).catch(() => null); 
@@ -217,8 +223,8 @@ client.on("messageCreate", async (message) => {
 
     // ─── ACTION: ADD PREMIUM ───
     if (action === "add") {
-      const durationInput = args[3]?.toLowerCase(); // Duration shifts to args[3]
-      if (!durationInput) return message.reply(`❌ **Error:** Please specify a duration framework. Example: \`!premium add ${type} ${targetId} 1m\``);
+      const durationInput = args[3]?.toLowerCase(); 
+      if (!durationInput) return message.reply(`❌ **Error:** Please specify a duration. Example: \`!premium add ${type} ${rawTargetInput} 1m\``);
 
       let durationSeconds = 0;
       let timeString = "";
@@ -239,7 +245,7 @@ client.on("messageCreate", async (message) => {
         return message.reply("❌ **Invalid Duration:** Use `1m`, `3m`, `1y`, or `perm`.");
       }
 
-      // Save configurations to storage cache
+      // Commit values to Redis
       if (durationSeconds === -1) {
         await redis.set(premiumKey, "perm");
       } else {
@@ -250,22 +256,22 @@ client.on("messageCreate", async (message) => {
         await redis.set(`antispam:toggle:${targetId}`, "true");
       }
 
-      // ─── STEP A: DISPATCH DIRECT MESSAGE EMBED ───
+      // ─── STEP A: DISPATCH DM ALERT EMBED ───
       let dmSentStatus = "";
       if (dmTarget) {
+        const { EmbedBuilder } = require("discord.js");
         const premiumDmEmbed = new EmbedBuilder()
           .setColor("#00FFAC")
-          .setAuthor({ name: "Premium License Activated Successfully", iconURL: client.user.displayAvatarURL() })
           .setTitle(type === "user" ? "💎 Your Personal Premium is Live!" : "🏢 Server Guild Premium Activated!")
           .setDescription(
-            `Thank you for your purchase, bro! Your payment has been completely verified, and your premium capabilities have been activated.\n\n` +
+            `Thank you for your purchase, bro! Your payment has been verified and your premium features are unlocked.\n\n` +
             `📦 **Subscription Plan Details:**\n` +
             `• **License Type:** \`${type.toUpperCase()} Tier\`\n` +
             `• **Assigned To:** **${targetName}** (\`${targetId}\`)\n` +
             `• **Time Frame:** \`${timeString}\`\n\n` +
             `${type === "guild" 
-              ? "⚡ **What's Next?** Your server now has full access to the ultra-fast, high-speed Anti-Spam protection engine! Use `/premium-set` inside your server to manage your features." 
-              : "✨ **What's Next?** Your personal global profile assets have been unlocked successfully across the network!"}`
+              ? "⚡ **What's Next?** Your server now has full access to the high-speed Anti-Spam protection engine! Use `/premium-set` to manage it." 
+              : "✨ **What's Next?** Your personal premium profile features have been unlocked across the entire network!"}`
           )
           .setFooter({ text: "Thank you for supporting the application development core!" })
           .setTimestamp();
@@ -274,7 +280,7 @@ client.on("messageCreate", async (message) => {
         dmSentStatus = dmSuccess ? "\n📥 **DM Alert:** Dispatched confirmation directly to client." : "\n⚠️ **DM Alert:** Failed to message client (DMs closed).";
       }
 
-      // ─── STEP B: SEND RESPONSE TO THE CHAT CHANNEL ───
+      // ─── STEP B: DISPATCH PUBLIC CHANNEL RESPONSE ───
       return message.reply(`👑 **Global ${type.toUpperCase()} Premium Activated:**\n🎯 **Target:** ${targetName} (\`${targetId}\`)\n⏳ **Duration:** \`${timeString}\`${dmSentStatus}`);
     }
 
@@ -284,10 +290,10 @@ client.on("messageCreate", async (message) => {
       if (type === "guild") await redis.del(`antispam:toggle:${targetId}`);
       
       if (dmTarget) {
+        const { EmbedBuilder } = require("discord.js");
         const expireDmEmbed = new EmbedBuilder()
           .setColor("#FF3366")
-          .setAuthor({ name: "Subscription License Terminated", iconURL: client.user.displayAvatarURL() })
-          .setDescription(`🔴 Your Premium subscription tier for **${targetName}** has officially ended or been manually removed by the developer.\n\nIf you believe this was an error or you would like to renew your allocation stream, contact the bot developer.`);
+          .setDescription(`🔴 Your Premium subscription tier for **${targetName}** has officially ended or been manually removed by the developer.`);
         
         await dmTarget.send({ embeds: [expireDmEmbed] }).catch(() => null);
       }
@@ -297,53 +303,6 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-// ==========================================
-// 👑 DEVELOPER PREFERRED TEXT COMMAND ENGINE
-// ==========================================
-client.on("messageCreate", async (message) => {
-  const prefix = "!"; 
-  if (!message.content.startsWith(prefix) || message.author.bot) return;
-
-  const args = message.content.slice(prefix.length).trim().split(/ +/);
-  const command = args.shift().toLowerCase();
-
-  if (command === "shield") {
-    const subcommand = args[0]?.toLowerCase();
-
-    if (subcommand === "send") {
-      const DEVELOPER_ID = "1303357369622990889"; 
-
-      if (message.author.id !== DEVELOPER_ID) return; 
-
-      const targetUser = message.mentions.users.first() || await client.users.fetch(args[1]).catch(() => null);
-      
-      if (!targetUser) {
-        return message.reply("❌ **Usage Error:** You must mention a user or provide a valid user ID. \n`!shield send <@user> [amount]`");
-      }
-
-      let amount = parseInt(args[2]) || 1;
-      if (amount <= 0) return message.reply("❌ **Error:** You must transfer a valid amount of at least 1 shield.");
-
-      const guildId = message.guild.id;
-      const targetKey = `eco:${guildId}:${targetUser.id}:shield`;
-      const newTotal = await redis.incrby(targetKey, amount);
-
-      const { EmbedBuilder } = require("discord.js");
-      const transferEmbed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setAuthor({ name: "System Administrator Override", iconURL: client.user.displayAvatarURL() })
-        .setDescription(`Successfully bypassed economy infrastructure to inject assets directly into the target profile layer.`)
-        .addFields(
-          { name: "🎁 Recipient", value: `<@${targetUser.id}>`, inline: true },
-          { name: "🛡️ Shields Transferred", value: `\`+${amount}\` units`, inline: true },
-          { name: "📊 Current Inventory Balance", value: `\`${newTotal}\` active shields`, inline: false }
-        )
-        .setTimestamp();
-
-      return message.reply({ embeds: [transferEmbed] });
-    }
-  }
-});
 
 // ==========================================
 // 🖼️ GUILD MEMBER ENGAGEMENT CANVAS FLOWS
