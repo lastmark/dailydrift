@@ -3,7 +3,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ChannelType, Mes
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("premium-set")
-    .setDescription("💎 Premium Suite: Configure advanced server matrices.")
+    .setDescription("💎 Premium Suite: Configure advanced premium metrics and server protections.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("antispam")
@@ -20,16 +20,20 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("setup-stats")
-        .setDescription("📊 Setup live tracker channels (Select an existing channel OR create a new one).")
+        .setDescription("📊 Deploy premium analytics live tracker panels.")
+        .addStringOption(opt =>
+          opt.setName("type")
+            .setDescription("Select the advanced tracking metric type.")
+            .setRequired(true)
+            .addChoices(
+              { name: "🎙️ Peoples in Voices", value: "voice" },
+              { name: "📈 Members Joined Today", value: "today" }
+            )
+        )
         .addChannelOption(opt => 
           opt.setName("target_channel")
-            .setDescription("Option A: Choose an existing voice channel to convert into the counter.")
+            .setDescription("Connect to an existing voice channel (Leave empty to let bot auto-create one).")
             .addChannelTypes(ChannelType.GuildVoice)
-            .setRequired(false)
-        )
-        .addStringOption(opt => 
-          opt.setName("create_prefix")
-            .setDescription("Option B: Type a naming prefix to create a brand new channel (e.g., 👥 ┃ Members).")
             .setRequired(false)
         )
     ),
@@ -38,6 +42,7 @@ module.exports = {
     const guildId = interaction.guildId;
     const subcommand = interaction.options.getSubcommand();
 
+    // Strict premium verification checking gate right at the entrypoint
     const isGuildPremium = await redis.get(`premium:guild:${guildId}`);
     if (!isGuildPremium || isGuildPremium === "false") {
       const accessDeniedEmbed = new EmbedBuilder()
@@ -62,58 +67,61 @@ module.exports = {
     }
 
     // ==========================================
-    // 📊 SUBCOMMAND: SETUP STATS
+    // 📊 SUBCOMMAND: SETUP STATS (PREMIUM MODULES)
     // ==========================================
     if (subcommand === "setup-stats") {
       await interaction.deferReply();
 
+      const type = interaction.options.getString("type");
       const targetChannel = interaction.options.getChannel("target_channel");
-      const createPrefix = interaction.options.getString("create_prefix");
-      const currentCount = interaction.guild.memberCount.toLocaleString();
+
+      let currentMetricValue = "0";
+      let defaultDesignName = "";
+
+      if (type === "voice") {
+        const voiceChannels = interaction.guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice);
+        let voiceCount = 0;
+        voiceChannels.forEach(ch => voiceCount += ch.members.size);
+        currentMetricValue = voiceCount.toLocaleString();
+        defaultDesignName = "🎙️ ┃ In Voices";
+      } else if (type === "today") {
+        const joinedTodayCount = await redis.get(`stats:joinedtoday:${guildId}`) || "0";
+        currentMetricValue = parseInt(joinedTodayCount).toLocaleString();
+        defaultDesignName = "📈 ┃ Joined Today";
+      }
 
       let activeChannelId = null;
       let displayMessage = "";
 
-      // Fallback logic if user provided absolutely no choices
-      if (!targetChannel && !createPrefix) {
-        return interaction.editReply({ 
-          content: "❌ **Configuration Error:** You must provide at least one option! Either select a `target_channel` or define a `create_prefix`." 
-        });
-      }
-
-      // 🔄 CASE 1: User chose an existing voice channel
       if (targetChannel) {
         activeChannelId = targetChannel.id;
-        displayMessage = `✅ **Data Sync Completed:** Connected to existing channel ${targetChannel}. It will now log real-time counts.`;
+        displayMessage = `✅ **Premium Data Sync Completed:** Connected to channel ${targetChannel}. It will now track advanced **${type.toUpperCase()}** metrics.`;
         
-        // Instant initialization rename
-        await targetChannel.setName(`✨ ┃ Members • ${currentCount}`).catch(() => null);
-      } 
-      // 🛠️ CASE 2: User wants the bot to auto-create a brand new channel
-      else if (createPrefix) {
-        const cleanName = `${createPrefix} • ${currentCount}`;
+        const customName = targetChannel.name.split("•")[0] || `${defaultDesignName} `;
+        await targetChannel.setName(`${customName}• ${currentMetricValue}`).catch(() => null);
+      } else {
+        const botDesignedName = `${defaultDesignName} • ${currentMetricValue}`;
         
         const newChannel = await interaction.guild.channels.create({
-          name: cleanName,
+          name: botDesignedName,
           type: ChannelType.GuildVoice,
           permissionOverwrites: [
             {
               id: interaction.guild.roles.everyone.id,
-              deny: [PermissionFlagsBits.Connect], // Keep it locked so users treat it like an aesthetic status board
+              deny: [PermissionFlagsBits.Connect],
             },
           ],
         }).catch(() => null);
 
         if (!newChannel) {
-          return interaction.editReply({ content: "❌ **Permissions Error:** Unsuccessful creating a voice channel asset. Ensure my application roles have channel generation rights." });
+          return interaction.editReply({ content: "❌ **Permissions Error:** Unsuccessful creating channel asset. Ensure my application roles have channel generation rights." });
         }
 
         activeChannelId = newChannel.id;
-        displayMessage = `🛠️ **Dynamic Channel Deployed:** Successfully generated brand new voice asset <#${newChannel.id}> with template formatting structure hooks!`;
+        displayMessage = `🛠️ **Premium Channel Deployed:** Successfully generated brand new voice asset <#${newChannel.id}> using premium design parameters. *(You can rename it inside Discord anytime, just keep the \`•\` symbol intact!)*`;
       }
 
-      // Save whichever channel ID was activated straight into the Redis memory core
-      await redis.set(`stats:channel:members:${guildId}`, activeChannelId);
+      await redis.set(`stats:channel:${type}:${guildId}`, activeChannelId);
       return interaction.editReply({ content: displayMessage });
     }
   }
