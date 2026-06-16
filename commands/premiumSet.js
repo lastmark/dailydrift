@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require("discord.js");
-const e = require("../emojis.js");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -8,7 +7,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("antispam")
-        .setDescription("⚡ Toggle the maximum performance high-speed anti-spam protection shield.")
+        .setDescription("⚡ Toggle high-speed anti-spam protection shield.")
         .addStringOption(opt =>
           opt.setName("status")
             .setDescription("Turn the protection stream ON or OFF")
@@ -18,6 +17,11 @@ module.exports = {
               { name: "Disabled (Unprotected Stream)", value: "false" }
             )
         )
+    )
+    .addSubcommand(sub =>
+      sub.setName("setup-stats")
+        .setDescription("📊 Deploy dynamic live server statistics tracker channels.")
+        .addChannelOption(opt => opt.setName("voice_channel").setDescription("Select channel to turn into a counter").setRequired(true))
     ),
 
   async execute(interaction, client, redis) {
@@ -29,12 +33,7 @@ module.exports = {
       const accessDeniedEmbed = new EmbedBuilder()
         .setColor("#FF3366")
         .setTitle("🔒 Premium License Required")
-        .setDescription(
-          `This system configuration utility belongs exclusively to **Premium Tier Guilds**.\n\n` +
-          `💰 **Unlock Access:** Contact the application developer to activate a high-performance premium license subscription for this server.`
-        )
-        .setFooter({ text: "Maximum Performance Streams • Security Core" });
-
+        .setDescription("This system configuration utility belongs exclusively to **Premium Tier Guilds**.\n\n💰 Contact the application developer to activate a premium subscription.");
       return interaction.reply({ embeds: [accessDeniedEmbed], flags: [MessageFlags.Ephemeral] });
     }
 
@@ -45,14 +44,14 @@ module.exports = {
       const isEnabled = statusValue === "true";
       const configEmbed = new EmbedBuilder()
         .setColor(isEnabled ? "#00FFAC" : "#FF3366")
-        .setDescription(
-          `${isEnabled ? (e.check || "✅") : (e.error || "❌")} **Anti-Spam State Updated:**\n` +
-          `• **System Status:** ${isEnabled ? "🟢 **MAXIMUM ACTIVE SHIELDING**" : "🔴 **INACTIVE / BYPASSED**"}\n` +
-          `• **Tracking Engine:** Sliding-Window Rate Limiter (Redis Vector)`
-        )
-        .setTimestamp();
-
+        .setDescription(`**Anti-Spam State Updated:**\n• **System Status:** ${isEnabled ? "🟢 **MAXIMUM ACTIVE SHIELDING**" : "🔴 **INACTIVE**"}`);
       return interaction.reply({ embeds: [configEmbed] });
+    }
+
+    if (subcommand === "setup-stats") {
+      const targetChannel = interaction.options.getChannel("voice_channel");
+      await redis.set(`stats:channel:members:${guildId}`, targetChannel.id);
+      return interaction.reply({ content: `✅ **Data Sync Completed:** Channel ${targetChannel} will now display real-time cinematic count logs.` });
     }
   }
 };
