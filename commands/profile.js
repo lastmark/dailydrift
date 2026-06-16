@@ -99,21 +99,23 @@ module.exports = {
       // ⏳ Fetch Premium Status & Expiration Time remaining
       const premiumKey = `premium:user:${targetUser.id}`;
       const isPremiumUser = await redis.get(premiumKey);
-      const ttlSeconds = await redis.ttl(premiumKey); // Returns remaining seconds, -1 if permanent, -2 if missing
+      const ttlSeconds = await redis.ttl(premiumKey); 
 
       let premiumStatusText = null;
       if (isDev) {
         premiumStatusText = "👑 CORE DEVELOPER";
+      } else if (isPremiumUser === "perm") {
+        premiumStatusText = "✨ PREMIUM (Lifetime)";
       } else if (isPremiumUser) {
-        if (ttlSeconds === -1) {
-          premiumStatusText = "✨ PREMIUM (Lifetime)";
-        } else if (ttlSeconds > 0) {
+        if (ttlSeconds > 0) {
           const daysLeft = Math.ceil(ttlSeconds / (24 * 60 * 60));
           premiumStatusText = `✨ PREMIUM (${daysLeft} Days Left)`;
+        } else {
+          premiumStatusText = "✨ PREMIUM (Active)";
         }
       }
 
-      // Initialize Canvas
+      // Initialize Canvas Sizing
       const canvas = createCanvas(800, 300);
       const ctx = canvas.getContext("2d");
 
@@ -136,9 +138,9 @@ module.exports = {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // Card Highlight Colors (Gold frame for Premium Users, Neon Cyan for Dev, Purple for Normal)
-      let themeColor = "#5865F2"; // Default Blurple
-      if (isDev) themeColor = "#00FFFF"; // Developer Cyan
-      else if (isPremiumUser) themeColor = "#FFD700"; // Premium Gold
+      let themeColor = "#5865F2"; 
+      if (isDev) themeColor = "#00FFFF"; 
+      else if (isPremiumUser) themeColor = "#FFD700"; 
 
       ctx.strokeStyle = themeColor;
       ctx.lineWidth = 8;
@@ -172,6 +174,11 @@ module.exports = {
         ctx.fillText("👑 [DEV]", nameX, nameY);
         ctx.fillStyle = "#ffffff";
         ctx.fillText(targetUser.username, nameX + 155, nameY);
+      } else if (isPremiumUser) {
+        ctx.fillStyle = "#FFD700";
+        ctx.fillText("👑", nameX, nameY);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(targetUser.username, nameX + 45, nameY);
       } else {
         ctx.fillText(targetUser.username, nameX, nameY);
       }
