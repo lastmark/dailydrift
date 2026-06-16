@@ -21,6 +21,11 @@ module.exports = {
         .addStringOption(opt => opt.setName("reason").setDescription("Reason for ban").setRequired(false))
     )
     .addSubcommand(sub =>
+      sub.setName("unban").setDescription("Revoke a user's ban sentence via User ID.")
+        .addStringOption(opt => opt.setName("id").setDescription("The unique Discord ID of the user to unban").setRequired(true))
+        .addStringOption(opt => opt.setName("reason").setDescription("Reason for unban").setRequired(false))
+    )
+    .addSubcommand(sub =>
       sub.setName("timeout").setDescription("Place a member in a temporary timeout state.")
         .addUserOption(opt => opt.setName("target").setDescription("Select user").setRequired(true))
         .addIntegerOption(opt => opt.setName("minutes").setDescription("Duration in minutes").setRequired(true))
@@ -45,8 +50,8 @@ module.exports = {
 
       const logEmbed = new EmbedBuilder()
         .setColor("#FF0000")
-        .setAuthor({ name: "Security Audit Log", iconURL: targetUser?.displayAvatarURL() || guild.iconURL() })
-        .setDescription(`${icon} **Action:** ${action}\n${e.profile || "👤"} **Target:** ${targetUser ? `${targetUser.username} (\`${targetUser.id}\`)` : "Channel Matrix"}\n${e.info || "ℹ️"} **Moderator:** ${interaction.user.username}\n📝 **Reason:** ${reason || "None specified"}`)
+        .setAuthor({ name: "Security Audit Log", iconURL: targetUser?.displayAvatarURL || guild.iconURL() })
+        .setDescription(`${icon} **Action:** ${action}\n${e.profile || "👤"} **Target:** ${targetUser ? `${targetUser.username || targetUser} (\`${targetUser.id || targetUser}\`)` : "Channel Matrix"}\n${e.info || "ℹ️"} **Moderator:** ${interaction.user.username}\n📝 **Reason:** ${reason || "None specified"}`)
         .setTimestamp();
       await logChannel.send({ embeds: [logEmbed] }).catch(() => null);
     };
@@ -57,11 +62,9 @@ module.exports = {
       const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
 
       if (targetMember) {
-        // Prevent modifying server owner
         if (targetUser.id === guild.ownerId) {
           return interaction.reply({ content: `${e.error || "❌"} Target is the server owner. Execution blocked.`, flags: [MessageFlags.Ephemeral] });
         }
-        // Prevent modifying users with higher or equal role authority
         if (targetMember.roles.highest.position >= guild.members.me.roles.highest.position) {
           return interaction.reply({ content: `${e.error || "❌"} Execution blocked: Target user holds equal or greater hierarchy status than the bot application.`, flags: [MessageFlags.Ephemeral] });
         }
@@ -87,6 +90,25 @@ module.exports = {
       await guild.members.ban(target.id, { reason });
       await sendModLog("BAN", e.ban, target, reason);
       return interaction.reply({ content: `${e.ban || "✅"} **${target.username}** has been permanently banned.` });
+    }
+
+    // ─── ACTION: UNBAN ───
+    if (subcommand === "unban") {
+      const targetId = interaction.options.getString("id");
+      const reason = interaction.options.getString("reason") || "No explicit reason logged.";
+
+      const banList = await guild.bans.fetch().catch(() => null);
+      if (banList && !banList.has(targetId)) {
+        return interaction.reply({ content: `${e.error || "❌"} This user ID does not have an active ban entry on this guild.`, flags: [MessageFlags.Ephemeral] });
+      }
+
+      const unbannedUser = await guild.members.unban(targetId, reason).catch(() => null);
+      if (!unbannedUser) {
+        return interaction.reply({ content: `${e.error || "❌"} Failed to lift ban. Confirm that the ID format is correct.`, flags: [MessageFlags.Ephemeral] });
+      }
+
+      await sendModLog("UNBAN", e.unban, unbannedUser, reason);
+      return interaction.reply({ content: `${e.unban || "✅"} Ban lifted safely for user: **${unbannedUser.username || targetId}**.` });
     }
 
     // ─── ACTION: TIMEOUT ───
