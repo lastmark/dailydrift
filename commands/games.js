@@ -1,4 +1,4 @@
-// commands/games.js - COMPLETE WORKING VERSION
+// commands/games.js - CLEAN VERSION WITHOUT SUIT EMOJIS
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 
 // =========================
@@ -14,8 +14,8 @@ class BlackjackGame {
     this.result = null;
     this.balance = 0;
     
-    // Card setup
-    this.suits = ['♠️', '♥️', '♦️', '♣️'];
+    // Card setup - NO EMOJIS
+    this.suits = ['S', 'H', 'D', 'C'];
     this.values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
     this.deck = this.createDeck();
     this.shuffleDeck();
@@ -84,7 +84,7 @@ class BlackjackGame {
 
   formatHand(hand, hideDealer = false) {
     if (hideDealer) {
-      return `${hand[0].value}${hand[0].suit} ❓`;
+      return `${hand[0].value}${hand[0].suit} ?`;
     }
     return hand.map(card => `${card.value}${card.suit}`).join(' ');
   }
@@ -160,16 +160,16 @@ class BlackjackGame {
       .setColor(this.gameOver ? 
         (this.result === 'win' || this.result === 'blackjack' ? '#57F287' : 
          this.result === 'push' ? '#F1C40F' : '#ED4245') : '#2B2D31')
-      .setTitle(this.gameOver ? this.getResultTitle() : '🃏 **BLACKJACK**')
-      .setDescription(this.gameOver ? this.getResultDescription() : `💰 **Bet:** ${this.bet} coins`)
+      .setTitle(this.gameOver ? this.getResultTitle() : 'BLACKJACK')
+      .setDescription(this.gameOver ? this.getResultDescription() : `Bet: ${this.bet} coins`)
       .addFields(
         {
-          name: `🎯 **Your Hand** (${this.playerValue})`,
+          name: `Your Hand (${this.playerValue})`,
           value: this.formatHand(this.playerHand),
           inline: false
         },
         {
-          name: `🤖 **Dealer's Hand** (${this.gameOver ? this.dealerValue : '?'})`,
+          name: `Dealer's Hand (${this.gameOver ? this.dealerValue : '?'})`,
           value: this.gameOver ? this.formatHand(this.dealerHand) : this.formatHand(this.dealerHand, true),
           inline: false
         }
@@ -182,10 +182,10 @@ class BlackjackGame {
                         this.result === 'win' ? this.bet * 2 :
                         this.result === 'push' ? this.bet : 0;
       embed.addFields({
-        name: '💰 Result',
-        value: winAmount > this.bet ? `You won **${winAmount}** coins! 🎉` :
-               winAmount === this.bet ? "Push! Bet returned! 🤝" :
-               `You lost **${this.bet}** coins! 😢`,
+        name: 'Result',
+        value: winAmount > this.bet ? `You won ${winAmount} coins!` :
+               winAmount === this.bet ? "Push! Bet returned!" :
+               `You lost ${this.bet} coins!`,
         inline: false
       });
     }
@@ -194,19 +194,19 @@ class BlackjackGame {
   }
 
   getResultTitle() {
-    if (this.result === 'blackjack') return '🎉 **BLACKJACK!**';
-    if (this.result === 'win') return '🎉 **YOU WIN!**';
-    if (this.result === 'push') return '🤝 **PUSH!**';
-    if (this.result === 'bust') return '💥 **BUST!**';
-    return '😢 **YOU LOSE!**';
+    if (this.result === 'blackjack') return 'BLACKJACK!';
+    if (this.result === 'win') return 'YOU WIN!';
+    if (this.result === 'push') return 'PUSH!';
+    if (this.result === 'bust') return 'BUST!';
+    return 'YOU LOSE!';
   }
 
   getResultDescription() {
-    if (this.result === 'blackjack') return `💰 **Bet:** ${this.bet} coins\n🎯 Perfect 21! You hit Blackjack!`;
-    if (this.result === 'win') return `💰 **Bet:** ${this.bet} coins\n🎯 You beat the dealer!`;
-    if (this.result === 'push') return `💰 **Bet:** ${this.bet} coins\n🤝 It's a tie!`;
-    if (this.result === 'bust') return `💰 **Bet:** ${this.bet} coins\n💥 You went over 21!`;
-    return `💰 **Bet:** ${this.bet} coins\n😢 Dealer beats you!`;
+    if (this.result === 'blackjack') return `Bet: ${this.bet} coins\nPerfect 21! You hit Blackjack!`;
+    if (this.result === 'win') return `Bet: ${this.bet} coins\nYou beat the dealer!`;
+    if (this.result === 'push') return `Bet: ${this.bet} coins\nIt's a tie!`;
+    if (this.result === 'bust') return `Bet: ${this.bet} coins\nYou went over 21!`;
+    return `Bet: ${this.bet} coins\nDealer beats you!`;
   }
 
   getButtons() {
@@ -215,11 +215,11 @@ class BlackjackGame {
         .addComponents(
           new ButtonBuilder()
             .setCustomId('blackjack_play_again')
-            .setLabel('🔄 Play Again')
+            .setLabel('Play Again')
             .setStyle(ButtonStyle.Success),
           new ButtonBuilder()
             .setCustomId('blackjack_end')
-            .setLabel('🚪 End Game')
+            .setLabel('End Game')
             .setStyle(ButtonStyle.Secondary)
         );
     }
@@ -228,11 +228,11 @@ class BlackjackGame {
       .addComponents(
         new ButtonBuilder()
           .setCustomId('blackjack_hit')
-          .setLabel('🃏 Hit')
+          .setLabel('Hit')
           .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
           .setCustomId('blackjack_stand')
-          .setLabel('🛑 Stand')
+          .setLabel('Stand')
           .setStyle(ButtonStyle.Danger)
       );
   }
@@ -244,7 +244,7 @@ class BlackjackGame {
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("games")
-    .setDescription("🎮 Play games and earn coins!")
+    .setDescription("Play games and earn coins!")
     .addSubcommand(sub =>
       sub.setName("rps")
         .setDescription("Play Rock Paper Scissors")
@@ -253,9 +253,9 @@ module.exports = {
             .setDescription("Your choice")
             .setRequired(true)
             .addChoices(
-              { name: "🪨 Rock", value: "rock" },
-              { name: "📄 Paper", value: "paper" },
-              { name: "✂️ Scissors", value: "scissors" }
+              { name: "Rock", value: "rock" },
+              { name: "Paper", value: "paper" },
+              { name: "Scissors", value: "scissors" }
             )
         )
         .addIntegerOption(opt =>
@@ -273,8 +273,8 @@ module.exports = {
             .setDescription("Choose heads or tails")
             .setRequired(true)
             .addChoices(
-              { name: "🪙 Heads", value: "heads" },
-              { name: "🪙 Tails", value: "tails" }
+              { name: "Heads", value: "heads" },
+              { name: "Tails", value: "tails" }
             )
         )
         .addIntegerOption(opt =>
@@ -303,7 +303,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("slots")
-        .setDescription("🎰 Play the slot machine")
+        .setDescription("Play the slot machine")
         .addIntegerOption(opt =>
           opt.setName("bet")
             .setDescription("Amount to bet (min 10)")
@@ -313,7 +313,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("blackjack")
-        .setDescription("🃏 Play Blackjack against the bot")
+        .setDescription("Play Blackjack against the bot")
         .addIntegerOption(opt =>
           opt.setName("bet")
             .setDescription("Amount to bet (min 10)")
@@ -323,29 +323,29 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("daily")
-        .setDescription("💰 Claim your daily bonus")
+        .setDescription("Claim your daily bonus")
     )
     .addSubcommand(sub =>
       sub.setName("shop")
-        .setDescription("🛒 View the shop")
+        .setDescription("View the shop")
     )
     .addSubcommand(sub =>
       sub.setName("buy")
-        .setDescription("🛒 Buy an item from the shop")
+        .setDescription("Buy an item from the shop")
         .addStringOption(opt =>
           opt.setName("item")
             .setDescription("Item to buy")
             .setRequired(true)
             .addChoices(
-              { name: "🛡️ Shield", value: "shield" },
-              { name: "⚡ Double XP", value: "double" },
-              { name: "👑 VIP Access", value: "vip" }
+              { name: "Shield", value: "shield" },
+              { name: "Double XP", value: "double" },
+              { name: "VIP Access", value: "vip" }
             )
         )
     )
     .addSubcommand(sub =>
       sub.setName("stats")
-        .setDescription("📊 View your game statistics")
+        .setDescription("View your game statistics")
     ),
 
   async execute(interaction, client, redis) {
@@ -353,7 +353,7 @@ module.exports = {
     const userId = interaction.user.id;
     
     // =========================
-    // ECONOMY HELPER FUNCTIONS (inlined to avoid import issues)
+    // ECONOMY HELPER FUNCTIONS
     // =========================
     const getBalance = async (id) => Number(await redis.get(`eco:${id}:money`) || 0);
     const addBalance = async (id, amount) => await redis.incrby(`eco:${id}:money`, amount);
@@ -374,7 +374,6 @@ module.exports = {
     const getTotalSpent = async (id) => Number(await redis.get(`eco:${id}:total_spent`) || 0);
     const addTotalSpent = async (id, amount) => await redis.incrby(`eco:${id}:total_spent`, amount);
 
-    // Create economy object for Blackjack
     const economy = {
       getBalance, addBalance, takeBalance, getShield, addShield,
       getDoubleXP, addDoubleXP, getVIP, setVIP,
@@ -394,7 +393,7 @@ module.exports = {
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
-              .setDescription(`❌ You don't have enough coins! You have **${balance}**, need **${bet}**.`)
+              .setDescription(`You don't have enough coins! You have ${balance}, need ${bet}.`)
           ],
           flags: MessageFlags.Ephemeral
         });
@@ -403,11 +402,10 @@ module.exports = {
       const botChoices = ["rock", "paper", "scissors"];
       const botChoice = botChoices[Math.floor(Math.random() * 3)];
       
-      let result, emoji, winAmount = 0;
+      let result, winAmount = 0;
       
       if (choice === botChoice) {
         result = "tie";
-        emoji = "🤝";
         winAmount = bet;
       } else if (
         (choice === "rock" && botChoice === "scissors") ||
@@ -415,11 +413,9 @@ module.exports = {
         (choice === "scissors" && botChoice === "paper")
       ) {
         result = "win";
-        emoji = "🎉";
         winAmount = bet * 2;
       } else {
         result = "lose";
-        emoji = "😢";
         winAmount = 0;
       }
 
@@ -437,19 +433,19 @@ module.exports = {
 
       const embed = new EmbedBuilder()
         .setColor(result === "win" ? "#57F287" : result === "tie" ? "#F1C40F" : "#ED4245")
-        .setTitle(`${emoji} Rock Paper Scissors ${result === "win" ? "Win!" : result === "tie" ? "Tie!" : "Lose..."}`)
-        .setDescription(`You chose **${choice}**\nBot chose **${botChoice}**`)
+        .setTitle(`Rock Paper Scissors ${result === "win" ? "Win!" : result === "tie" ? "Tie!" : "Lose..."}`)
+        .setDescription(`You chose ${choice}\nBot chose ${botChoice}`)
         .addFields(
           { 
-            name: "💰 Result", 
-            value: result === "win" ? `You won **${winAmount}** coins!` : 
+            name: "Result", 
+            value: result === "win" ? `You won ${winAmount} coins!` : 
                    result === "tie" ? "Tie! Bet returned!" : 
-                   `You lost **${bet}** coins!`,
+                   `You lost ${bet} coins!`,
             inline: false
           },
           {
-            name: "💳 New Balance",
-            value: `\`${await getBalance(userId)} coins\``,
+            name: "New Balance",
+            value: `${await getBalance(userId)} coins`,
             inline: true
           }
         )
@@ -472,7 +468,7 @@ module.exports = {
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
-              .setDescription(`❌ You need **${bet}** coins but only have **${balance}**.`)
+              .setDescription(`You need ${bet} coins but only have ${balance}.`)
           ],
           flags: MessageFlags.Ephemeral
         });
@@ -494,18 +490,18 @@ module.exports = {
 
       const embed = new EmbedBuilder()
         .setColor(won ? "#57F287" : "#ED4245")
-        .setTitle(`${won ? "🎉" : "😢"} Coin Flip ${won ? "Win!" : "Lose..."}`)
-        .setDescription(`The coin landed on **${result}**!`)
+        .setTitle(`Coin Flip ${won ? "Win!" : "Lose..."}`)
+        .setDescription(`The coin landed on ${result}!`)
         .addFields(
           { 
-            name: "💰 Result", 
-            value: won ? `You won **${winAmount}** coins!` : 
-                   `You lost **${bet}** coins!`,
+            name: "Result", 
+            value: won ? `You won ${winAmount} coins!` : 
+                   `You lost ${bet} coins!`,
             inline: false
           },
           {
-            name: "💳 New Balance",
-            value: `\`${await getBalance(userId)} coins\``,
+            name: "New Balance",
+            value: `${await getBalance(userId)} coins`,
             inline: true
           }
         )
@@ -527,7 +523,7 @@ module.exports = {
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
-              .setDescription(`❌ You need **${bet}** coins but only have **${balance}**.`)
+              .setDescription(`You need ${bet} coins but only have ${balance}.`)
           ],
           flags: MessageFlags.Ephemeral
         });
@@ -559,18 +555,18 @@ module.exports = {
 
       const embed = new EmbedBuilder()
         .setColor(won ? "#57F287" : "#ED4245")
-        .setTitle(`${won ? "🎉" : "😢"} Dice Roll ${won ? "Win!" : "Lose..."}`)
-        .setDescription(`You rolled a **${roll}**!`)
+        .setTitle(`Dice Roll ${won ? "Win!" : "Lose..."}`)
+        .setDescription(`You rolled a ${roll}!`)
         .addFields(
           { 
-            name: "💰 Result", 
-            value: won ? `You won **${winAmount}** coins! (${multipliers[number]}x multiplier)` : 
-                   `You lost **${bet}** coins!`,
+            name: "Result", 
+            value: won ? `You won ${winAmount} coins! (${multipliers[number]}x multiplier)` : 
+                   `You lost ${bet} coins!`,
             inline: false
           },
           {
-            name: "💳 New Balance",
-            value: `\`${await getBalance(userId)} coins\``,
+            name: "New Balance",
+            value: `${await getBalance(userId)} coins`,
             inline: true
           }
         )
@@ -591,7 +587,7 @@ module.exports = {
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
-              .setDescription(`❌ You need **${bet}** coins but only have **${balance}**.`)
+              .setDescription(`You need ${bet} coins but only have ${balance}.`)
           ],
           flags: MessageFlags.Ephemeral
         });
@@ -617,13 +613,13 @@ module.exports = {
           "🍒": 2
         };
         winAmount = bet * (multipliers[result[0]] || 2);
-        message = `🎉 JACKPOT! Three ${result[0]}!`;
+        message = `JACKPOT! Three ${result[0]}!`;
         await redis.incr(`games:${userId}:slots_jackpots`);
       } else if (result[0] === result[1] || result[1] === result[2] || result[0] === result[2]) {
         winAmount = Math.floor(bet * 1.5);
-        message = "🎯 Two of a kind!";
+        message = "Two of a kind!";
       } else {
-        message = "😢 No match...";
+        message = "No match...";
         winAmount = 0;
       }
 
@@ -639,18 +635,18 @@ module.exports = {
 
       const embed = new EmbedBuilder()
         .setColor(winAmount > 0 ? "#57F287" : "#ED4245")
-        .setTitle("🎰 Slot Machine")
+        .setTitle("Slot Machine")
         .setDescription(`${result.join(" | ")}\n\n${message}`)
         .addFields(
           { 
-            name: "💰 Result", 
-            value: winAmount > 0 ? `You won **${winAmount}** coins!` : 
-                   `You lost **${bet}** coins!`,
+            name: "Result", 
+            value: winAmount > 0 ? `You won ${winAmount} coins!` : 
+                   `You lost ${bet} coins!`,
             inline: false
           },
           {
-            name: "💳 New Balance",
-            value: `\`${await getBalance(userId)} coins\``,
+            name: "New Balance",
+            value: `${await getBalance(userId)} coins`,
             inline: true
           }
         )
@@ -671,7 +667,7 @@ module.exports = {
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
-              .setDescription(`❌ You need **${bet}** coins but only have **${balance}**.`)
+              .setDescription(`You need ${bet} coins but only have ${balance}.`)
           ],
           flags: MessageFlags.Ephemeral
         });
@@ -771,7 +767,7 @@ module.exports = {
           embeds: [
             new EmbedBuilder()
               .setColor("#F1C40F")
-              .setDescription(`⏳ You can claim your daily bonus in **${remaining}** minutes!`)
+              .setDescription(`You can claim your daily bonus in ${remaining} minutes!`)
           ],
           flags: MessageFlags.Ephemeral
         });
@@ -784,11 +780,11 @@ module.exports = {
 
       const embed = new EmbedBuilder()
         .setColor("#57F287")
-        .setTitle("💰 Daily Bonus Claimed!")
-        .setDescription(`You received **${bonus}** coins!`)
+        .setTitle("Daily Bonus Claimed!")
+        .setDescription(`You received ${bonus} coins!`)
         .addFields({
-          name: "💳 New Balance",
-          value: `\`${await getBalance(userId)} coins\``,
+          name: "New Balance",
+          value: `${await getBalance(userId)} coins`,
           inline: true
         })
         .setFooter({ text: "Come back tomorrow for more!" })
@@ -803,22 +799,22 @@ module.exports = {
     if (sub === "shop") {
       const embed = new EmbedBuilder()
         .setColor("#FF69B4")
-        .setTitle("🛒 Game Shop")
-        .setDescription(`💰 Your balance: **${await getBalance(userId)}** coins`)
+        .setTitle("Game Shop")
+        .setDescription(`Your balance: ${await getBalance(userId)} coins`)
         .addFields(
           {
-            name: "🛡️ Shield",
-            value: `Protects your counting streak\nPrice: **200** coins\nOwned: **${await getShield(userId)}**`,
+            name: "Shield",
+            value: `Protects your counting streak\nPrice: 200 coins\nOwned: ${await getShield(userId)}`,
             inline: true
           },
           {
-            name: "⚡ Double XP",
-            value: `Double coins for 5 counts\nPrice: **500** coins\nActive: **${await getDoubleXP(userId) > 0 ? '✅' : '❌'}**`,
+            name: "Double XP",
+            value: `Double coins for 5 counts\nPrice: 500 coins\nActive: ${await getDoubleXP(userId) > 0 ? 'Active' : 'Inactive'}`,
             inline: true
           },
           {
-            name: "👑 VIP Access",
-            value: `Exclusive profile features\nPrice: **2000** coins\nStatus: **${await getVIP(userId) ? '✅ Active' : '❌ Inactive'}**`,
+            name: "VIP Access",
+            value: `Exclusive profile features\nPrice: 2000 coins\nStatus: ${await getVIP(userId) ? 'Active' : 'Inactive'}`,
             inline: true
           }
         )
@@ -847,7 +843,7 @@ module.exports = {
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
-              .setDescription(`❌ You need **${price}** coins but only have **${balance}**.`)
+              .setDescription(`You need ${price} coins but only have ${balance}.`)
           ],
           flags: MessageFlags.Ephemeral
         });
@@ -865,18 +861,18 @@ module.exports = {
       }
 
       const itemNames = {
-        shield: "🛡️ Shield",
-        double: "⚡ Double XP (5 uses)",
-        vip: "👑 VIP Access"
+        shield: "Shield",
+        double: "Double XP (5 uses)",
+        vip: "VIP Access"
       };
 
       const embed = new EmbedBuilder()
         .setColor("#57F287")
-        .setTitle("✅ Purchase Successful!")
-        .setDescription(`You bought **${itemNames[item]}** for **${price}** coins!`)
+        .setTitle("Purchase Successful!")
+        .setDescription(`You bought ${itemNames[item]} for ${price} coins!`)
         .addFields({
-          name: "💰 New Balance",
-          value: `\`${await getBalance(userId)} coins\``,
+          name: "New Balance",
+          value: `${await getBalance(userId)} coins`,
           inline: true
         })
         .setTimestamp();
@@ -892,32 +888,32 @@ module.exports = {
       
       const embed = new EmbedBuilder()
         .setColor("#5865F2")
-        .setTitle(`📊 ${interaction.user.username}'s Game Stats`)
+        .setTitle(`${interaction.user.username}'s Game Stats`)
         .setThumbnail(interaction.user.displayAvatarURL())
         .addFields(
           {
-            name: "🪨 RPS",
-            value: `Wins: **${stats.rps_wins || 0}**\nLosses: **${stats.rps_losses || 0}**\nTies: **${stats.rps_ties || 0}**`,
+            name: "RPS",
+            value: `Wins: ${stats.rps_wins || 0}\nLosses: ${stats.rps_losses || 0}\nTies: ${stats.rps_ties || 0}`,
             inline: true
           },
           {
-            name: "🪙 Coin Flip",
-            value: `Wins: **${stats.coinflip_wins || 0}**\nLosses: **${stats.coinflip_losses || 0}**`,
+            name: "Coin Flip",
+            value: `Wins: ${stats.coinflip_wins || 0}\nLosses: ${stats.coinflip_losses || 0}`,
             inline: true
           },
           {
-            name: "🎲 Dice",
-            value: `Wins: **${stats.dice_wins || 0}**\nLosses: **${stats.dice_losses || 0}**`,
+            name: "Dice",
+            value: `Wins: ${stats.dice_wins || 0}\nLosses: ${stats.dice_losses || 0}`,
             inline: true
           },
           {
-            name: "🎰 Slots",
-            value: `Wins: **${stats.slots_wins || 0}**\nLosses: **${stats.slots_losses || 0}**\nJackpots: **${stats.slots_jackpots || 0}**`,
+            name: "Slots",
+            value: `Wins: ${stats.slots_wins || 0}\nLosses: ${stats.slots_losses || 0}\nJackpots: ${stats.slots_jackpots || 0}`,
             inline: true
           },
           {
-            name: "🃏 Blackjack",
-            value: `Wins: **${stats.blackjack_wins || 0}**\nLosses: **${stats.blackjack_losses || 0}**\nTies: **${stats.blackjack_ties || 0}**`,
+            name: "Blackjack",
+            value: `Wins: ${stats.blackjack_wins || 0}\nLosses: ${stats.blackjack_losses || 0}\nTies: ${stats.blackjack_ties || 0}`,
             inline: true
           }
         )
