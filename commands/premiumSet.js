@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ChannelType, MessageFlags } = require("discord.js");
 
 module.exports = {
+  category: "Premium",
   data: new SlashCommandBuilder()
     .setName("premium-set")
     .setDescription("💎 Premium Suite: Configure advanced premium metrics and server protections.")
