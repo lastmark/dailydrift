@@ -9,7 +9,7 @@ module.exports = {
 
   // Profile, Premium, and Economy Icons
   profile: "<:bot:1513533291385458708>", 
-  premium: "<:emoji_33:1516445937273147415>", 
+  premium: "<:premium:1516599137116880997>", 
   money: "<:money:1513532519599964270>",
   birthday: "<:emoji_33:1516445937273147415>", // Using emoji_33 as your clean sparkling theme asset
 
