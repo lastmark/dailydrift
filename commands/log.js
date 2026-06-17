@@ -6,19 +6,20 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
-const e = require("../emojis.js");
-
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("log")
-    .setDescription("Full audit logging system setup")
+    .setDescription("Audit logging system")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+
     .addSubcommand(sub =>
-      sub.setName("setup")
-        .setDescription("Setup full audit logging system")
+      sub
+        .setName("setup")
+        .setDescription("Setup audit log channel")
         .addChannelOption(opt =>
-          opt.setName("channel")
-            .setDescription("Select log channel (optional)")
+          opt
+            .setName("channel")
+            .setDescription("Log channel (optional)")
             .addChannelTypes(ChannelType.GuildText)
         )
     ),
@@ -31,20 +32,16 @@ module.exports = {
     await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
     if (!guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels)) {
-      return interaction.editReply({
-        content: "❌ Missing Manage Channels permission"
-      });
+      return interaction.editReply("❌ Missing Manage Channels permission");
     }
 
-    // AUTO CREATE LOG CHANNEL
     if (!channel) {
       channel = await guild.channels.create({
-        name: "🧾・audit-logs",
+        name: "audit-logs",
         type: ChannelType.GuildText,
-        topic: "Full security audit logging system",
         permissionOverwrites: [
           {
-            id: guild.roles.everyone.id,
+            id: guild.id,
             deny: [PermissionFlagsBits.ViewChannel]
           },
           {
@@ -63,16 +60,17 @@ module.exports = {
 
     await redis.set(`auditlog:${guild.id}`, channel.id);
 
-    const embed = new EmbedBuilder()
-      .setColor("#57F287")
-      .setTitle("🧾 Audit System Activated")
-      .setDescription("Full server security logging system is now online.")
-      .addFields(
-        { name: "📡 Channel", value: `${channel}` },
-        { name: "⚙️ Mode", value: created ? "Auto Created" : "Manual Bind" }
-      )
-      .setTimestamp();
-
-    return interaction.editReply({ embeds: [embed] });
+    return interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor("#57F287")
+          .setTitle("🧾 Audit System Enabled")
+          .setDescription("Logging system is now active")
+          .addFields(
+            { name: "Channel", value: `${channel}` },
+            { name: "Mode", value: created ? "Auto Created" : "Manual" }
+          )
+      ]
+    });
   }
 };
