@@ -1,246 +1,167 @@
-// commands/counting.js - COMPLETE REWRITE
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags, ChannelType } = require("discord.js");
+// games/counting.js – WITH SHIELD & DOUBLE XP
+const { EmbedBuilder } = require("discord.js");
 
-module.exports = {
-  category: "Games",
+module.exports = async (message, redis) => {
+  try {
+    if (message.author.bot) return;
+    
+    const guildId = message.guild.id;
+    const userId = message.author.id;
+    const channelId = message.channel.id;
 
-  data: new SlashCommandBuilder()
-    .setName("counting")
-    .setDescription("🎯 Counting game system")
-    .addSubcommand(sub =>
-      sub.setName("setup")
-        .setDescription("Setup counting channel")
-        .addChannelOption(opt =>
-          opt.setName("channel")
-            .setDescription("Channel for counting")
-            .setRequired(true)
-            .addChannelTypes(ChannelType.GuildText)
-        )
-    )
-    .addSubcommand(sub =>
-      sub.setName("stats")
-        .setDescription("View your counting stats")
-        .addUserOption(opt =>
-          opt.setName("user")
-            .setDescription("User to view stats for")
-        )
-    )
-    .addSubcommand(sub =>
-      sub.setName("leaderboard")
-        .setDescription("View top counters")
-    )
-    .addSubcommand(sub =>
-      sub.setName("reset")
-        .setDescription("Reset counting stats (Admin only)")
-        .addUserOption(opt =>
-          opt.setName("user")
-            .setDescription("Reset specific user")
-        )
-    ),
+    // Check if this is the counting channel
+    const countingChannel = await redis.get(`counting:${guildId}:channel`);
+    if (countingChannel !== channelId) return;
 
-  async execute(interaction, client, redis) {
-    try {
-      // Check if in server
-      if (!interaction.inGuild()) {
-        return interaction.reply({
-          content: "❌ This command must be used in a server.",
-          flags: MessageFlags.Ephemeral
-        });
+    // Get current number
+    const currentNumber = Number(await redis.get(`counting:${guildId}:number`) || 0);
+    const expectedNumber = currentNumber + 1;
+
+    // Parse user's message
+    let userNumber;
+    const cleanContent = message.content.replace(/\s+/g, "");
+    
+    if (/[\+\-\*\/\^]/.test(cleanContent)) {
+      try {
+        const mathExpression = cleanContent.replace(/\^/g, "**");
+        userNumber = Function(`"use strict"; return (${mathExpression})`)();
+      } catch (err) {
+        userNumber = null;
       }
-
-      const guildId = interaction.guildId;
-      const userId = interaction.user.id;
-      const sub = interaction.options.getSubcommand();
-
-      // =========================
-      // ⚙️ SETUP
-      // =========================
-      if (sub === "setup") {
-        // Check admin
-        if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
-          return interaction.reply({
-            content: "❌ You need Administrator permission.",
-            flags: MessageFlags.Ephemeral
-          });
-        }
-
-        const channel = interaction.options.getChannel("channel");
-        
-        // Save channel to Redis
-        await redis.set(`counting:${guildId}:channel`, channel.id);
-        
-        // Initialize count if not exists
-        if (!await redis.get(`counting:${guildId}:number`)) {
-          await redis.set(`counting:${guildId}:number`, 0);
-        }
-
-        const embed = new EmbedBuilder()
-          .setColor("#57F287")
-          .setTitle("✅ Counting System Setup Complete!")
-          .setDescription(`Counting channel: ${channel}`)
-          .addFields(
-            { name: "Channel", value: `${channel}`, inline: true },
-            { name: "Current Number", value: `0`, inline: true }
-          )
-          .setTimestamp();
-
-        return interaction.reply({ embeds: [embed] });
-      }
-
-      // =========================
-      // 📊 STATS
-      // =========================
-      if (sub === "stats") {
-        const targetUser = interaction.options.getUser("user") || interaction.user;
-        const targetId = targetUser.id;
-
-        const correct = Number(await redis.zscore(`counting:${guildId}:correct`, targetId) || 0);
-        const mistakes = Number(await redis.zscore(`counting:${guildId}:mistakes`, targetId) || 0);
-        const streak = Number(await redis.get(`counting:${guildId}:${targetId}:streak`) || 0);
-        const bestStreak = Number(await redis.get(`counting:${guildId}:${targetId}:bestStreak`) || 0);
-        
-        const total = correct + mistakes;
-        const successRate = total > 0 ? Math.round((correct / total) * 100) : 0;
-
-        const embed = new EmbedBuilder()
-          .setColor("#5865F2")
-          .setAuthor({
-            name: `${targetUser.username}'s Counting Stats`,
-            iconURL: targetUser.displayAvatarURL()
-          })
-          .setThumbnail(targetUser.displayAvatarURL())
-          .addFields(
-            { 
-              name: "📊 Overall", 
-              value: `✅ **${correct}** correct\n❌ **${mistakes}** mistakes\n📈 **${successRate}%** success rate`,
-              inline: true 
-            },
-            { 
-              name: "🔥 Streaks", 
-              value: `⚡ Current: **${streak}**\n🏆 Best: **${bestStreak}**`,
-              inline: true 
-            }
-          )
-          .setFooter({ text: `Total attempts: ${total}` })
-          .setTimestamp();
-
-        return interaction.reply({ embeds: [embed] });
-      }
-
-      // =========================
-      // 🏆 LEADERBOARD
-      // =========================
-      if (sub === "leaderboard") {
-        const data = await redis.zrevrange(`counting:${guildId}:correct`, 0, 9, "WITHSCORES");
-        
-        let description = "";
-        if (!data || data.length === 0) {
-          description = "No one has counted yet!";
-        } else {
-          const medals = ["🥇", "🥈", "🥉"];
-          for (let i = 0; i < data.length; i += 2) {
-            const rank = (i / 2) + 1;
-            const id = data[i];
-            const score = data[i + 1];
-            const medal = rank <= 3 ? medals[rank - 1] : `#${rank}`;
-            
-            try {
-              const user = await client.users.fetch(id);
-              description += `${medal} **${user.username}** — \`${score}\` counts\n`;
-            } catch {
-              description += `${medal} **Unknown User** — \`${score}\` counts\n`;
-            }
-          }
-        }
-
-        const embed = new EmbedBuilder()
-          .setColor("#FFD700")
-          .setTitle("🏆 Counting Leaderboard")
-          .setDescription(description)
-          .setFooter({ text: "Top 10 counters" })
-          .setTimestamp();
-
-        return interaction.reply({ embeds: [embed] });
-      }
-
-      // =========================
-      // 🔄 RESET (Admin only)
-      // =========================
-      if (sub === "reset") {
-        if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
-          return interaction.reply({
-            content: "❌ You need Administrator permission.",
-            flags: MessageFlags.Ephemeral
-          });
-        }
-
-        const targetUser = interaction.options.getUser("user");
-        
-        if (targetUser) {
-          // Reset specific user
-          await redis.zrem(`counting:${guildId}:correct`, targetUser.id);
-          await redis.zrem(`counting:${guildId}:mistakes`, targetUser.id);
-          await redis.del(`counting:${guildId}:${targetUser.id}:streak`);
-          await redis.del(`counting:${guildId}:${targetUser.id}:bestStreak`);
-          
-          return interaction.reply({
-            content: `✅ Reset stats for **${targetUser.username}**`,
-            flags: MessageFlags.Ephemeral
-          });
-        }
-
-        // Reset all stats (with confirmation)
-        const embed = new EmbedBuilder()
-          .setColor("#ED4245")
-          .setTitle("⚠️ Reset All Stats")
-          .setDescription("This will reset ALL counting stats in this server. React with ✅ to confirm.");
-
-        await interaction.reply({ embeds: [embed], withResponse: true });
-        const msg = await interaction.fetchReply();
-        await msg.react("✅");
-        
-        try {
-          const collected = await msg.awaitReactions({
-            filter: (reaction, user) => reaction.emoji.name === "✅" && user.id === userId,
-            max: 1,
-            time: 30000
-          });
-          
-          if (collected.size > 0) {
-            // Reset all counting data
-            const keys = await redis.keys(`counting:${guildId}:*`);
-            for (const key of keys) {
-              await redis.del(key);
-            }
-            await redis.set(`counting:${guildId}:number`, 0);
-            
-            return interaction.editReply({
-              content: "✅ All counting stats have been reset.",
-              embeds: [],
-              components: []
-            });
-          } else {
-            return interaction.editReply({
-              content: "❌ Reset cancelled.",
-              embeds: [],
-              components: []
-            });
-          }
-        } catch (error) {
-          return interaction.editReply({
-            content: "❌ Reset cancelled or timed out.",
-            embeds: [],
-            components: []
-          });
-        }
-      }
-
-    } catch (error) {
-      console.error("Counting command error:", error);
-      return interaction.reply({
-        content: `❌ Error: ${error.message}`,
-        flags: MessageFlags.Ephemeral
-      });
+    } else {
+      userNumber = parseInt(cleanContent);
     }
+
+    if (isNaN(userNumber)) {
+      await message.react("❌");
+      return;
+    }
+
+    const lastUser = await redis.get(`counting:${guildId}:lastUser`);
+
+    // Check double count
+    if (userId === lastUser) {
+      await message.react("❌");
+      const embed = new EmbedBuilder()
+        .setColor("#ED4245")
+        .setDescription(`⚠️ <@${userId}> you can't count twice in a row!`);
+      await message.reply({ embeds: [embed] });
+      return;
+    }
+
+    // ---- WRONG NUMBER ----
+    if (userNumber !== expectedNumber) {
+      await message.react("❌");
+
+      // 🔥 Check for SHIELD
+      const shieldCount = Number(await redis.get(`eco:${userId}:shield`) || 0);
+      if (shieldCount > 0) {
+        // Use one shield, save the streak
+        await redis.decrby(`eco:${userId}:shield`, 1);
+        // Keep the number as is (don't reset)
+        // But we need to reset lastUser so someone else can count
+        await redis.del(`counting:${guildId}:lastUser`);
+
+        const embed = new EmbedBuilder()
+          .setColor("#3498DB")
+          .setTitle("🛡️ Shield Activated!")
+          .setDescription(`<@${userId}> made a mistake, but their **shield** absorbed it!`)
+          .addFields(
+            { name: "Remaining Shields", value: `${shieldCount - 1}`, inline: true },
+            { name: "Next Number", value: `${expectedNumber}`, inline: true }
+          )
+          .setTimestamp();
+        await message.reply({ embeds: [embed] });
+        return;
+      }
+
+      // No shield – full reset
+      await redis.zincrby(`counting:${guildId}:mistakes`, 1, userId);
+      await redis.del(`counting:${guildId}:${userId}:streak`);
+      await redis.set(`counting:${guildId}:number`, 0);
+      await redis.del(`counting:${guildId}:lastUser`);
+
+      const embed = new EmbedBuilder()
+        .setColor("#ED4245")
+        .setTitle("💥 Wrong Number!")
+        .setDescription(`<@${userId}> typed **${userNumber}** but expected **${expectedNumber}**`)
+        .addFields(
+          { name: "🔥 Streak Lost", value: `Count reset to **0**`, inline: true }
+        )
+        .setTimestamp();
+      await message.reply({ embeds: [embed] });
+      return;
+    }
+
+    // ---- CORRECT COUNT ----
+    await redis.set(`counting:${guildId}:number`, expectedNumber);
+    await redis.set(`counting:${guildId}:lastUser`, userId);
+    await redis.zincrby(`counting:${guildId}:correct`, 1, userId);
+
+    // Update streak
+    const currentStreak = Number(await redis.get(`counting:${guildId}:${userId}:streak`) || 0) + 1;
+    await redis.set(`counting:${guildId}:${userId}:streak`, currentStreak);
+
+    const bestStreak = Number(await redis.get(`counting:${guildId}:${userId}:bestStreak`) || 0);
+    if (currentStreak > bestStreak) {
+      await redis.set(`counting:${guildId}:${userId}:bestStreak`, currentStreak);
+    }
+
+    // 💰 COINS REWARD
+    let baseReward = 5;
+    let multiplier = 1;
+
+    // Check for Double XP
+    const doubleXP = Number(await redis.get(`eco:${userId}:double`) || 0);
+    if (doubleXP > 0) {
+      multiplier = 2;
+      await redis.set(`eco:${userId}:double`, doubleXP - 1);
+      if (doubleXP === 1) {
+        await message.channel.send(`⚡ <@${userId}> used their last **Double XP**!`);
+      }
+    }
+
+    // Streak bonus (every 10)
+    if (currentStreak % 10 === 0) {
+      multiplier += 0.5;
+    }
+
+    const totalReward = Math.floor(baseReward * multiplier);
+    await redis.incrby(`eco:${userId}:money`, totalReward);
+
+    await message.react("✅");
+
+    // Milestones
+    if (expectedNumber % 10 === 0) {
+      const embed = new EmbedBuilder()
+        .setColor("#F1C40F")
+        .setTitle("🎉 Milestone Reached!")
+        .setDescription(`The count reached **${expectedNumber}**!`)
+        .addFields(
+          { name: "👑 Counted By", value: `<@${userId}>`, inline: true },
+          { name: "🔥 Streak", value: `${currentStreak}`, inline: true },
+          { name: "💰 Coins Earned", value: `+${totalReward}`, inline: true }
+        )
+        .setTimestamp();
+      await message.channel.send({ embeds: [embed] });
+    }
+
+    // Streak achievements (bonus coins)
+    if (currentStreak === 10) {
+      await message.channel.send(`🌟 <@${userId}> hit **10** streak! +25 bonus coins!`);
+      await redis.incrby(`eco:${userId}:money`, 25);
+    } else if (currentStreak === 25) {
+      await message.channel.send(`💎 <@${userId}> hit **25** streak! +50 bonus coins!`);
+      await redis.incrby(`eco:${userId}:money`, 50);
+    } else if (currentStreak === 50) {
+      await message.channel.send(`👑 <@${userId}> hit **50** streak! +100 bonus coins!`);
+      await redis.incrby(`eco:${userId}:money`, 100);
+    } else if (currentStreak === 100) {
+      await message.channel.send(`🏆 <@${userId}> hit **100** streak! +500 bonus coins! LEGEND!`);
+      await redis.incrby(`eco:${userId}:money`, 500);
+    }
+
+  } catch (error) {
+    console.error("Counting game error:", error);
   }
 };
