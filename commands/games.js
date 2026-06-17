@@ -197,6 +197,7 @@ class BlackjackGame {
 // 📦 COMMAND EXPORT
 // =========================
 module.exports = {
+  category: "Games",
   data: new SlashCommandBuilder()
     .setName("games")
     .setDescription("Play games and earn coins!")
