@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder } = require("discord.js");
 
 module.exports = {
+  category: "Events",
   data: new SlashCommandBuilder()
     .setName("birthday")
     .setDescription("🎂 Manage and configure the community birthday celebration matrix.")
