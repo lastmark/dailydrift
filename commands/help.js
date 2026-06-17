@@ -4,7 +4,7 @@ const e = require("../emojis.js");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("help")
-    .setDescription("View all bot commands and features"),
+    .setDescription("View all bot commands and categories"),
 
   async execute(interaction, client, redis) {
     const userId = interaction.user.id;
@@ -15,56 +15,46 @@ module.exports = {
       redis.get(`premium:guild:${guildId}`)
     ]);
 
-    const userStatus = userPremium ? "Active" : "Standard";
-    const guildStatus = guildPremium ? "Active" : "Standard";
-
     const color = userPremium || guildPremium ? "#FFD700" : "#5865F2";
+
+    // Group commands by category (folder name)
+    const categories = new Map();
+
+    for (const [, command] of client.commands) {
+      const name = command.data.name;
+      const description = command.data.description || "No description";
+      const category = command.category || "Other";
+
+      if (!categories.has(category)) categories.set(category, []);
+      categories.get(category).push(`\`/${name}\` - ${description}`);
+    }
 
     const embed = new EmbedBuilder()
       .setColor(color)
       .setAuthor({
-        name: `${client.user.username} Help Center`,
+        name: `${client.user.username} Command Center`,
         iconURL: client.user.displayAvatarURL()
       })
       .setDescription(
-        `${e.info} Welcome ${interaction.user.username}\n\n` +
-        `**Status Overview**\n` +
-        `${e.premium} User: ${userStatus}\n` +
-        `${e.server} Server: ${guildStatus}\n\n` +
-        `Use the categories below to explore commands.`
+        `${e.info} Hello ${interaction.user.username}\n\n` +
+        `${e.premium} **User:** ${userPremium ? "Premium" : "Standard"}\n` +
+        `${e.server} **Server:** ${guildPremium ? "Premium" : "Standard"}\n\n` +
+        `All available commands are listed below.`
       )
-      .addFields(
-        {
-          name: `${e.profile} Profile System`,
-          value:
-            "`/profile view` - View profile\n" +
-            "`/profile setbio` - Set biography\n" +
-            "`/profile reset` - Reset profile"
-        },
-        {
-          name: `${e.premium} Premium Features`,
-          value:
-            "`/profile upload` - Custom background\n" +
-            "`/premium` - Check subscription status"
-        },
-        {
-          name: `${e.tools} Utility`,
-          value:
-            "`/help` - Show this menu\n" +
-            "`/ping` - Check bot latency"
-        },
-        {
-          name: `${e.settings} Server Tools`,
-          value:
-            "`/premium-set antispam` - Anti-spam system\n" +
-            "`/premium-set setup-stats` - Voice stats setup\n" +
-            "`/responder-set` - Auto responder system"
-        }
-      )
-      .setFooter({
-        text: `${client.user.username} • System Help Module`
-      })
       .setTimestamp();
+
+    // Add each category dynamically
+    for (const [category, commands] of categories) {
+      embed.addFields({
+        name: `${e.folder || "📁"} ${category}`,
+        value: commands.join("\n").slice(0, 1024) || "No commands",
+        inline: false
+      });
+    }
+
+    embed.setFooter({
+      text: `${client.user.username} • Auto-Generated Help System`
+    });
 
     return interaction.reply({ embeds: [embed] });
   }
