@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
-const { createCanvas, loadImage, registerFont } = require("canvas");
+const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
 const fs = require("fs");
 
