@@ -1,163 +1,144 @@
-const {
-  SlashCommandBuilder,
-  EmbedBuilder,
-  MessageFlags
-} = require("discord.js");
+const { SlashCommandBuilder, AttachmentBuilder } = require("discord.js");
+const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
+const path = require("path");
+const fs = require("fs");
+
+const fontPath = path.join(__dirname, "../font.ttf");
+
+try {
+  if (fs.existsSync(fontPath)) {
+    GlobalFonts.registerFromPath(fontPath, "CustomFont");
+  }
+} catch {}
 
 module.exports = {
-  category: "Games",
-
   data: new SlashCommandBuilder()
-    .setName("game")
-    .setDescription("Economy system")
-
-    .addSubcommand(s => s.setName("balance").setDescription("Check coins"))
-    .addSubcommand(s => s.setName("daily").setDescription("Daily reward"))
+    .setName("profile")
+    .setDescription("Profile system")
 
     .addSubcommand(s =>
-      s.setName("shop").setDescription("View background shop")
-    )
-
-    .addSubcommand(s =>
-      s.setName("buybg")
-        .setDescription("Buy background")
-        .addStringOption(o =>
-          o.setName("id").setDescription("Background ID").setRequired(true)
+      s.setName("view")
+        .setDescription("View profile")
+        .addUserOption(o =>
+          o.setName("target").setDescription("User").setRequired(false)
         )
     )
 
     .addSubcommand(s =>
-      s.setName("equipbg")
-        .setDescription("Equip background")
+      s.setName("setbio")
+        .setDescription("Set bio")
         .addStringOption(o =>
-          o.setName("id").setDescription("Background ID").setRequired(true)
+          o.setName("text").setDescription("Bio").setRequired(true)
         )
     )
 
     .addSubcommand(s =>
-      s.setName("addbg")
-        .setDescription("Admin add background")
-        .addStringOption(o =>
-          o.setName("id").setDescription("ID").setRequired(true)
-        )
-        .addIntegerOption(o =>
-          o.setName("price").setDescription("Price").setRequired(true)
-        )
+      s.setName("upload")
+        .setDescription("Premium background")
         .addAttachmentOption(o =>
           o.setName("image").setDescription("Image").setRequired(true)
         )
+    )
+
+    .addSubcommand(s =>
+      s.setName("reset")
+        .setDescription("Reset profile background")
     ),
 
   async execute(interaction, client, redis) {
-    const userId = interaction.user.id;
+    await interaction.deferReply();
+
     const sub = interaction.options.getSubcommand();
+    const target = interaction.options.getUser("target") || interaction.user;
 
-    const DEV_ID = "1303357369622990889";
+    const profile = (await redis.hgetall(`profile:${target.id}`)) || {};
 
-    const getBal = async () =>
-      Number(await redis.get(`eco:${userId}:money`) || 0);
-
-    const addBal = (a) => redis.incrby(`eco:${userId}:money`, a);
-    const takeBal = (a) => redis.decrby(`eco:${userId}:money`, a);
-
-    // ================= BALANCE =================
-    if (sub === "balance") {
-      const coins = await getBal();
-      return interaction.reply(`💰 Coins: **${coins}**`);
+    // ================= BIO =================
+    if (sub === "setbio") {
+      const text = interaction.options.getString("text");
+      await redis.hset(`profile:${interaction.user.id}`, "bio", text);
+      return interaction.editReply("Bio updated");
     }
 
-    // ================= DAILY =================
-    if (sub === "daily") {
-      const key = `daily:${userId}`;
-      const last = await redis.get(key);
-
-      if (last && Date.now() - last < 86400000)
-        return interaction.reply({
-          content: "⏳ Already claimed",
-          flags: [MessageFlags.Ephemeral]
-        });
-
-      const reward = Math.floor(Math.random() * 100) + 1;
-
-      await addBal(reward);
-      await redis.set(key, Date.now());
-
-      return interaction.reply(`🎁 +${reward} coins`);
-    }
-
-    // ================= SHOP =================
-    if (sub === "shop") {
-      const keys = await redis.keys("shop:bg:*");
-
-      if (!keys.length)
-        return interaction.reply("❌ No backgrounds available");
-
-      const embeds = [];
-
-      for (const key of keys) {
-        const id = key.split(":")[2];
-        const item = await redis.hgetall(key);
-
-        embeds.push({
-          title: `🖼 ${id}`,
-          description: `💰 ${item.price} coins\n/buybg ${id}`,
-          image: { url: item.url }
-        });
-      }
-
-      return interaction.reply({ embeds: embeds.slice(0, 10) });
-    }
-
-    // ================= BUY =================
-    if (sub === "buybg") {
-      const id = interaction.options.getString("id");
-
-      const item = await redis.hgetall(`shop:bg:${id}`);
-      if (!item?.price) return interaction.reply("❌ Invalid ID");
-
-      const bal = await getBal();
-      if (bal < Number(item.price))
-        return interaction.reply("❌ Not enough coins");
-
-      await takeBal(Number(item.price));
-
-      await redis.sadd(`bg:owned:${userId}`, id);
-      await redis.hset(`profile:${userId}`, "bg", id);
-
-      return interaction.reply(`✅ Bought **${id}**`);
-    }
-
-    // ================= EQUIP =================
-    if (sub === "equipbg") {
-      const id = interaction.options.getString("id");
-
-      const owned = await redis.sismember(`bg:owned:${userId}`, id);
-      if (!owned)
-        return interaction.reply("❌ You don't own this");
-
-      await redis.hset(`profile:${userId}`, "bg", id);
-
-      return interaction.reply(`✅ Equipped **${id}**`);
-    }
-
-    // ================= ADD BG =================
-    if (sub === "addbg") {
-      if (userId !== DEV_ID)
-        return interaction.reply({
-          content: "❌ No permission",
-          flags: [MessageFlags.Ephemeral]
-        });
-
-      const id = interaction.options.getString("id");
-      const price = interaction.options.getInteger("price");
+    // ================= PREMIUM BG =================
+    if (sub === "upload") {
       const file = interaction.options.getAttachment("image");
 
-      await redis.hset(`shop:bg:${id}`, {
-        price: price.toString(),
-        url: file.url
-      });
+      await redis.hset(`profile:${interaction.user.id}`, "custom_bg", file.url);
+      return interaction.editReply("Premium BG saved");
+    }
 
-      return interaction.reply(`🛒 Added **${id}**`);
+    // ================= RESET =================
+    if (sub === "reset") {
+      await redis.hdel(`profile:${interaction.user.id}`, "custom_bg");
+      await redis.hdel(`profile:${interaction.user.id}`, "bg");
+      return interaction.editReply("Reset done");
+    }
+
+    // ================= VIEW =================
+    if (sub === "view") {
+      const canvas = createCanvas(800, 300);
+      const ctx = canvas.getContext("2d");
+
+      let bg = null;
+
+      try {
+        // 1. Premium BG
+        if (profile.custom_bg) {
+          bg = await loadImage(profile.custom_bg);
+
+        // 2. Shop BG
+        } else if (profile.bg) {
+          const item = await redis.hgetall(`shop:bg:${profile.bg}`);
+          if (item?.url) bg = await loadImage(item.url);
+
+        // 3. Default
+        } else {
+          bg = await loadImage(path.join(__dirname, "../backgrounds/classic.png"));
+        }
+      } catch {}
+
+      if (bg) ctx.drawImage(bg, 0, 0, 800, 300);
+      else {
+        ctx.fillStyle = "#111";
+        ctx.fillRect(0, 0, 800, 300);
+      }
+
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, 0, 800, 300);
+
+      const avatar = await loadImage(
+        target.displayAvatarURL({ extension: "png", size: 256 })
+      );
+
+      const ax = 110, ay = 130;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(ax, ay, 70, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(avatar, 35, 55, 150, 150);
+      ctx.restore();
+
+      ctx.strokeStyle = "#5865F2";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(ax, ay, 72, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = "#fff";
+      ctx.font = "28px CustomFont";
+      ctx.fillText(target.username, 220, 85);
+
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.font = "18px CustomFont";
+      ctx.fillText(profile.bio || "No bio set", 220, 130);
+
+      const buffer = canvas.toBuffer("image/png");
+
+      return interaction.editReply({
+        files: [new AttachmentBuilder(buffer, { name: "profile.png" })]
+      });
     }
   }
 };
