@@ -101,8 +101,8 @@ module.exports = {
       const sub = args[0];
 
       if (sub === "xp") {
-        await redis.hset(profileKey, "xp", 0);
-        await redis.hset(profileKey, "level", 1);
+        await redis.hset(profileKey, "xp", 4000);
+        await redis.hset(profileKey, "level", 25);
         return message.reply("XP reset for testing.");
       }
 
