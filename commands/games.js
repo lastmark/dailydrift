@@ -11,58 +11,84 @@ module.exports = {
     .setName("game")
     .setDescription("Economy system")
 
-    .addSubcommand(s => s.setName("balance").setDescription("Check coins"))
-    .addSubcommand(s => s.setName("daily").setDescription("Daily reward"))
-
+    // ================= BASIC =================
     .addSubcommand(s =>
-      s.setName("shop").setDescription("View background shop")
+      s.setName("balance")
+        .setDescription("Check your coins")
     )
 
     .addSubcommand(s =>
-      s.setName("buybg")
-        .setDescription("Buy background")
-        .addStringOption(o =>
-          o.setName("id").setDescription("Background ID").setRequired(true)
+      s.setName("daily")
+        .setDescription("Claim daily reward")
+    )
+
+    // ================= GAMES =================
+    .addSubcommand(s =>
+      s.setName("rps")
+        .setDescription("Rock Paper Scissors")
+        .addIntegerOption(o =>
+          o.setName("bet")
+            .setDescription("Bet amount")
+            .setRequired(true)
         )
     )
 
     .addSubcommand(s =>
-      s.setName("equipbg")
-        .setDescription("Equip background")
-        .addStringOption(o =>
-          o.setName("id").setDescription("Background ID").setRequired(true)
+      s.setName("coinflip")
+        .setDescription("Flip a coin")
+        .addIntegerOption(o =>
+          o.setName("bet")
+            .setDescription("Bet amount")
+            .setRequired(true)
         )
     )
 
     .addSubcommand(s =>
-      s.setName("addbg")
-        .setDescription("Admin add background")
-        .addStringOption(o =>
-          o.setName("id").setDescription("ID").setRequired(true)
+      s.setName("dice")
+        .setDescription("Roll dice")
+        .addIntegerOption(o =>
+          o.setName("bet")
+            .setDescription("Bet amount")
+            .setRequired(true)
+        )
+    )
+
+    // ================= CASH =================
+    .addSubcommand(s =>
+      s.setName("sendcash")
+        .setDescription("Send coins to user")
+        .addUserOption(o =>
+          o.setName("user")
+            .setDescription("Target user")
+            .setRequired(true)
         )
         .addIntegerOption(o =>
-          o.setName("price").setDescription("Price").setRequired(true)
-        )
-        .addAttachmentOption(o =>
-          o.setName("image").setDescription("Image").setRequired(true)
+          o.setName("amount")
+            .setDescription("Amount")
+            .setRequired(true)
         )
     ),
 
   async execute(interaction, client, redis) {
     const userId = interaction.user.id;
+    const guildId = interaction.guild.id;
     const sub = interaction.options.getSubcommand();
 
-    const DEV_ID = "1303357369622990889";
+    // ================= HELPERS =================
+    const balKey = (id) => `eco:${guildId}:${id}:money`;
 
-    const getBal = async () =>
-      Number(await redis.get(`eco:${userId}:money`) || 0);
+    const getBal = async (id) =>
+      Number(await redis.get(balKey(id)) || 0);
 
-    const addBal = (a) => redis.incrby(`eco:${userId}:money`, a);
-    const takeBal = (a) => redis.decrby(`eco:${userId}:money`, a);
+    const addBal = (id, amt) =>
+      redis.incrby(balKey(id), amt);
+
+    const takeBal = (id, amt) =>
+      redis.decrby(balKey(id), amt);
 
     // ================= BALANCE =================
     if (sub === "balance") {
-      const coins = await getBal();
+      const coins = await getBal(userId);
 
       return interaction.reply({
         embeds: [
@@ -76,107 +102,148 @@ module.exports = {
 
     // ================= DAILY =================
     if (sub === "daily") {
-      const key = `daily:${userId}`;
+      const key = `daily:${guildId}:${userId}`;
       const last = await redis.get(key);
 
-      if (last && Date.now() - last < 86400000)
+      const cooldown = 86400000;
+
+      if (last && Date.now() - Number(last) < cooldown) {
         return interaction.reply({
-          content: "⏳ Already claimed",
+          content: "⏳ You already claimed daily today.",
           flags: [MessageFlags.Ephemeral]
-        });
-
-      const reward = Math.floor(Math.random() * 100) + 1;
-
-      await addBal(reward);
-      await redis.set(key, Date.now());
-
-      return interaction.reply(`🎁 +${reward} coins`);
-    }
-
-    // ================= SHOP =================
-    if (sub === "shop") {
-      const keys = await redis.keys("shop:bg:*");
-
-      if (!keys.length)
-        return interaction.reply("❌ No backgrounds available");
-
-      const embeds = [];
-
-      for (const key of keys) {
-        const id = key.split(":")[2];
-        const item = await redis.hgetall(key);
-
-        embeds.push({
-          title: `🖼 ${id}`,
-          description: `💰 Price: **${item.price} coins**\nUse: /game buybg ${id}`,
-          image: { url: item.url }
         });
       }
 
-      return interaction.reply({ embeds: embeds.slice(0, 10) });
-    }
+      const reward = Math.floor(Math.random() * 100) + 1;
 
-    // ================= BUY BG =================
-    if (sub === "buybg") {
-      const id = interaction.options.getString("id");
-
-      const item = await redis.hgetall(`shop:bg:${id}`);
-      if (!item || !item.price)
-        return interaction.reply("❌ Invalid ID");
-
-      const bal = await getBal();
-      if (bal < Number(item.price))
-        return interaction.reply("❌ Not enough coins");
-
-      await takeBal(Number(item.price));
-
-      await redis.sadd(`bg:owned:${userId}`, id);
-      await redis.hset(`profile:${userId}`, "bg", id);
+      await addBal(userId, reward);
+      await redis.set(key, Date.now());
 
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
             .setColor("#57F287")
-            .setTitle("✅ Purchased")
-            .setImage(item.url)
+            .setTitle("🎁 Daily Reward")
+            .setDescription(`You received **${reward} coins**`)
         ]
       });
     }
 
-    // ================= EQUIP BG =================
-    if (sub === "equipbg") {
-      const id = interaction.options.getString("id");
+    // ================= RPS =================
+    if (sub === "rps") {
+      const bet = interaction.options.getInteger("bet");
+      const bal = await getBal(userId);
 
-      const owned = await redis.sismember(`bg:owned:${userId}`, id);
-      if (!owned)
-        return interaction.reply("❌ You don't own this background");
+      if (bet <= 0)
+        return interaction.reply({ content: "❌ Invalid bet", flags: [MessageFlags.Ephemeral] });
 
-      await redis.hset(`profile:${userId}`, "bg", id);
+      if (bet > bal)
+        return interaction.reply({ content: "❌ Not enough coins", flags: [MessageFlags.Ephemeral] });
 
-      return interaction.reply(`✅ Equipped **${id}**`);
+      const moves = ["rock", "paper", "scissors"];
+
+      const user = moves[Math.floor(Math.random() * 3)];
+      const bot = moves[Math.floor(Math.random() * 3)];
+
+      let win =
+        user === bot ? null :
+        (user === "rock" && bot === "scissors") ||
+        (user === "paper" && bot === "rock") ||
+        (user === "scissors" && bot === "paper");
+
+      const reward = win === null ? 0 : win ? Math.floor(bet * 1.8) : -bet;
+
+      if (reward > 0) await addBal(userId, reward);
+      if (reward < 0) await takeBal(userId, Math.abs(reward));
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#5865F2")
+            .setTitle("🎮 RPS Result")
+            .setDescription(
+              `You: **${user}**\nBot: **${bot}**\n\n` +
+              `${win === null ? "Draw" : win ? "Win" : "Lose"}`
+            )
+        ]
+      });
     }
 
-    // ================= ADD BG (ADMIN) =================
-    if (sub === "addbg") {
-      if (userId !== DEV_ID)
-        return interaction.reply({
-          content: "❌ No permission",
-          flags: [MessageFlags.Ephemeral]
-        });
+    // ================= COINFLIP =================
+    if (sub === "coinflip") {
+      const bet = interaction.options.getInteger("bet");
+      const bal = await getBal(userId);
 
-      const id = interaction.options.getString("id");
-      const price = interaction.options.getInteger("price");
-      const file = interaction.options.getAttachment("image");
+      if (bet > bal)
+        return interaction.reply({ content: "❌ Not enough coins", flags: [MessageFlags.Ephemeral] });
 
-      if (!file.contentType?.startsWith("image/"))
-        return interaction.reply("❌ Invalid image");
+      const win = Math.random() < 0.5;
+      const reward = win ? bet : -bet;
 
-      await redis.hset(`shop:bg:${id}`, {
-        price: price.toString(),
-        url: file.url
+      if (reward > 0) await addBal(userId, reward);
+      else await takeBal(userId, Math.abs(reward));
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#F1C40F")
+            .setDescription(`🪙 ${win ? "WIN" : "LOSE"}\n💰 ${reward}`)
+        ]
       });
+    }
 
-      return interaction.reply(`🛒 Added **${id}**`);
+    // ================= DICE =================
+    if (sub === "dice") {
+      const bet = interaction.options.getInteger("bet");
+      const bal = await getBal(userId);
+
+      if (bet > bal)
+        return interaction.reply({ content: "❌ Not enough coins", flags: [MessageFlags.Ephemeral] });
+
+      const roll = Math.floor(Math.random() * 6) + 1;
+      const win = roll >= 5;
+
+      const reward = win ? bet * 2 : -bet;
+
+      if (reward > 0) await addBal(userId, reward);
+      else await takeBal(userId, Math.abs(reward));
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#57F287")
+            .setDescription(`🎲 Rolled **${roll}**\n💰 ${reward}`)
+        ]
+      });
+    }
+
+    // ================= SEND CASH =================
+    if (sub === "sendcash") {
+      const target = interaction.options.getUser("user");
+      const amount = interaction.options.getInteger("amount");
+
+      const bal = await getBal(userId);
+
+      if (target.id === userId)
+        return interaction.reply({ content: "❌ You can't send to yourself", flags: [MessageFlags.Ephemeral] });
+
+      if (amount <= 0)
+        return interaction.reply({ content: "❌ Invalid amount", flags: [MessageFlags.Ephemeral] });
+
+      if (amount > bal)
+        return interaction.reply({ content: "❌ Not enough coins", flags: [MessageFlags.Ephemeral] });
+
+      await takeBal(userId, amount);
+      await addBal(target.id, amount);
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#57F287")
+            .setTitle("💸 Transfer Complete")
+            .setDescription(`Sent **${amount} coins** to <@${target.id}>`)
+        ]
+      });
     }
   }
 };
