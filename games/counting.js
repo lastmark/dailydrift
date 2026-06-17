@@ -1,115 +1,146 @@
-const Economy = require("../economy");
+// games/counting.js - COMPLETE REWRITE
+const { EmbedBuilder } = require("discord.js");
 
 module.exports = async (message, redis) => {
-  if (message.author.bot || !message.guild) return;
+  try {
+    // Ignore bots
+    if (message.author.bot) return;
+    
+    const guildId = message.guild.id;
+    const userId = message.author.id;
+    const channelId = message.channel.id;
 
-  const guildId = message.guild.id;
-  const userId = message.author.id;
+    // Check if this is the counting channel
+    const countingChannel = await redis.get(`counting:${guildId}:channel`);
+    if (countingChannel !== channelId) return;
 
-  const countingChannel =
-    await redis.get(`counting:${guildId}:channel`);
+    // Get current number
+    const currentNumber = Number(await redis.get(`counting:${guildId}:number`) || 0);
+    const expectedNumber = currentNumber + 1;
 
-  if (!countingChannel) return;
-  if (message.channel.id !== countingChannel) return;
+    // Parse user's message
+    let userNumber;
+    const cleanContent = message.content.replace(/\s+/g, "");
+    
+    // Check if it's a math expression
+    if (/[\+\-\*\/\^]/.test(cleanContent)) {
+      try {
+        const mathExpression = cleanContent.replace(/\^/g, "**");
+        userNumber = Function(`"use strict"; return (${mathExpression})`)();
+      } catch (err) {
+        userNumber = null;
+      }
+    } else {
+      userNumber = parseInt(cleanContent);
+    }
 
-  const economy = new Economy(redis);
+    // Validate number
+    if (isNaN(userNumber)) {
+      await message.react("❌");
+      return;
+    }
 
-  const countKey = `count:${guildId}`;
-  const lastUserKey = `counting:${guildId}:lastUser`;
+    // Get last user
+    const lastUser = await redis.get(`counting:${guildId}:lastUser`);
 
-  const current = Number(await redis.get(countKey) || 0);
-  const expected = current + 1;
+    // Check if same user
+    if (userId === lastUser) {
+      await message.react("❌");
+      const embed = new EmbedBuilder()
+        .setColor("#ED4245")
+        .setDescription(`⚠️ <@${userId}> you can't count twice in a row!`);
+      await message.reply({ embeds: [embed] });
+      return;
+    }
 
-  const number = Number(message.content);
+    // Check if correct number
+    if (userNumber !== expectedNumber) {
+      await message.react("❌");
+      
+      // Track mistake
+      await redis.zincrby(`counting:${guildId}:mistakes`, 1, userId);
+      
+      // Reset streak
+      await redis.del(`counting:${guildId}:${userId}:streak`);
+      
+      // Reset count
+      await redis.set(`counting:${guildId}:number`, 0);
+      await redis.del(`counting:${guildId}:lastUser`);
 
-  if (isNaN(number)) return;
+      const embed = new EmbedBuilder()
+        .setColor("#ED4245")
+        .setTitle("💥 Wrong Number!")
+        .setDescription(`<@${userId}> typed **${userNumber}** but expected **${expectedNumber}**`)
+        .addFields(
+          { name: "🔥 Streak Lost", value: `The count resets to **0**`, inline: true }
+        )
+        .setTimestamp();
 
-  const lastUser = await redis.get(lastUserKey);
+      await message.reply({ embeds: [embed] });
+      return;
+    }
 
-  // same user twice
-  if (lastUser === userId) {
-    await message.react("❌");
+    // =========================
+    // ✅ CORRECT COUNT
+    // =========================
 
-    await redis.set(countKey, 0);
-    await redis.del(lastUserKey);
+    // Update count
+    await redis.set(`counting:${guildId}:number`, expectedNumber);
+    await redis.set(`counting:${guildId}:lastUser`, userId);
 
-    return;
+    // Track correct count
+    await redis.zincrby(`counting:${guildId}:correct`, 1, userId);
+
+    // Update streak
+    const currentStreak = Number(await redis.get(`counting:${guildId}:${userId}:streak`) || 0) + 1;
+    await redis.set(`counting:${guildId}:${userId}:streak`, currentStreak);
+
+    // Update best streak
+    const bestStreak = Number(await redis.get(`counting:${guildId}:${userId}:bestStreak`) || 0);
+    if (currentStreak > bestStreak) {
+      await redis.set(`counting:${guildId}:${userId}:bestStreak`, currentStreak);
+    }
+
+    // React with ✅
+    await message.react("✅");
+
+    // =========================
+    // 🎉 MILESTONES
+    // =========================
+    if (expectedNumber % 10 === 0) {
+      const embed = new EmbedBuilder()
+        .setColor("#F1C40F")
+        .setTitle("🎉 Milestone Reached!")
+        .setDescription(`The count has reached **${expectedNumber}**!`)
+        .addFields(
+          { name: "👑 Counted By", value: `<@${userId}>`, inline: true },
+          { name: "🔥 Current Streak", value: `${currentStreak}`, inline: true }
+        )
+        .setTimestamp();
+      
+      await message.channel.send({ embeds: [embed] });
+    }
+
+    // =========================
+    // 🏆 STREAK ACHIEVEMENTS
+    // =========================
+    if (currentStreak === 100) {
+      await message.channel.send(`🌟 <@${userId}> hit a **100** streak! Keep going!`);
+    }
+    
+    if (currentStreak === 200) {
+      await message.channel.send(`💎 <@${userId}> hit a **200** streak! Amazing!`);
+    }
+    
+    if (currentStreak === 300) {
+      await message.channel.send(`👑 <@${userId}> hit a **300** streak! LEGENDARY!`);
+    }
+    
+    if (currentStreak === 400) {
+      await message.channel.send(`🏆 <@${userId}> hit a **400** streak! ABSOLUTE LEGEND!`);
+    }
+
+  } catch (error) {
+    console.error("Counting game error:", error);
   }
-
-  // wrong number
-  if (number !== expected) {
-    await message.react("❌");
-
-    await redis.set(countKey, 0);
-    await redis.del(lastUserKey);
-
-    await redis.zincrby(
-      `counting:${guildId}:sabotages`,
-      1,
-      userId
-    );
-
-    return;
-  }
-
-  // correct number
-  await message.react("✅");
-
-  await redis.set(countKey, number);
-  await redis.set(lastUserKey, userId);
-
-  await redis.zincrby(
-    `counting:${guildId}:scores`,
-    1,
-    userId
-  );
-
-  const streakKey =
-    `counting:${guildId}:${userId}:streak`;
-
-  const currentStreak =
-    await redis.incr(streakKey);
-
-  const highscoreKey =
-    `counting:${guildId}:${userId}:highscore`;
-
-  const highscore =
-    Number(await redis.get(highscoreKey) || 0);
-
-  if (currentStreak > highscore) {
-    await redis.set(
-      highscoreKey,
-      currentStreak
-    );
-  }
-
-  // Economy reward
-  const baseReward = 5;
-
-  let multiplier = 1;
-
-  const doubleXP =
-    await economy.getDoubleXP(userId);
-
-  if (doubleXP > 0) {
-    multiplier = 2;
-    await economy.addDoubleXP(userId, -1);
-  }
-
-  if (currentStreak % 10 === 0) {
-    multiplier += 0.5;
-  }
-
-  const reward =
-    Math.floor(baseReward * multiplier);
-
-  await economy.addBalance(
-    userId,
-    reward
-  );
-
-  await economy.addTotalEarned(
-    userId,
-    reward
-  );
 };
