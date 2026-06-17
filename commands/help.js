@@ -12,7 +12,7 @@ module.exports = {
 
     
 
-    const color = userPremium || guildPremium ? "#FFD700" : "#5865F2";
+    
 
     // Group commands by category (folder name)
     const categories = new Map();
