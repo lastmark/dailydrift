@@ -1,8 +1,8 @@
-// commands/games.js - NUMBERS ONLY VERSION
+// commands/games.js – REMOVED VIP SHOP OPTION
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 
 // =========================
-// 🃏 BLACKJACK GAME CLASS
+// 🃏 BLACKJACK GAME CLASS (unchanged)
 // =========================
 class BlackjackGame {
   constructor(userId, bet, economy, redis) {
@@ -14,19 +14,16 @@ class BlackjackGame {
     this.result = null;
     this.balance = 0;
     
-    // Card setup - NUMBERS ONLY
     this.values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
     this.deck = this.createDeck();
     this.shuffleDeck();
     
-    // Deal initial hands
     this.playerHand = [this.drawCard(), this.drawCard()];
     this.dealerHand = [this.drawCard(), this.drawCard()];
     
     this.playerValue = this.getHandValue(this.playerHand);
     this.dealerValue = this.getHandValue(this.dealerHand);
     
-    // Check for instant blackjack
     if (this.playerValue === 21 && this.dealerValue === 21) {
       this.gameOver = true;
       this.result = 'push';
@@ -42,10 +39,7 @@ class BlackjackGame {
   createDeck() {
     const deck = [];
     for (const value of this.values) {
-      // 4 copies of each value (like 4 suits but no suit symbols)
-      for (let i = 0; i < 4; i++) {
-        deck.push({ value });
-      }
+      for (let i = 0; i < 4; i++) deck.push({ value });
     }
     return deck;
   }
@@ -83,18 +77,14 @@ class BlackjackGame {
   }
 
   formatHand(hand, hideDealer = false) {
-    if (hideDealer) {
-      return `${hand[0].value} ?`;
-    }
+    if (hideDealer) return `${hand[0].value} ?`;
     return hand.map(card => card.value).join(' ');
   }
 
   hit() {
     if (this.gameOver) return false;
-    
     this.playerHand.push(this.drawCard());
     this.playerValue = this.getHandValue(this.playerHand);
-    
     if (this.playerValue > 21) {
       this.gameOver = true;
       this.result = 'bust';
@@ -104,30 +94,20 @@ class BlackjackGame {
 
   stand() {
     if (this.gameOver) return false;
-    
     while (this.dealerValue < 17) {
       this.dealerHand.push(this.drawCard());
       this.dealerValue = this.getHandValue(this.dealerHand);
     }
-    
     this.gameOver = true;
-    
-    if (this.dealerValue > 21) {
-      this.result = 'win';
-    } else if (this.playerValue > this.dealerValue) {
-      this.result = 'win';
-    } else if (this.playerValue === this.dealerValue) {
-      this.result = 'push';
-    } else {
-      this.result = 'lose';
-    }
-    
+    if (this.dealerValue > 21) this.result = 'win';
+    else if (this.playerValue > this.dealerValue) this.result = 'win';
+    else if (this.playerValue === this.dealerValue) this.result = 'push';
+    else this.result = 'lose';
     return true;
   }
 
   async processResult() {
     let winAmount = 0;
-    
     if (this.result === 'blackjack') {
       winAmount = Math.floor(this.bet * 2.5);
       await this.economy.addBalance(this.userId, winAmount);
@@ -142,18 +122,15 @@ class BlackjackGame {
       winAmount = this.bet;
       await this.economy.addBalance(this.userId, winAmount);
       await this.redis.incr(`games:${this.userId}:blackjack_ties`);
-    } else if (this.result === 'bust' || this.result === 'lose') {
+    } else {
       await this.economy.takeBalance(this.userId, this.bet);
       await this.economy.addTotalSpent(this.userId, this.bet);
       await this.redis.incr(`games:${this.userId}:blackjack_losses`);
     }
-    
     return winAmount;
   }
 
-  setBalance(balance) {
-    this.balance = balance;
-  }
+  setBalance(balance) { this.balance = balance; }
 
   getEmbed() {
     const embed = new EmbedBuilder()
@@ -163,16 +140,8 @@ class BlackjackGame {
       .setTitle(this.gameOver ? this.getResultTitle() : 'BLACKJACK')
       .setDescription(this.gameOver ? this.getResultDescription() : `Bet: ${this.bet} coins`)
       .addFields(
-        {
-          name: `Your Hand (${this.playerValue})`,
-          value: this.formatHand(this.playerHand),
-          inline: false
-        },
-        {
-          name: `Dealer's Hand (${this.gameOver ? this.dealerValue : '?'})`,
-          value: this.gameOver ? this.formatHand(this.dealerHand) : this.formatHand(this.dealerHand, true),
-          inline: false
-        }
+        { name: `Your Hand (${this.playerValue})`, value: this.formatHand(this.playerHand), inline: false },
+        { name: `Dealer's Hand (${this.gameOver ? this.dealerValue : '?'})`, value: this.gameOver ? this.formatHand(this.dealerHand) : this.formatHand(this.dealerHand, true), inline: false }
       )
       .setFooter({ text: `Balance: ${this.balance} coins` })
       .setTimestamp();
@@ -189,7 +158,6 @@ class BlackjackGame {
         inline: false
       });
     }
-
     return embed;
   }
 
@@ -202,7 +170,7 @@ class BlackjackGame {
   }
 
   getResultDescription() {
-    if (this.result === 'blackjack') return `Bet: ${this.bet} coins\nPerfect 21! You hit Blackjack!`;
+    if (this.result === 'blackjack') return `Bet: ${this.bet} coins\nPerfect 21!`;
     if (this.result === 'win') return `Bet: ${this.bet} coins\nYou beat the dealer!`;
     if (this.result === 'push') return `Bet: ${this.bet} coins\nIt's a tie!`;
     if (this.result === 'bust') return `Bet: ${this.bet} coins\nYou went over 21!`;
@@ -213,27 +181,14 @@ class BlackjackGame {
     if (this.gameOver) {
       return new ActionRowBuilder()
         .addComponents(
-          new ButtonBuilder()
-            .setCustomId('blackjack_play_again')
-            .setLabel('Play Again')
-            .setStyle(ButtonStyle.Success),
-          new ButtonBuilder()
-            .setCustomId('blackjack_end')
-            .setLabel('End Game')
-            .setStyle(ButtonStyle.Secondary)
+          new ButtonBuilder().setCustomId('blackjack_play_again').setLabel('Play Again').setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId('blackjack_end').setLabel('End Game').setStyle(ButtonStyle.Secondary)
         );
     }
-
     return new ActionRowBuilder()
       .addComponents(
-        new ButtonBuilder()
-          .setCustomId('blackjack_hit')
-          .setLabel('Hit')
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId('blackjack_stand')
-          .setLabel('Stand')
-          .setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId('blackjack_hit').setLabel('Hit').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('blackjack_stand').setLabel('Stand').setStyle(ButtonStyle.Danger)
       );
   }
 }
@@ -338,8 +293,7 @@ module.exports = {
             .setRequired(true)
             .addChoices(
               { name: "Shield", value: "shield" },
-              { name: "Double XP", value: "double" },
-              { name: "VIP Access", value: "vip" }
+              { name: "Double XP", value: "double" }
             )
         )
     )
@@ -353,7 +307,7 @@ module.exports = {
     const userId = interaction.user.id;
     
     // =========================
-    // ECONOMY HELPER FUNCTIONS
+    // ECONOMY HELPERS (global keys)
     // =========================
     const getBalance = async (id) => Number(await redis.get(`eco:${id}:money`) || 0);
     const addBalance = async (id, amount) => await redis.incrby(`eco:${id}:money`, amount);
@@ -367,8 +321,6 @@ module.exports = {
     const addShield = async (id, amount = 1) => await redis.incrby(`eco:${id}:shield`, amount);
     const getDoubleXP = async (id) => Number(await redis.get(`eco:${id}:double`) || 0);
     const addDoubleXP = async (id, amount = 1) => await redis.incrby(`eco:${id}:double`, amount);
-    const getVIP = async (id) => await redis.get(`eco:${id}:vip`) === 'true';
-    const setVIP = async (id, status) => await redis.set(`eco:${id}:vip`, status.toString());
     const getTotalEarned = async (id) => Number(await redis.get(`eco:${id}:total_earned`) || 0);
     const addTotalEarned = async (id, amount) => await redis.incrby(`eco:${id}:total_earned`, amount);
     const getTotalSpent = async (id) => Number(await redis.get(`eco:${id}:total_spent`) || 0);
@@ -376,12 +328,12 @@ module.exports = {
 
     const economy = {
       getBalance, addBalance, takeBalance, getShield, addShield,
-      getDoubleXP, addDoubleXP, getVIP, setVIP,
+      getDoubleXP, addDoubleXP,
       getTotalEarned, addTotalEarned, getTotalSpent, addTotalSpent
     };
 
     // =========================
-    // 🎮 RPS
+    // 🎮 RPS (unchanged)
     // =========================
     if (sub === "rps") {
       const choice = interaction.options.getString("choice");
@@ -390,11 +342,7 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription(`You don't have enough coins! You have ${balance}, need ${bet}.`)
-          ],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You don't have enough coins! You have ${balance}, need ${bet}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -436,18 +384,8 @@ module.exports = {
         .setTitle(`Rock Paper Scissors ${result === "win" ? "Win!" : result === "tie" ? "Tie!" : "Lose..."}`)
         .setDescription(`You chose ${choice}\nBot chose ${botChoice}`)
         .addFields(
-          { 
-            name: "Result", 
-            value: result === "win" ? `You won ${winAmount} coins!` : 
-                   result === "tie" ? "Tie! Bet returned!" : 
-                   `You lost ${bet} coins!`,
-            inline: false
-          },
-          {
-            name: "New Balance",
-            value: `${await getBalance(userId)} coins`,
-            inline: true
-          }
+          { name: "Result", value: result === "win" ? `You won ${winAmount} coins!` : result === "tie" ? "Tie! Bet returned!" : `You lost ${bet} coins!`, inline: false },
+          { name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true }
         )
         .setFooter({ text: `Bet: ${bet} coins` })
         .setTimestamp();
@@ -456,7 +394,7 @@ module.exports = {
     }
 
     // =========================
-    // 🪙 COINFLIP
+    // 🪙 COINFLIP (unchanged)
     // =========================
     if (sub === "coinflip") {
       const side = interaction.options.getString("side");
@@ -465,11 +403,7 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription(`You need ${bet} coins but only have ${balance}.`)
-          ],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${bet} coins but only have ${balance}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -493,17 +427,8 @@ module.exports = {
         .setTitle(`Coin Flip ${won ? "Win!" : "Lose..."}`)
         .setDescription(`The coin landed on ${result}!`)
         .addFields(
-          { 
-            name: "Result", 
-            value: won ? `You won ${winAmount} coins!` : 
-                   `You lost ${bet} coins!`,
-            inline: false
-          },
-          {
-            name: "New Balance",
-            value: `${await getBalance(userId)} coins`,
-            inline: true
-          }
+          { name: "Result", value: won ? `You won ${winAmount} coins!` : `You lost ${bet} coins!`, inline: false },
+          { name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true }
         )
         .setTimestamp();
 
@@ -511,7 +436,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎲 DICE
+    // 🎲 DICE (unchanged)
     // =========================
     if (sub === "dice") {
       const number = interaction.options.getInteger("number");
@@ -520,11 +445,7 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription(`You need ${bet} coins but only have ${balance}.`)
-          ],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${bet} coins but only have ${balance}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -532,15 +453,7 @@ module.exports = {
       const roll = Math.floor(Math.random() * 6) + 1;
       const won = number === roll;
       
-      const multipliers = {
-        1: 5,
-        2: 3,
-        3: 2.5,
-        4: 2.5,
-        5: 3,
-        6: 5
-      };
-      
+      const multipliers = { 1: 5, 2: 3, 3: 2.5, 4: 2.5, 5: 3, 6: 5 };
       const winAmount = won ? Math.floor(bet * multipliers[number]) : 0;
 
       if (won) {
@@ -558,17 +471,8 @@ module.exports = {
         .setTitle(`Dice Roll ${won ? "Win!" : "Lose..."}`)
         .setDescription(`You rolled a ${roll}!`)
         .addFields(
-          { 
-            name: "Result", 
-            value: won ? `You won ${winAmount} coins! (${multipliers[number]}x multiplier)` : 
-                   `You lost ${bet} coins!`,
-            inline: false
-          },
-          {
-            name: "New Balance",
-            value: `${await getBalance(userId)} coins`,
-            inline: true
-          }
+          { name: "Result", value: won ? `You won ${winAmount} coins! (${multipliers[number]}x multiplier)` : `You lost ${bet} coins!`, inline: false },
+          { name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true }
         )
         .setTimestamp();
 
@@ -576,7 +480,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎰 SLOTS
+    // 🎰 SLOTS (unchanged)
     // =========================
     if (sub === "slots") {
       const bet = interaction.options.getInteger("bet");
@@ -584,16 +488,11 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription(`You need ${bet} coins but only have ${balance}.`)
-          ],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${bet} coins but only have ${balance}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
 
-      // Numbers only slots
       const slots = ["7", "7", "7", "7", "7", "7"];
       const result = [
         slots[Math.floor(Math.random() * slots.length)],
@@ -631,17 +530,8 @@ module.exports = {
         .setTitle("Slot Machine")
         .setDescription(`${result.join(" | ")}\n\n${message}`)
         .addFields(
-          { 
-            name: "Result", 
-            value: winAmount > 0 ? `You won ${winAmount} coins!` : 
-                   `You lost ${bet} coins!`,
-            inline: false
-          },
-          {
-            name: "New Balance",
-            value: `${await getBalance(userId)} coins`,
-            inline: true
-          }
+          { name: "Result", value: winAmount > 0 ? `You won ${winAmount} coins!` : `You lost ${bet} coins!`, inline: false },
+          { name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true }
         )
         .setTimestamp();
 
@@ -649,7 +539,7 @@ module.exports = {
     }
 
     // =========================
-    // 🃏 BLACKJACK
+    // 🃏 BLACKJACK (unchanged)
     // =========================
     if (sub === "blackjack") {
       const bet = interaction.options.getInteger("bet");
@@ -657,11 +547,7 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription(`You need ${bet} coins but only have ${balance}.`)
-          ],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${bet} coins but only have ${balance}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -671,14 +557,15 @@ module.exports = {
       
       const embed = game.getEmbed();
       const buttons = game.getButtons();
-      
+
       const reply = await interaction.reply({
         embeds: [embed],
         components: [buttons],
-        fetchReply: true
+        withResponse: true
       });
+      const msg = reply.resource.message;
 
-      const collector = reply.createMessageComponentCollector({
+      const collector = msg.createMessageComponentCollector({
         filter: i => i.user.id === userId,
         time: 60000
       });
@@ -738,7 +625,7 @@ module.exports = {
           game.setBalance(newBalance);
           
           const newEmbed = game.getEmbed();
-          await reply.edit({ 
+          await msg.edit({ 
             embeds: [newEmbed], 
             components: [] 
           });
@@ -747,7 +634,7 @@ module.exports = {
     }
 
     // =========================
-    // 💰 DAILY
+    // 💰 DAILY (unchanged)
     // =========================
     if (sub === "daily") {
       const lastDaily = await redis.get(`games:${userId}:daily`);
@@ -757,11 +644,7 @@ module.exports = {
       if (lastDaily && now - Number(lastDaily) < cooldown) {
         const remaining = Math.ceil((cooldown - (now - Number(lastDaily))) / 60000);
         return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#F1C40F")
-              .setDescription(`You can claim your daily bonus in ${remaining} minutes!`)
-          ],
+          embeds: [new EmbedBuilder().setColor("#F1C40F").setDescription(`You can claim your daily bonus in ${remaining} minutes!`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -775,11 +658,7 @@ module.exports = {
         .setColor("#57F287")
         .setTitle("Daily Bonus Claimed!")
         .setDescription(`You received ${bonus} coins!`)
-        .addFields({
-          name: "New Balance",
-          value: `${await getBalance(userId)} coins`,
-          inline: true
-        })
+        .addFields({ name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true })
         .setFooter({ text: "Come back tomorrow for more!" })
         .setTimestamp();
 
@@ -787,7 +666,7 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 SHOP
+    // 🛒 SHOP (removed VIP)
     // =========================
     if (sub === "shop") {
       const embed = new EmbedBuilder()
@@ -795,21 +674,8 @@ module.exports = {
         .setTitle("Game Shop")
         .setDescription(`Your balance: ${await getBalance(userId)} coins`)
         .addFields(
-          {
-            name: "Shield",
-            value: `Protects your counting streak\nPrice: 200 coins\nOwned: ${await getShield(userId)}`,
-            inline: true
-          },
-          {
-            name: "Double XP",
-            value: `Double coins for 5 counts\nPrice: 500 coins\nActive: ${await getDoubleXP(userId) > 0 ? 'Active' : 'Inactive'}`,
-            inline: true
-          },
-          {
-            name: "VIP Access",
-            value: `Exclusive profile features\nPrice: 2000 coins\nStatus: ${await getVIP(userId) ? 'Active' : 'Inactive'}`,
-            inline: true
-          }
+          { name: "Shield", value: `Protects your counting streak\nPrice: 200 coins\nOwned: ${await getShield(userId)}`, inline: true },
+          { name: "Double XP", value: `Double coins for 5 counts\nPrice: 500 coins\nActive: ${await getDoubleXP(userId) > 0 ? 'Active' : 'Inactive'}`, inline: true }
         )
         .setFooter({ text: "Use /games buy <item> to purchase" });
 
@@ -817,27 +683,24 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 BUY
+    // 🛒 BUY (removed VIP)
     // =========================
     if (sub === "buy") {
       const item = interaction.options.getString("item");
 
-      const prices = {
-        shield: 200,
-        double: 500,
-        vip: 2000
-      };
-
+      const prices = { shield: 200, double: 500 };
       const price = prices[item];
+      if (!price) {
+        return interaction.reply({
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription("Invalid item. Choose `shield` or `double`.")],
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
       const balance = await getBalance(userId);
-      
       if (balance < price) {
         return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription(`You need ${price} coins but only have ${balance}.`)
-          ],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${price} coins but only have ${balance}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -849,32 +712,21 @@ module.exports = {
         await addShield(userId);
       } else if (item === "double") {
         await addDoubleXP(userId, 5);
-      } else if (item === "vip") {
-        await setVIP(userId, true);
       }
 
-      const itemNames = {
-        shield: "Shield",
-        double: "Double XP (5 uses)",
-        vip: "VIP Access"
-      };
-
+      const itemNames = { shield: "Shield", double: "Double XP (5 uses)" };
       const embed = new EmbedBuilder()
         .setColor("#57F287")
         .setTitle("Purchase Successful!")
         .setDescription(`You bought ${itemNames[item]} for ${price} coins!`)
-        .addFields({
-          name: "New Balance",
-          value: `${await getBalance(userId)} coins`,
-          inline: true
-        })
+        .addFields({ name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true })
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed] });
     }
 
     // =========================
-    // 📊 STATS
+    // 📊 STATS (unchanged)
     // =========================
     if (sub === "stats") {
       const stats = await redis.hgetall(`games:${userId}`) || {};
@@ -884,31 +736,11 @@ module.exports = {
         .setTitle(`${interaction.user.username}'s Game Stats`)
         .setThumbnail(interaction.user.displayAvatarURL())
         .addFields(
-          {
-            name: "RPS",
-            value: `Wins: ${stats.rps_wins || 0}\nLosses: ${stats.rps_losses || 0}\nTies: ${stats.rps_ties || 0}`,
-            inline: true
-          },
-          {
-            name: "Coin Flip",
-            value: `Wins: ${stats.coinflip_wins || 0}\nLosses: ${stats.coinflip_losses || 0}`,
-            inline: true
-          },
-          {
-            name: "Dice",
-            value: `Wins: ${stats.dice_wins || 0}\nLosses: ${stats.dice_losses || 0}`,
-            inline: true
-          },
-          {
-            name: "Slots",
-            value: `Wins: ${stats.slots_wins || 0}\nLosses: ${stats.slots_losses || 0}\nJackpots: ${stats.slots_jackpots || 0}`,
-            inline: true
-          },
-          {
-            name: "Blackjack",
-            value: `Wins: ${stats.blackjack_wins || 0}\nLosses: ${stats.blackjack_losses || 0}\nTies: ${stats.blackjack_ties || 0}`,
-            inline: true
-          }
+          { name: "RPS", value: `Wins: ${stats.rps_wins || 0}\nLosses: ${stats.rps_losses || 0}\nTies: ${stats.rps_ties || 0}`, inline: true },
+          { name: "Coin Flip", value: `Wins: ${stats.coinflip_wins || 0}\nLosses: ${stats.coinflip_losses || 0}`, inline: true },
+          { name: "Dice", value: `Wins: ${stats.dice_wins || 0}\nLosses: ${stats.dice_losses || 0}`, inline: true },
+          { name: "Slots", value: `Wins: ${stats.slots_wins || 0}\nLosses: ${stats.slots_losses || 0}\nJackpots: ${stats.slots_jackpots || 0}`, inline: true },
+          { name: "Blackjack", value: `Wins: ${stats.blackjack_wins || 0}\nLosses: ${stats.blackjack_losses || 0}\nTies: ${stats.blackjack_ties || 0}`, inline: true }
         )
         .setTimestamp();
 
