@@ -1,3 +1,9 @@
+const {
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  EmbedBuilder,
+  MessageFlags
+} = require("discord.js");
 data: new SlashCommandBuilder()
   .setName("mod")
   .setDescription("Moderation control system")
