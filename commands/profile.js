@@ -239,4 +239,3 @@ module.exports = {
       return await interaction.editReply({ files: [attachment] });
     }
   }
-};
