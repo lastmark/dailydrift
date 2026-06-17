@@ -92,19 +92,62 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // Handle Buttons
+  // ==========================================
+  // 🖲️ BUTTON HANDLER (inline – no external file)
+  // ==========================================
   if (interaction.isButton()) {
-    try {
-      const buttonHandler = require("./handlers/buttonHandler.js");
-      await buttonHandler(interaction, client, redis);
-    } catch (err) {
-      console.error("Button handler error:", err);
-      if (!interaction.replied) {
-        await interaction.reply({ 
-          content: "❌ Error handling button.", 
-          flags: MessageFlags.Ephemeral 
-        });
+    // Ignore blackjack buttons – they are handled inside the games command
+    if (interaction.customId.startsWith('blackjack_')) return;
+
+    const { customId, user, guildId } = interaction;
+
+    // Handle counting shop buttons
+    if (customId.startsWith('counting_buy_')) {
+      try {
+        const item = customId.split('_')[2];
+        const userId = user.id;
+        const prices = { shield: 200, double: 500 };
+        const price = prices[item];
+        if (!price) {
+          return interaction.reply({ content: "❌ Invalid item.", flags: MessageFlags.Ephemeral });
+        }
+
+        const balanceKey = `eco:${userId}:money`;
+        let coins = Number(await redis.get(balanceKey) || 0);
+        if (coins < price) {
+          return interaction.reply({
+            embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`❌ You need **${price}** coins but only have **${coins}**.`)],
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        await redis.set(balanceKey, coins - price);
+        if (item === 'shield') {
+          await redis.incr(`eco:${userId}:shield`);
+        } else if (item === 'double') {
+          await redis.set(`eco:${userId}:double`, 5);
+        }
+
+        const itemNames = { shield: "🛡️ Shield", double: "⚡ Double XP (5 uses)" };
+        const embed = new EmbedBuilder()
+          .setColor("#57F287")
+          .setTitle("✅ Purchase Successful!")
+          .setDescription(`You bought **${itemNames[item]}** for **${price}** coins!`)
+          .addFields({ name: "💰 New Balance", value: `${await redis.get(balanceKey) || 0} coins`, inline: true })
+          .setTimestamp();
+
+        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      } catch (err) {
+        console.error("Button handler error:", err);
+        if (!interaction.replied) {
+          await interaction.reply({ content: "❌ Error handling button.", flags: MessageFlags.Ephemeral });
+        }
       }
+    }
+
+    // If button is not recognized, ignore
+    if (!interaction.replied) {
+      await interaction.reply({ content: "❌ This button is not supported.", flags: MessageFlags.Ephemeral });
     }
   }
 
