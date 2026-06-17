@@ -2,6 +2,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 
 module.exports = {
+  category: "Premium",
   data: new SlashCommandBuilder()
     .setName("redeem")
     .setDescription("Redeem a premium code")
