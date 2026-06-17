@@ -1,76 +1,71 @@
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
+const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const e = require("../emojis.js");
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("help")
-    .setDescription("📚 View the complete listing of interactive application modules and features."),
+    .setDescription("View all bot commands and features"),
 
   async execute(interaction, client, redis) {
     const userId = interaction.user.id;
     const guildId = interaction.guildId;
 
-    // Fetch active licenses from Redis cache layers concurrently
     const [userPremium, guildPremium] = await Promise.all([
       redis.get(`premium:user:${userId}`),
       redis.get(`premium:guild:${guildId}`)
     ]);
 
-    const userStatus = userPremium ? "💎 **User Premium Active**" : "Standard Tier";
-    const guildStatus = guildPremium ? "💎 **Server Premium Active**" : "Standard Tier";
+    const userStatus = userPremium ? "Active" : "Standard";
+    const guildStatus = guildPremium ? "Active" : "Standard";
 
-    const helpEmbed = new EmbedBuilder()
-      .setColor(userPremium || guildPremium ? "#FFD700" : "#5865F2")
-      .setAuthor({ name: `${client.user.username} Operational Directive Matrix`, iconURL: client.user.displayAvatarURL() })
+    const color = userPremium || guildPremium ? "#FFD700" : "#5865F2";
+
+    const embed = new EmbedBuilder()
+      .setColor(color)
+      .setAuthor({
+        name: `${client.user.username} Help Center`,
+        iconURL: client.user.displayAvatarURL()
+      })
       .setDescription(
-        `Welcome to the primary help terminal console, ${interaction.user}.\n\n` +
-        `⚙️ **Your System Access Frameworks:**\n` +
-        `• **Your Profile Status:** ${userStatus}\n` +
-        `• **Current Server Status:** ${guildStatus}\n\n` +
-        `🔬 *To activate higher processing modules, check out our support pathways.*`
+        `${e.info} Welcome ${interaction.user.username}\n\n` +
+        `**Status Overview**\n` +
+        `${e.premium} User: ${userStatus}\n` +
+        `${e.server} Server: ${guildStatus}\n\n` +
+        `Use the categories below to explore commands.`
       )
       .addFields(
         {
-          name: "👑 How to Get Premium & Active Perks",
+          name: `${e.profile} Profile System`,
           value:
-            "💬 **How to Purchase:** Contact the bot developer (<@1303357369622990889>) directly or visit the support node to buy a license key.\n\n" +
-            "✨ **User Premium Perks:** Unlocks personal profile card banner uploads, custom hex color profiles, and a network-wide permanent **2.0x XP & Economy Coin Multiplier**.\n\n" +
-            "🏢 **Guild Premium Perks:** Unlocks advanced server automation systems including high-speed Anti-Spam protection loops, live voice-channel member statistics tracking boards, and custom rich-embed auto-responders.",
-          inline: false
+            "`/profile view` - View profile\n" +
+            "`/profile setbio` - Set biography\n" +
+            "`/profile reset` - Reset profile"
         },
         {
-          name: "Sub-Section: Identity & Profile Utilities",
-          value: 
-            "`/profile view` - Render your premium-styled graphical profile canvas.\n" +
-            "`/profile setbio` - Modify your biography parameters string (Max 80 chars).\n" +
-            "`/profile reset` - Strip your customized background image back to default core assets.",
-          inline: false
+          name: `${e.premium} Premium Features`,
+          value:
+            "`/profile upload` - Custom background\n" +
+            "`/premium` - Check subscription status"
         },
         {
-          name: "Sub-Section: Premium Member Options (User Tier)",
-          value: 
-            "`/profile upload` - 🖼️ Inject a custom 800x300 image backdrop layer onto your canvas card.\n" +
-            "⚡ **Passive Boosts:** Automatically doubles your progression rate via our global multiplier engine hooks.",
-          inline: false
+          name: `${e.tools} Utility`,
+          value:
+            "`/help` - Show this menu\n" +
+            "`/ping` - Check bot latency"
         },
         {
-          name: "Sub-Section: Server Administration Options (Guild Tier)",
-          value: 
-            "`/premium-set antispam` - Toggle high-velocity real-time message flood mitigation engine blocks.\n" +
-            "`/premium-set setup-stats` - Deploy synchronized live member trackers onto voice room directory channels.\n" +
-            "`/responder-set` - Map custom keywords directly onto automated deep rich interactive embeds.",
-          inline: false
-        },
-        {
-          name: "Sub-Section: Diagnostics & Core Tools",
-          value: 
-            "`/premium` - Query remaining expiration lifespans on active subscription configurations.\n" +
-            "`/help` - Deploy this complete diagnostics reference handbook asset.",
-          inline: false
+          name: `${e.settings} Server Tools`,
+          value:
+            "`/premium-set antispam` - Anti-spam system\n" +
+            "`/premium-set setup-stats` - Voice stats setup\n" +
+            "`/responder-set` - Auto responder system"
         }
       )
-      .setFooter({ text: "Application Core System Protocol • Created by Aryan Center Dev Division" })
+      .setFooter({
+        text: `${client.user.username} • System Help Module`
+      })
       .setTimestamp();
 
-    return await interaction.reply({ embeds: [helpEmbed] });
+    return interaction.reply({ embeds: [embed] });
   }
 };
