@@ -11,203 +11,174 @@ try {
   }
 } catch {}
 
+const bgList = {
+  cyber1: "https://yourcdn.com/bg/cyber1.png",
+  fire1: "https://yourcdn.com/bg/fire1.png",
+  void1: "https://yourcdn.com/bg/void1.png",
+  neon1: "https://yourcdn.com/bg/neon1.png"
+};
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("profile")
-    .setDescription("View your profile system")
+    .setDescription("View profile system")
     .addSubcommand(s =>
       s.setName("view")
-        .setDescription("View a user profile")
+        .setDescription("View profile")
         .addUserOption(o =>
-          o.setName("target")
-            .setDescription("User to view")
-            .setRequired(false)
+          o.setName("target").setDescription("User").setRequired(false)
         )
+    )
+    .addSubcommand(s =>
+      s.setName("setbio")
+        .setDescription("Set bio")
+        .addStringOption(o =>
+          o.setName("text").setDescription("Bio").setRequired(true)
+        )
+    )
+    .addSubcommand(s =>
+      s.setName("upload")
+        .setDescription("Premium custom background")
+        .addAttachmentOption(o =>
+          o.setName("image").setDescription("Image").setRequired(true)
+        )
+    )
+    .addSubcommand(s =>
+      s.setName("reset")
+        .setDescription("Reset background")
     ),
 
   async execute(interaction, client, redis) {
     await interaction.deferReply();
 
-    const target = interaction.options.getUser("target") || interaction.user;
-    const data = (await redis.hgetall(`profile:${target.id}`)) || {};
+    const sub = interaction.options.getSubcommand();
+    const user = interaction.options.getUser("target") || interaction.user;
+    const userId = user.id;
 
-    const bio = data.bio || "No bio set";
-    const bg = data.custom_bg;
+    const data = (await redis.hgetall(`profile:${userId}`)) || {};
 
-    const level = Number(data.level || 1);
-    const xp = Number(data.xp || 0);
-    const needed = 100 * level;
-    const progress = Math.min(xp / needed, 1);
+    /* ================= BIO ================= */
+    if (sub === "setbio") {
+      const text = interaction.options.getString("text");
 
-    const canvas = createCanvas(800, 300);
-    const ctx = canvas.getContext("2d");
+      if (text.length > 80)
+        return interaction.reply({ content: "Max 80 chars", ephemeral: true });
 
-    const tick = Date.now() / 50; // animation driver
-
-    // =========================
-    // BACKGROUND
-    // =========================
-    try {
-      const image = bg
-        ? await loadImage(bg)
-        : await loadImage(path.join(__dirname, "../backgrounds/classic.png"));
-
-      ctx.drawImage(image, 0, 0, 800, 300);
-    } catch {
-      ctx.fillStyle = "#111";
-      ctx.fillRect(0, 0, 800, 300);
+      await redis.hset(`profile:${interaction.user.id}`, "bio", text);
+      return interaction.editReply("Bio updated");
     }
 
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(0, 0, 800, 300);
+    /* ================= PREMIUM BG ================= */
+    if (sub === "upload") {
+      const file = interaction.options.getAttachment("image");
 
-    // =========================
-    // FRAME SYSTEM
-    // =========================
-    function getFrame(level) {
-      if (level >= 120) return { glow: "#FFD700", accent: "#FFF3A0", name: "mythic" };
-      if (level >= 100) return { glow: "#FF3B3B", accent: "#FF8A00", name: "fire" };
-      if (level >= 75) return { glow: "#00D4FF", accent: "#66F2FF", name: "diamond" };
-      if (level >= 50) return { glow: "#9B59B6", accent: "#C39BD3", name: "elite" };
-      if (level >= 25) return { glow: "#3498DB", accent: "#85C1E9", name: "rare" };
-      return { glow: "#5865F2", accent: "#7289DA", name: "basic" };
+      if (!file.contentType?.startsWith("image/"))
+        return interaction.editReply("Invalid image");
+
+      await redis.hset(`profile:${interaction.user.id}`, "custom_bg", file.url);
+      return interaction.editReply("Premium background saved");
     }
 
-    const frame = getFrame(level);
+    /* ================= RESET ================= */
+    if (sub === "reset") {
+      await redis.hdel(`profile:${interaction.user.id}`, "custom_bg");
+      return interaction.editReply("Reset done");
+    }
 
-    // =========================
-    // AVATAR
-    // =========================
-    const avatar = await loadImage(
-      target.displayAvatarURL({ extension: "png", size: 256 })
-    );
+    /* ================= VIEW ================= */
+    if (sub === "view") {
+      const bio = data.bio || "No bio set";
+      const level = Number(data.level || 1);
+      const xp = Number(data.xp || 0);
+      const needed = 100 * level;
+      const progress = Math.min(xp / needed, 1);
 
-    const ax = 110, ay = 130;
+      const canvas = createCanvas(800, 300);
+      const ctx = canvas.getContext("2d");
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(ax, ay, 70, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.drawImage(avatar, 35, 55, 150, 150);
-    ctx.restore();
+      let bg;
 
-    // =========================
-    // FRAME DRAW (ADVANCED)
-    // =========================
-    function drawFrame() {
-      const t = tick / 10;
+      try {
+        // 1. Premium BG
+        if (data.custom_bg) {
+          bg = await loadImage(data.custom_bg);
 
-      // 🌌 outer aura
-      ctx.save();
-      ctx.globalAlpha = 0.25 + Math.sin(t) * 0.05;
-      ctx.strokeStyle = hexToRGBA(frame.glow, 0.3);
-      ctx.lineWidth = 28;
-      ctx.beginPath();
-      ctx.arc(ax, ay, 82, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
+        // 2. Shop BG
+        } else if (data.bg && bgList[data.bg]) {
+          bg = await loadImage(bgList[data.bg]);
 
-      // ⚡ main energy ring
-      ctx.save();
-      ctx.strokeStyle = frame.glow;
-      ctx.globalAlpha = 0.9;
-      ctx.lineWidth = 6 + Math.sin(t) * 1.5;
-      ctx.beginPath();
-      ctx.arc(ax, ay, 74, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      // 🧿 inner clean ring
-      ctx.save();
-      ctx.strokeStyle = "#fff";
-      ctx.globalAlpha = 0.2;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(ax, ay, 70, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      // ✨ PARTICLES (ORBIT SYSTEM)
-      const particles = Math.min(4 + Math.floor(level / 10), 18);
-
-      for (let i = 0; i < particles; i++) {
-        const angle = (i / particles) * Math.PI * 2 + t;
-        const radius = 88;
-
-        const px = ax + Math.cos(angle) * radius;
-        const py = ay + Math.sin(angle) * radius;
-
-        ctx.fillStyle = frame.accent;
-        ctx.globalAlpha = 0.6;
-        ctx.beginPath();
-        ctx.arc(px, py, 2, 0, Math.PI * 2);
-        ctx.fill();
+        // 3. Default
+        } else {
+          bg = await loadImage(path.join(__dirname, "../backgrounds/classic.png"));
+        }
+      } catch {
+        bg = null;
       }
 
-      ctx.globalAlpha = 1;
+      if (bg) ctx.drawImage(bg, 0, 0, 800, 300);
+      else {
+        ctx.fillStyle = "#111";
+        ctx.fillRect(0, 0, 800, 300);
+      }
 
-      // ⚡ light sweep effect
-      const grad = ctx.createLinearGradient(0, 0, 800, 300);
-      grad.addColorStop(0, "transparent");
-      grad.addColorStop(0.5, "rgba(255,255,255,0.15)");
-      grad.addColorStop(1, "transparent");
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, 0, 800, 300);
 
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = 12;
+      const avatar = await loadImage(
+        user.displayAvatarURL({ extension: "png", size: 256 })
+      );
+
+      ctx.save();
       ctx.beginPath();
-      ctx.arc(ax, ay, 72, 0, Math.PI * 2);
+      ctx.arc(110, 130, 70, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(avatar, 35, 55, 150, 150);
+      ctx.restore();
+
+      // frame
+      ctx.strokeStyle = "#5865F2";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(110, 130, 72, 0, Math.PI * 2);
       ctx.stroke();
+
+      ctx.fillStyle = "#fff";
+      ctx.font = "28px CustomFont";
+      ctx.fillText(user.username, 220, 85);
+
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.font = "18px CustomFont";
+      ctx.fillText(bio, 220, 130);
+
+      // XP bar
+      const x = 220, y = 190, w = 500, h = 18;
+
+      ctx.fillStyle = "rgba(255,255,255,0.15)";
+      roundRect(ctx, x, y, w, h, 10);
+      ctx.fill();
+
+      ctx.fillStyle = "#5865F2";
+      roundRect(ctx, x, y, w * progress, h, 10);
+      ctx.fill();
+
+      ctx.fillStyle = "#fff";
+      ctx.font = "14px CustomFont";
+      ctx.fillText(`${xp}/${needed} XP`, x + 10, y + 13);
+
+      ctx.fillStyle = "#5865F2";
+      ctx.font = "bold 22px CustomFont";
+      ctx.fillText(`LVL ${level}`, 680, 85);
+
+      const buffer = canvas.toBuffer("image/png");
+
+      return interaction.editReply({
+        files: [new AttachmentBuilder(buffer, { name: "profile.png" })]
+      });
     }
-
-    drawFrame();
-
-    // =========================
-    // TEXT
-    // =========================
-    ctx.fillStyle = "#fff";
-    ctx.font = "28px CustomFont";
-    ctx.fillText(target.username, 220, 85);
-
-    ctx.fillStyle = "rgba(255,255,255,0.75)";
-    ctx.font = "18px CustomFont";
-    ctx.fillText(bio, 220, 130);
-
-    // =========================
-    // XP BAR
-    // =========================
-    const x = 220, y = 190, w = 500, h = 18;
-
-    ctx.fillStyle = "rgba(255,255,255,0.15)";
-    roundRect(ctx, x, y, w, h, 10);
-    ctx.fill();
-
-    ctx.fillStyle = frame.glow;
-    roundRect(ctx, x, y, w * progress, h, 10);
-    ctx.fill();
-
-    ctx.fillStyle = "#fff";
-    ctx.font = "14px CustomFont";
-    ctx.fillText(`${xp} / ${needed} XP`, x + 10, y + 13);
-
-    // LEVEL
-    ctx.fillStyle = frame.glow;
-    ctx.font = "bold 22px CustomFont";
-    ctx.fillText(`LVL ${level}`, 680, 85);
-
-    // =========================
-    // OUTPUT
-    // =========================
-    const buffer = canvas.toBuffer("image/png");
-
-    return interaction.editReply({
-      files: [new AttachmentBuilder(buffer, { name: "profile.png" })]
-    });
   }
 };
 
-// =========================
-// HELPERS
-// =========================
+/* ================= HELPERS ================= */
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -218,12 +189,4 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.lineTo(x + r, y + h);
   ctx.quadraticCurveTo(x, y + h, x, y + h - r);
   ctx.closePath();
-}
-
-function hexToRGBA(hex, a) {
-  const c = hex.replace("#", "");
-  const r = parseInt(c.substring(0, 2), 16);
-  const g = parseInt(c.substring(2, 4), 16);
-  const b = parseInt(c.substring(4, 6), 16);
-  return `rgba(${r},${g},${b},${a})`;
 }
