@@ -1,3 +1,4 @@
+// commands/counting.js - COMPLETE WITH GLOBAL ECONOMY
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
@@ -54,14 +55,7 @@ module.exports = {
     ),
 
   async execute(interaction, client, redis) {
-    // Don't defer for setup, defer for others
     const sub = interaction.options.getSubcommand();
-    
-    // Only defer for commands that need it
-    if (sub !== "setup") {
-      await interaction.deferReply();
-    }
-
     const guildId = interaction.guild.id;
     const userId = interaction.user.id;
 
@@ -188,7 +182,9 @@ module.exports = {
       const mistakes = Number(await redis.zscore(`counting:${guildId}:sabotages`, targetId) || 0);
       const streak = Number(await redis.get(`counting:${guildId}:${targetId}:streak`) || 0);
       const record = Number(await redis.get(`counting:${guildId}:${targetId}:highscore`) || 0);
-      const shield = Number(await redis.get(`eco:${guildId}:${targetId}:shield`) || 0);
+      
+      // GLOBAL economy for shields
+      const shield = Number(await redis.get(`eco:${targetId}:shield`) || 0);
       
       const total = correct + mistakes;
       const successRate = total > 0 ? Math.round((correct / total) * 100) : 0;
@@ -236,7 +232,7 @@ module.exports = {
         embed.setDescription(`**Level Progress**\n\`${bar}\` ${Math.round((progress / nextLevel) * 100)}%`);
       }
 
-      return interaction.editReply({ embeds: [embed] });
+      return interaction.reply({ embeds: [embed] });
     }
 
     // =========================
@@ -328,24 +324,28 @@ module.exports = {
             .setDisabled(type === "improved")
         );
 
-      return interaction.editReply({ 
+      return interaction.reply({ 
         embeds: [embed],
         components: [row]
       });
     }
 
     // =========================
-    // 🛒 SHOP
+    // 🛒 SHOP (GLOBAL ECONOMY)
     // =========================
     if (sub === "shop") {
       const shieldPrice = 200;
       const doublePrice = 500;
       const resetPrice = 100;
 
-      let coins = Number(await redis.get(`eco:${guildId}:${userId}:money`) || 0);
-      const shield = Number(await redis.get(`eco:${guildId}:${userId}:shield`) || 0);
-      const double = Number(await redis.get(`eco:${guildId}:${userId}:double`) || 0);
-      const isDev = userId === "1303357369622990889";
+      // GLOBAL economy keys
+      const balanceKey = `eco:${userId}:money`;
+      const shieldKey = `eco:${userId}:shield`;
+      const doubleKey = `eco:${userId}:double`;
+      
+      let coins = Number(await redis.get(balanceKey) || 0);
+      const shield = Number(await redis.get(shieldKey) || 0);
+      const double = Number(await redis.get(doubleKey) || 0);
 
       const embed = new EmbedBuilder()
         .setColor("#FF69B4")
@@ -368,7 +368,7 @@ module.exports = {
             inline: true 
           }
         )
-        .setFooter({ text: "Use /counting buy <item> to purchase" })
+        .setFooter({ text: "Click the buttons below to purchase!" })
         .setTimestamp();
 
       const row = new ActionRowBuilder()
@@ -387,7 +387,7 @@ module.exports = {
             .setStyle(ButtonStyle.Secondary)
         );
 
-      return interaction.editReply({ 
+      return interaction.reply({ 
         embeds: [embed],
         components: [row]
       });
@@ -399,12 +399,13 @@ module.exports = {
     if (sub === "reset") {
       const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
       if (!isAdmin) {
-        return interaction.editReply({
+        return interaction.reply({
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
               .setDescription("❌ You need **Administrator** permission to reset stats.")
-          ]
+          ],
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -416,7 +417,7 @@ module.exports = {
         await redis.del(`counting:${guildId}:${target.id}:streak`);
         await redis.del(`counting:${guildId}:${target.id}:highscore`);
         
-        return interaction.editReply({
+        return interaction.reply({
           embeds: [
             new EmbedBuilder()
               .setColor("#57F287")
@@ -431,7 +432,7 @@ module.exports = {
         .setDescription("This will reset **ALL** counting stats in this server. Are you sure?")
         .setFooter({ text: "React with ✅ to confirm" });
 
-      const msg = await interaction.editReply({
+      const msg = await interaction.reply({
         embeds: [embed],
         fetchReply: true
       });
