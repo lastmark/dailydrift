@@ -48,9 +48,9 @@ module.exports = {
   async execute(interaction, client, redis) {
     const sub = interaction.options.getSubcommand();
 
-    // =========================
-    // 🎂 SET BIRTHDAY
-    // =========================
+    /* =========================
+       🎂 SET BIRTHDAY
+    ========================= */
     if (sub === "set") {
       const month = interaction.options.getInteger("month");
       const day = interaction.options.getInteger("day");
@@ -62,7 +62,7 @@ module.exports = {
               .setColor("#ED4245")
               .setDescription(`${e.error || "❌"} February can't exceed 29 days`)
           ],
-          ephemeral: true
+          flags: 64
         });
       }
 
@@ -73,7 +73,7 @@ module.exports = {
               .setColor("#ED4245")
               .setDescription(`${e.error || "❌"} This month has only 30 days`)
           ],
-          ephemeral: true
+          flags: 64
         });
       }
 
@@ -90,28 +90,26 @@ module.exports = {
               name: "Birthday Saved",
               iconURL: interaction.user.displayAvatarURL()
             })
-            .setDescription(
-              `${e.success || "🎉"} Saved successfully!\n\n` +
-              `📅 **Date:** \`${formatted}\``
-            )
-            .setTimestamp()
+            .setDescription(`${e.success || "🎉"} Saved successfully!\n📅 **Date:** \`${formatted}\``)
         ],
-        ephemeral: true
+        flags: 64
       });
     }
 
-    // =========================
-    // ⚙️ SETUP CHANNEL
-    // =========================
+    /* =========================
+       ⚙️ SETUP CHANNEL
+    ========================= */
     if (sub === "setup") {
-      if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
+
+      if (!isAdmin) {
         return interaction.reply({
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
               .setDescription(`${e.error || "❌"} Missing Manage Server permission`)
           ],
-          ephemeral: true
+          flags: 64
         });
       }
 
@@ -125,7 +123,7 @@ module.exports = {
               .setColor("#ED4245")
               .setDescription(`${e.error || "❌"} Select channel or enable auto-create`)
           ],
-          ephemeral: true
+          flags: 64
         });
       }
 
@@ -134,7 +132,11 @@ module.exports = {
       if (!target && autoCreate) {
         await interaction.deferReply();
 
-        if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels)) {
+        const botPerms = interaction.guild.members.me.permissions.has(
+          PermissionFlagsBits.ManageChannels
+        );
+
+        if (!botPerms) {
           return interaction.editReply({
             embeds: [
               new EmbedBuilder()
@@ -161,7 +163,6 @@ module.exports = {
           }).catch(() => null);
 
         } catch (err) {
-          console.error(err);
           return interaction.editReply({
             embeds: [
               new EmbedBuilder()
@@ -183,14 +184,16 @@ module.exports = {
         .setDescription(`${e.success || "✅"} Channel set to ${target}`)
         .setTimestamp();
 
-      return interaction.deferred
-        ? interaction.editReply({ embeds: [embed] })
-        : interaction.reply({ embeds: [embed] });
+      if (interaction.deferred || interaction.replied) {
+        return interaction.editReply({ embeds: [embed] });
+      }
+
+      return interaction.reply({ embeds: [embed] });
     }
 
-    // =========================
-    // 📜 LIST BIRTHDAYS
-    // =========================
+    /* =========================
+       📜 LIST BIRTHDAYS
+    ========================= */
     if (sub === "list") {
       const keys = await redis.keys("profile:*");
       const list = [];
@@ -201,22 +204,23 @@ module.exports = {
         if (data) list.push({ id, birthday: data });
       }
 
-      const embed = new EmbedBuilder()
-        .setColor("#5865F2")
-        .setTitle("🎂 Server Birthdays")
-        .setDescription(
-          list.length
-            ? list.map(u => `<@${u.id}> → **${u.birthday}**`).join("\n")
-            : "No birthdays set yet."
-        )
-        .setTimestamp();
-
-      return interaction.reply({ embeds: [embed] });
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#5865F2")
+            .setTitle("🎂 Server Birthdays")
+            .setDescription(
+              list.length
+                ? list.map(u => `<@${u.id}> → **${u.birthday}**`).join("\n")
+                : "No birthdays set yet."
+            )
+        ]
+      });
     }
 
-    // =========================
-    // ⏳ UPCOMING BIRTHDAYS
-    // =========================
+    /* =========================
+       ⏳ UPCOMING BIRTHDAYS
+    ========================= */
     if (sub === "upcoming") {
       const keys = await redis.keys("profile:*");
       const now = new Date();
@@ -236,16 +240,18 @@ module.exports = {
         }
       }
 
-      const embed = new EmbedBuilder()
-        .setColor("#FF69B4")
-        .setTitle("🎉 Upcoming Birthdays")
-        .setDescription(
-          upcoming.length
-            ? upcoming.map(u => `<@${u.id}> → **${u.birthday}**`).join("\n")
-            : "No upcoming birthdays found."
-        );
-
-      return interaction.reply({ embeds: [embed] });
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#FF69B4")
+            .setTitle("🎉 Upcoming Birthdays")
+            .setDescription(
+              upcoming.length
+                ? upcoming.map(u => `<@${u.id}> → **${u.birthday}**`).join("\n")
+                : "No upcoming birthdays found."
+            )
+        ]
+      });
     }
   }
 };
