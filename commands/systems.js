@@ -33,7 +33,7 @@ module.exports = {
           inline: true 
         },
         { 
-          name: `${e.leave || "📤"} Leave System`, 
+          name: `${e.leav || "📤"} Leave System`, 
           value: `└ Destination: ${leaveChannel}`, 
           inline: true 
         }
