@@ -2,8 +2,10 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } =
 const e = require("../emojis.js");
 
 module.exports = {
+  category: "Moderation",
   data: new SlashCommandBuilder()
     .setName("mod")
+
     .setDescription("🛡️ Core server moderation control systems.")
     .setDefaultMemberPermissions(
       PermissionFlagsBits.ModerateMembers | 
