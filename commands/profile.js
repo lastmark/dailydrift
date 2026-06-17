@@ -27,7 +27,6 @@ const roundRect = (ctx, x, y, w, h, r) => {
   return ctx;
 };
 
-// Polyfill for older Node
 if (!CanvasRenderingContext2D.prototype.roundRect) {
   CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
     return roundRect(this, x, y, w, h, r);
@@ -43,14 +42,14 @@ module.exports = {
     // -------- PROFILE SUBCOMMANDS --------
     .addSubcommand(s =>
       s.setName("view")
-        .setDescription("👤 View a user's profile")
+        .setDescription("View a user's profile")
         .addUserOption(o =>
           o.setName("target").setDescription("User to view")
         )
     )
     .addSubcommand(s =>
       s.setName("setbio")
-        .setDescription("📝 Set your bio")
+        .setDescription("Set your bio")
         .addStringOption(o =>
           o.setName("text")
             .setDescription("Your bio (max 200 chars)")
@@ -60,7 +59,7 @@ module.exports = {
     )
     .addSubcommand(s =>
       s.setName("setcolor")
-        .setDescription("🎨 Set your profile accent color")
+        .setDescription("Set your profile accent color")
         .addStringOption(o =>
           o.setName("color")
             .setDescription("Hex color code (e.g., #FF6B6B)")
@@ -69,55 +68,55 @@ module.exports = {
     )
     .addSubcommand(s =>
       s.setName("upload")
-        .setDescription("🖼️ Upload a custom background (VIP only)")
+        .setDescription("Upload a custom background (VIP only)")
         .addAttachmentOption(o =>
           o.setName("image").setDescription("Image file").setRequired(true)
         )
     )
     .addSubcommand(s =>
       s.setName("reset")
-        .setDescription("🔄 Reset your profile (with confirmation)")
+        .setDescription("Reset your profile (with confirmation)")
     )
 
     // -------- SHOP SUBCOMMANDS --------
     .addSubcommand(s =>
       s.setName("shop")
-        .setDescription("🛒 Browse backgrounds by category")
+        .setDescription("Browse backgrounds by category")
         .addStringOption(o =>
           o.setName("category")
             .setDescription("Filter")
             .addChoices(
-              { name: "🌟 All", value: "all" },
-              { name: "🎆 Premium", value: "premium" },
-              { name: "🌌 Space", value: "space" },
-              { name: "🏰 Fantasy", value: "fantasy" },
-              { name: "🌊 Nature", value: "nature" }
+              { name: "All", value: "all" },
+              { name: "Premium", value: "premium" },
+              { name: "Space", value: "space" },
+              { name: "Fantasy", value: "fantasy" },
+              { name: "Nature", value: "nature" }
             )
         )
     )
     .addSubcommand(s =>
       s.setName("buybg")
-        .setDescription("💳 Purchase a background")
+        .setDescription("Purchase a background")
         .addStringOption(o =>
           o.setName("id").setDescription("Background ID").setRequired(true)
         )
     )
     .addSubcommand(s =>
       s.setName("equipbg")
-        .setDescription("⚔️ Equip a background you own")
+        .setDescription("Equip a background you own")
         .addStringOption(o =>
           o.setName("id").setDescription("Background ID").setRequired(true)
         )
     )
     .addSubcommand(s =>
       s.setName("backgrounds")
-        .setDescription("🎨 View all backgrounds you own")
+        .setDescription("View all backgrounds you own")
     )
 
     // -------- ADMIN SUBCOMMANDS --------
     .addSubcommand(s =>
       s.setName("addbg")
-        .setDescription("👑 (Admin) Add background to shop")
+        .setDescription("(Admin) Add background to shop")
         .addStringOption(o =>
           o.setName("id").setDescription("Unique ID").setRequired(true)
         )
@@ -183,12 +182,12 @@ module.exports = {
     };
 
     const getTitle = async (id, level) => {
-      if (id === DEV_ID) return "👑 Developer";
-      if (await isVIP(id)) return "💎 VIP Member";
-      if (level >= 100) return "🏆 Legend";
-      if (level >= 50) return "⚡ Elite";
-      if (level >= 25) return "🌟 Dedicated";
-      return "🌟 Member";
+      if (id === DEV_ID) return "Developer";
+      if (await isVIP(id)) return "VIP Member";
+      if (level >= 100) return "Legend";
+      if (level >= 50) return "Elite";
+      if (level >= 25) return "Dedicated";
+      return "Member";
     };
 
     // -------------------- SUBCOMMAND HANDLERS --------------------
@@ -199,7 +198,7 @@ module.exports = {
       await redis.hset(`profile:${authorId}`, "bio", text);
       const embed = new EmbedBuilder()
         .setColor("#00D4FF")
-        .setTitle("✅ Bio Updated")
+        .setTitle("Bio Updated")
         .setDescription(`> ${text}`)
         .setFooter({ text: "Your profile has been updated!" })
         .setTimestamp();
@@ -211,12 +210,12 @@ module.exports = {
       let color = interaction.options.getString("color");
       if (!color.startsWith("#")) color = `#${color}`;
       if (!/^#[0-9A-F]{6}$/i.test(color)) {
-        return interaction.editReply("❌ Invalid hex color. Use format `#FF6B6B`.");
+        return interaction.editReply("Invalid hex color. Use format `#FF6B6B`.");
       }
       await redis.hset(`profile:${authorId}`, "color", color);
       const embed = new EmbedBuilder()
         .setColor(color)
-        .setTitle("🎨 Color Updated")
+        .setTitle("Color Updated")
         .setDescription(`Your accent color is now ${color}`)
         .setFooter({ text: "Your profile will reflect this color!" })
         .setTimestamp();
@@ -226,16 +225,16 @@ module.exports = {
     // --- UPLOAD (VIP only) ---
     if (sub === "upload") {
       if (!(await isVIP(authorId))) {
-        return interaction.editReply("❌ This feature is for VIP members only.");
+        return interaction.editReply("This feature is for VIP members only.");
       }
       const file = interaction.options.getAttachment("image");
       if (!file.contentType?.startsWith("image/")) {
-        return interaction.editReply("❌ Please upload a valid image.");
+        return interaction.editReply("Please upload a valid image.");
       }
       await redis.hset(`profile:${authorId}`, "custom_bg", file.url);
       const embed = new EmbedBuilder()
         .setColor("#FFD700")
-        .setTitle("🖼️ Premium Background Uploaded")
+        .setTitle("Premium Background Uploaded")
         .setImage(file.url)
         .setFooter({ text: "You can equip it with /profile equipbg" })
         .setTimestamp();
@@ -245,7 +244,7 @@ module.exports = {
     // --- RESET (with confirmation) ---
     if (sub === "reset") {
       const msg = await interaction.editReply({
-        content: "⚠️ **Are you sure?** This will delete your entire profile.\nReact with ✅ within 30 seconds to confirm.",
+        content: "Are you sure? This will delete your entire profile.\nReact with ✅ within 30 seconds to confirm.",
         flags: MessageFlags.Ephemeral
       });
       await msg.react("✅");
@@ -255,19 +254,19 @@ module.exports = {
         if (collected.size) {
           await redis.del(`profile:${authorId}`);
           await interaction.editReply({
-            content: "✅ Profile reset successfully.",
+            content: "Profile reset successfully.",
             embeds: [],
             flags: MessageFlags.Ephemeral
           });
         } else {
           await interaction.editReply({
-            content: "❌ Reset cancelled.",
+            content: "Reset cancelled.",
             flags: MessageFlags.Ephemeral
           });
         }
       } catch {
         await interaction.editReply({
-          content: "❌ Reset timed out.",
+          content: "Reset timed out.",
           flags: MessageFlags.Ephemeral
         });
       }
@@ -278,7 +277,7 @@ module.exports = {
     if (sub === "shop") {
       const category = interaction.options.getString("category") || "all";
       const keys = await redis.keys("shop:bg:*");
-      if (!keys.length) return interaction.editReply("🛒 Shop is empty.");
+      if (!keys.length) return interaction.editReply("Shop is empty.");
 
       const items = [];
       for (const key of keys) {
@@ -289,20 +288,20 @@ module.exports = {
         }
       }
       if (!items.length) {
-        return interaction.editReply(`❌ No backgrounds in category: ${category}`);
+        return interaction.editReply(`No backgrounds in category: ${category}`);
       }
 
       const embed = new EmbedBuilder()
         .setColor("#FF6B6B")
-        .setTitle(`🛒 Background Shop ${category !== "all" ? `- ${category}` : ""}`)
-        .setDescription(`💰 Your balance: **${await getBalance(authorId)}** coins\nUse \`/profile buybg <id>\``)
+        .setTitle(`Background Shop ${category !== "all" ? `- ${category}` : ""}`)
+        .setDescription(`Balance: **${await getBalance(authorId)}** coins\nUse \`/profile buybg <id>\``)
         .setFooter({ text: `Showing ${items.length} backgrounds` })
         .setTimestamp();
 
       items.slice(0, 10).forEach((item, i) => {
         embed.addFields({
-          name: `${i+1}. 🎨 ${item.name || item.id}`,
-          value: `ID: \`${item.id}\`\n💰 ${item.price} coins\n🏷️ ${item.category || "General"}`,
+          name: `${i+1}. ${item.name || item.id}`,
+          value: `ID: \`${item.id}\`\nPrice: ${item.price} coins\nCategory: ${item.category || "General"}`,
           inline: true
         });
       });
@@ -314,14 +313,14 @@ module.exports = {
       const id = interaction.options.getString("id");
       const item = await redis.hgetall(`shop:bg:${id}`);
       if (!item?.price) {
-        return interaction.editReply("❌ Invalid background ID. Use `/profile shop`.");
+        return interaction.editReply("Invalid background ID. Use `/profile shop`.");
       }
       const bal = await getBalance(authorId);
       const price = Number(item.price);
       if (bal < price) {
         const embed = new EmbedBuilder()
           .setColor("#FF0000")
-          .setTitle("❌ Insufficient Funds")
+          .setTitle("Insufficient Funds")
           .setDescription(`You need **${price - bal}** more coins.`)
           .addFields(
             { name: "Balance", value: `${bal} coins`, inline: true },
@@ -336,7 +335,7 @@ module.exports = {
       await redis.hset(`profile:${authorId}`, "bg", id);
       const embed = new EmbedBuilder()
         .setColor("#00FF00")
-        .setTitle("✅ Background Purchased!")
+        .setTitle("Background Purchased!")
         .setDescription(`You bought **${item.name || id}** and equipped it.`)
         .addFields(
           { name: "Price", value: `${price} coins`, inline: true },
@@ -351,12 +350,12 @@ module.exports = {
       const id = interaction.options.getString("id");
       const owned = await redis.sismember(`bg:owned:${authorId}`, id);
       if (!owned) {
-        return interaction.editReply("❌ You don't own this background. Buy it first.");
+        return interaction.editReply("You don't own this background. Buy it first.");
       }
       await redis.hset(`profile:${authorId}`, "bg", id);
       const embed = new EmbedBuilder()
         .setColor("#00D4FF")
-        .setTitle("⚔️ Background Equipped")
+        .setTitle("Background Equipped")
         .setDescription(`Equipped **${id}**.`)
         .setTimestamp();
       return interaction.editReply({ embeds: [embed] });
@@ -366,11 +365,11 @@ module.exports = {
     if (sub === "backgrounds") {
       const owned = await redis.smembers(`bg:owned:${authorId}`);
       if (!owned.length) {
-        return interaction.editReply("🎨 You don't own any backgrounds. Visit the shop!");
+        return interaction.editReply("You don't own any backgrounds. Visit the shop!");
       }
       const embed = new EmbedBuilder()
         .setColor("#9B59B6")
-        .setTitle(`🎨 ${interaction.user.username}'s Backgrounds`)
+        .setTitle(`${interaction.user.username}'s Backgrounds`)
         .setDescription(`You own **${owned.length}** background(s).`)
         .setFooter({ text: "Use /profile equipbg <id> to equip one." })
         .setTimestamp();
@@ -379,7 +378,7 @@ module.exports = {
       for (const id of owned.slice(0, 25)) {
         const shop = await redis.hgetall(`shop:bg:${id}`);
         const name = shop?.name || id;
-        const equipped = id === currentBg ? "✅" : "⬜";
+        const equipped = id === currentBg ? "✓" : " ";
         embed.addFields({
           name: `${equipped} ${name}`,
           value: `ID: \`${id}\``,
@@ -392,7 +391,7 @@ module.exports = {
     // --- ADMIN: ADDBG ---
     if (sub === "addbg") {
       if (authorId !== DEV_ID) {
-        return interaction.editReply("👑 This command is restricted to the developer.");
+        return interaction.editReply("This command is restricted to the developer.");
       }
       const id = interaction.options.getString("id");
       const name = interaction.options.getString("name");
@@ -400,14 +399,14 @@ module.exports = {
       const category = interaction.options.getString("category");
       const file = interaction.options.getAttachment("image");
       if (!file.contentType?.startsWith("image/")) {
-        return interaction.editReply("❌ Invalid image file.");
+        return interaction.editReply("Invalid image file.");
       }
       await redis.hset(`shop:bg:${id}`, {
         name, price: price.toString(), url: file.url, category
       });
       const embed = new EmbedBuilder()
         .setColor("#FFD700")
-        .setTitle("✅ Background Added")
+        .setTitle("Background Added")
         .setDescription(`**${name}** added to shop.`)
         .addFields(
           { name: "ID", value: id, inline: true },
@@ -444,7 +443,6 @@ module.exports = {
       if (bgImage) {
         ctx.drawImage(bgImage, 0, 0, 900, 350);
       } else {
-        // Gradient background
         const gradient = ctx.createLinearGradient(0, 0, 900, 350);
         gradient.addColorStop(0, userColor + "33");
         gradient.addColorStop(1, "#2C3E50");
@@ -455,7 +453,6 @@ module.exports = {
       // ---- GLASS OVERLAY ----
       ctx.fillStyle = "rgba(0,0,0,0.55)";
       ctx.fillRect(0, 0, 900, 350);
-      
       ctx.fillStyle = "rgba(255,255,255,0.05)";
       ctx.fillRect(0, 0, 900, 350);
 
@@ -464,7 +461,6 @@ module.exports = {
         user.displayAvatarURL({ extension: "png", size: 256 })
       );
 
-      // Avatar shadow
       ctx.shadowColor = "rgba(0,0,0,0.5)";
       ctx.shadowBlur = 20;
       ctx.shadowOffsetX = 0;
@@ -477,7 +473,6 @@ module.exports = {
       ctx.drawImage(avatar, 45, 65, 170, 170);
       ctx.restore();
 
-      // Avatar ring with glow
       ctx.shadowColor = userColor;
       ctx.shadowBlur = 30;
       ctx.strokeStyle = userColor;
@@ -486,7 +481,6 @@ module.exports = {
       ctx.arc(130, 145, 85, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Secondary ring
       ctx.shadowBlur = 0;
       ctx.strokeStyle = "rgba(255,255,255,0.3)";
       ctx.lineWidth = 2;
@@ -516,9 +510,9 @@ module.exports = {
 
       // ---- STATS ----
       const stats = [
-        { label: "💰", value: balance },
-        { label: "📊", value: `${levelData.xp}/${levelData.needed}` },
-        { label: "⭐", value: levelData.level }
+        { label: "Coins:", value: balance },
+        { label: "XP:", value: `${levelData.xp}/${levelData.needed}` },
+        { label: "Level:", value: levelData.level }
       ];
 
       ctx.fillStyle = "rgba(255,255,255,0.9)";
@@ -533,11 +527,11 @@ module.exports = {
         ctx.fillStyle = "rgba(255,255,255,0.9)";
         ctx.font = "bold 16px CustomFont";
         ctx.fillText(stat.label, xPos, 205);
-        xPos += 40;
+        xPos += 70;
         ctx.font = "16px CustomFont";
         ctx.fillStyle = userColor;
         ctx.fillText(stat.value, xPos, 205);
-        xPos += 80;
+        xPos += 100;
       });
 
       // ---- XP BAR ----
@@ -546,7 +540,6 @@ module.exports = {
       const barWidth = 540;
       const barHeight = 22;
 
-      // Bar background
       ctx.shadowBlur = 5;
       ctx.shadowColor = "rgba(0,0,0,0.2)";
       ctx.fillStyle = "rgba(255,255,255,0.15)";
@@ -554,7 +547,6 @@ module.exports = {
       ctx.roundRect(barX, barY, barWidth, barHeight, 11);
       ctx.fill();
 
-      // XP progress with gradient
       const progress = levelData.progress;
       const gradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
       gradient.addColorStop(0, userColor);
@@ -566,33 +558,31 @@ module.exports = {
       ctx.roundRect(barX, barY, barWidth * progress, barHeight, 11);
       ctx.fill();
 
-      // Glowing effect on bar
       ctx.shadowBlur = 20;
       ctx.shadowColor = userColor + "55";
       ctx.fillRect(barX, barY, barWidth * progress, barHeight);
 
-      // XP text
       ctx.shadowBlur = 0;
       ctx.fillStyle = "#FFFFFF";
       ctx.font = "bold 14px CustomFont";
       ctx.textAlign = "center";
-      ctx.fillText(`⚡ ${levelData.xp} / ${levelData.needed} XP`, barX + barWidth / 2, barY + 17);
+      ctx.fillText(`${levelData.xp} / ${levelData.needed} XP`, barX + barWidth / 2, barY + 17);
 
       // ---- BADGES ----
       ctx.textAlign = "left";
       ctx.font = "16px CustomFont";
       const badges = [];
-      if (levelData.level >= 10) badges.push("⭐ Level 10+");
-      if (levelData.level >= 25) badges.push("🌟 Level 25+");
-      if (levelData.level >= 50) badges.push("⚡ Level 50+");
-      if (levelData.level >= 100) badges.push("🏆 Level 100+");
-      if (await isVIP(userId)) badges.push("💎 VIP");
-      if (userId === DEV_ID) badges.push("👑 Dev");
+      if (levelData.level >= 10) badges.push("Level 10+");
+      if (levelData.level >= 25) badges.push("Level 25+");
+      if (levelData.level >= 50) badges.push("Level 50+");
+      if (levelData.level >= 100) badges.push("Level 100+");
+      if (await isVIP(userId)) badges.push("VIP");
+      if (userId === DEV_ID) badges.push("Dev");
 
       if (badges.length) {
         ctx.fillStyle = "rgba(255,255,255,0.6)";
         ctx.font = "14px CustomFont";
-        ctx.fillText(`🎖️ ${badges.join(" • ")}`, 270, 295);
+        ctx.fillText(`Badges: ${badges.join(" • ")}`, 270, 295);
       }
 
       // ---- LEVEL BADGE ----
@@ -631,20 +621,20 @@ module.exports = {
       ctx.textAlign = "left";
       ctx.fillStyle = "rgba(255,255,255,0.2)";
       ctx.font = "12px CustomFont";
-      ctx.fillText(`ID: ${user.id.slice(0, 8)}... • ${new Date().toLocaleDateString()}`, 20, 340);
+      ctx.fillText(`ID: ${user.id.slice(0, 8)}...`, 20, 340);
 
       ctx.textAlign = "right";
-      ctx.fillText("✨ Profile v2.0", 880, 340);
+      ctx.fillText("Profile v2.0", 880, 340);
 
       const buffer = canvas.toBuffer("image/png");
 
       const embed = new EmbedBuilder()
         .setColor(userColor)
-        .setTitle(`👤 ${user.username}'s Profile`)
+        .setTitle(`${user.username}'s Profile`)
         .setDescription(`Level ${levelData.level} • ${title}`)
         .addFields(
-          { name: "💰 Balance", value: `${balance} coins`, inline: true },
-          { name: "📊 Progress", value: `${Math.round(levelData.progress * 100)}% to next level`, inline: true }
+          { name: "Balance", value: `${balance} coins`, inline: true },
+          { name: "Progress", value: `${Math.round(levelData.progress * 100)}% to next level`, inline: true }
         )
         .setImage("attachment://profile.png")
         .setFooter({ text: `Requested by ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL() })
