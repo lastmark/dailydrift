@@ -1,4 +1,4 @@
-// commands/counting.js - COMPLETE WITH GLOBAL ECONOMY
+// commands/counting.js - COMPLETE FIXED VERSION
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
@@ -52,6 +52,10 @@ module.exports = {
     .addSubcommand(s =>
       s.setName("reset")
         .setDescription("Reset your counting stats (admin only)")
+        .addUserOption(o =>
+          o.setName("target")
+            .setDescription("Reset a specific user's stats (optional)")
+        )
     ),
 
   async execute(interaction, client, redis) {
@@ -60,115 +64,137 @@ module.exports = {
     const userId = interaction.user.id;
 
     // =========================
-    // ⚙️ SETUP
+    // ⚙️ SETUP - FIXED
     // =========================
     if (sub === "setup") {
-      const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
-      if (!isAdmin) {
-        return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription("❌ You need **Administrator** permission to setup counting.")
-          ],
-          flags: MessageFlags.Ephemeral
-        });
-      }
-
-      const channel = interaction.options.getChannel("channel");
-      const autoCreate = interaction.options.getBoolean("auto_create") || false;
-      const clearOnReset = interaction.options.getBoolean("clear_on_reset") || false;
-
-      if (!channel && !autoCreate) {
-        return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription("❌ Please select a channel or enable auto-create.")
-          ],
-          flags: MessageFlags.Ephemeral
-        });
-      }
-
-      let targetChannel = channel;
-
-      if (!targetChannel && autoCreate) {
-        const botMember = interaction.guild.members.me;
-        if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
+      try {
+        const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
+        if (!isAdmin) {
           return interaction.reply({
             embeds: [
               new EmbedBuilder()
                 .setColor("#ED4245")
-                .setDescription("❌ I need **Manage Channels** permission to create a channel.")
+                .setDescription("❌ You need **Administrator** permission to setup counting.")
             ],
             flags: MessageFlags.Ephemeral
           });
         }
 
-        try {
-          targetChannel = await interaction.guild.channels.create({
-            name: "🔢-counting",
-            type: ChannelType.GuildText,
-            topic: "📊 Counting Game Channel - Keep the count going!",
-            permissionOverwrites: [
-              {
-                id: interaction.guild.id,
-                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
-                deny: [PermissionFlagsBits.CreateInstantInvite]
-              }
-            ]
-          });
+        const channel = interaction.options.getChannel("channel");
+        const autoCreate = interaction.options.getBoolean("auto_create") || false;
+        const clearOnReset = interaction.options.getBoolean("clear_on_reset") || false;
 
-          await targetChannel.send({
-            embeds: [
-              new EmbedBuilder()
-                .setColor("#5865F2")
-                .setTitle("🔢 Counting Game Started!")
-                .setDescription("Welcome to the counting game! Start counting from **1**.")
-                .addFields(
-                  { name: "📝 How to Play", value: "Type the next number in the sequence.\nFirst number should be **1**.", inline: true },
-                  { name: "⚠️ Rules", value: "• No double counting\n• Type the correct number\n• Have fun!", inline: true },
-                  { name: "💡 Tips", value: "You can also type math expressions!\nExample: `5+5` = 10", inline: true }
-                )
-                .setFooter({ text: "Good luck and have fun!" })
-                .setTimestamp()
-            ]
-          });
-        } catch (error) {
-          console.error("Failed to create counting channel:", error);
+        if (!channel && !autoCreate) {
           return interaction.reply({
             embeds: [
               new EmbedBuilder()
                 .setColor("#ED4245")
-                .setDescription("❌ Failed to create counting channel. Check my permissions.")
+                .setDescription("❌ Please select a channel or enable auto-create.")
             ],
             flags: MessageFlags.Ephemeral
           });
         }
+
+        let targetChannel = channel;
+
+        if (!targetChannel && autoCreate) {
+          try {
+            const botMember = await interaction.guild.members.fetchMe();
+            if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
+              return interaction.reply({
+                embeds: [
+                  new EmbedBuilder()
+                    .setColor("#ED4245")
+                    .setDescription("❌ I need **Manage Channels** permission to create a channel.")
+                ],
+                flags: MessageFlags.Ephemeral
+              });
+            }
+          } catch (err) {
+            return interaction.reply({
+              embeds: [
+                new EmbedBuilder()
+                  .setColor("#ED4245")
+                  .setDescription("❌ Failed to check my permissions. Please make sure I have `Manage Channels` permission.")
+              ],
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          try {
+            targetChannel = await interaction.guild.channels.create({
+              name: "counting",
+              type: ChannelType.GuildText,
+              topic: "Counting Game Channel - Keep the count going!",
+              permissionOverwrites: [
+                {
+                  id: interaction.guild.id,
+                  allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+                  deny: [PermissionFlagsBits.CreateInstantInvite]
+                }
+              ]
+            });
+
+            await targetChannel.send({
+              embeds: [
+                new EmbedBuilder()
+                  .setColor("#5865F2")
+                  .setTitle("🔢 Counting Game Started!")
+                  .setDescription("Welcome to the counting game! Start counting from **1**.")
+                  .addFields(
+                    { name: "📝 How to Play", value: "Type the next number in the sequence.", inline: true },
+                    { name: "⚠️ Rules", value: "• No double counting\n• Type the correct number", inline: true }
+                  )
+                  .setFooter({ text: "Good luck and have fun!" })
+                  .setTimestamp()
+              ]
+            });
+          } catch (error) {
+            console.error("Failed to create counting channel:", error);
+            return interaction.reply({
+              embeds: [
+                new EmbedBuilder()
+                  .setColor("#ED4245")
+                  .setDescription(`❌ Failed to create counting channel.\nError: ${error.message}`)
+              ],
+              flags: MessageFlags.Ephemeral
+            });
+          }
+        }
+
+        await redis.set(`counting:${guildId}:channel`, targetChannel.id);
+        await redis.set(`counting:${guildId}:clear_on_reset`, clearOnReset ? "true" : "false");
+
+        const countKey = `count:${guildId}`;
+        const existingCount = await redis.get(countKey);
+        if (!existingCount) {
+          await redis.set(countKey, 0);
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor("#57F287")
+          .setTitle("✅ Counting System Setup Complete!")
+          .setDescription(`Counting channel set to ${targetChannel}`)
+          .addFields(
+            { name: "📢 Channel", value: `${targetChannel}`, inline: true },
+            { name: "🔄 Clear on Reset", value: clearOnReset ? "✅ Yes" : "❌ No", inline: true },
+            { name: "🔢 Current Count", value: `\`${await redis.get(countKey) || 0}\``, inline: true }
+          )
+          .setTimestamp();
+
+        return interaction.reply({ embeds: [embed] });
+
+      } catch (error) {
+        console.error("Setup error:", error);
+        return interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#ED4245")
+              .setDescription(`❌ An error occurred during setup.\nError: ${error.message}`)
+          ],
+          flags: MessageFlags.Ephemeral
+        });
       }
-
-      await redis.set(`counting:${guildId}:channel`, targetChannel.id);
-      await redis.set(`counting:${guildId}:clear_on_reset`, clearOnReset ? "true" : "false");
-
-      const countKey = `count:${guildId}`;
-      const existingCount = await redis.get(countKey);
-      if (!existingCount) {
-        await redis.set(countKey, 0);
-      }
-
-      const embed = new EmbedBuilder()
-        .setColor("#57F287")
-        .setTitle("✅ Counting System Setup Complete!")
-        .setDescription(`Counting channel set to ${targetChannel}`)
-        .addFields(
-          { name: "📢 Channel", value: `${targetChannel}`, inline: true },
-          { name: "🔄 Clear on Reset", value: clearOnReset ? "✅ Yes" : "❌ No", inline: true },
-          { name: "🔢 Current Count", value: `\`${await redis.get(countKey) || 0}\``, inline: true }
-        )
-        .setFooter({ text: "Users can now start counting!" })
-        .setTimestamp();
-
-      return interaction.reply({ embeds: [embed] });
     }
 
     // =========================
@@ -182,8 +208,6 @@ module.exports = {
       const mistakes = Number(await redis.zscore(`counting:${guildId}:sabotages`, targetId) || 0);
       const streak = Number(await redis.get(`counting:${guildId}:${targetId}:streak`) || 0);
       const record = Number(await redis.get(`counting:${guildId}:${targetId}:highscore`) || 0);
-      
-      // GLOBAL economy for shields
       const shield = Number(await redis.get(`eco:${targetId}:shield`) || 0);
       
       const total = correct + mistakes;
@@ -331,14 +355,13 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 SHOP (GLOBAL ECONOMY)
+    // 🛒 SHOP
     // =========================
     if (sub === "shop") {
       const shieldPrice = 200;
       const doublePrice = 500;
       const resetPrice = 100;
 
-      // GLOBAL economy keys
       const balanceKey = `eco:${userId}:money`;
       const shieldKey = `eco:${userId}:shield`;
       const doubleKey = `eco:${userId}:double`;
@@ -394,7 +417,7 @@ module.exports = {
     }
 
     // =========================
-    // 🔄 RESET (Admin only)
+    // 🔄 RESET
     // =========================
     if (sub === "reset") {
       const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
@@ -434,16 +457,17 @@ module.exports = {
 
       const msg = await interaction.reply({
         embeds: [embed],
-        fetchReply: true
+        withResponse: true
       });
 
-      await msg.react("✅");
+      const reply = msg.resource.message;
+      await reply.react("✅");
       
       const filter = (reaction, user) => 
         reaction.emoji.name === "✅" && user.id === userId;
       
       try {
-        const collected = await msg.awaitReactions({ 
+        const collected = await reply.awaitReactions({ 
           filter, 
           max: 1, 
           time: 30000 
@@ -465,13 +489,23 @@ module.exports = {
             ],
             components: []
           });
+        } else {
+          return interaction.editReply({
+            embeds: [
+              new EmbedBuilder()
+                .setColor("#ED4245")
+                .setDescription("❌ Reset cancelled - No reaction received.")
+            ],
+            components: []
+          });
         }
-      } catch {
+      } catch (error) {
+        console.error("Reset error:", error);
         return interaction.editReply({
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
-              .setDescription("❌ Reset cancelled.")
+              .setDescription("❌ Reset cancelled or timed out.")
           ],
           components: []
         });
