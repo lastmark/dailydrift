@@ -4,13 +4,17 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ComponentType
+  ComponentType,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  MessageFlags
 } = require("discord.js");
 
 const DEV_ID = "1303357369622990889";
 
 /* =========================
-   FORMAT TIME
+   FORMAT TTL
 ========================= */
 function formatTTL(ttlSeconds) {
   if (ttlSeconds === -1) return "♾️ Permanent Access";
@@ -21,25 +25,6 @@ function formatTTL(ttlSeconds) {
   const m = Math.floor((ttlSeconds % 3600) / 60);
 
   return `⏳ ${d}d ${h}h ${m}m`;
-}
-
-/* =========================
-   DURATION PARSER
-========================= */
-function durationToSeconds(input) {
-  if (input === "perm") return -1;
-
-  const match = input.match(/(\d+)(d|h|m)/);
-  if (!match) return 0;
-
-  const value = parseInt(match[1]);
-  const type = match[2];
-
-  if (type === "d") return value * 86400;
-  if (type === "h") return value * 3600;
-  if (type === "m") return value * 60;
-
-  return 0;
 }
 
 module.exports = {
@@ -56,35 +41,30 @@ module.exports = {
     const userValue = await redis.get(`premium:user:${userId}`);
     const guildValue = await redis.get(`premium:guild:${guildId}`);
 
-    const userTTL =
-      userValue === "perm"
-        ? -1
-        : await redis.ttl(`premium:user:${userId}`);
+    const userTTL = userValue === "perm"
+      ? -1
+      : await redis.ttl(`premium:user:${userId}`);
 
-    const guildTTL =
-      guildValue === "perm"
-        ? -1
-        : await redis.ttl(`premium:guild:${guildId}`);
+    const guildTTL = guildValue === "perm"
+      ? -1
+      : await redis.ttl(`premium:guild:${guildId}`);
 
     /* =========================
-       EMBED
+       DASHBOARD EMBED
     ========================= */
     const embed = new EmbedBuilder()
       .setColor("#F1C40F")
-      .setAuthor({
-        name: "💎 Premium Control Hub",
-        iconURL: interaction.user.displayAvatarURL()
-      })
-      .setDescription("Select an action below:")
+      .setTitle("💎 Premium Control Hub")
+      .setDescription("Manage your premium access below")
       .addFields(
         {
-          name: "👤 User",
+          name: "👤 User Status",
           value: userValue
             ? `💎 Active\n${formatTTL(userTTL)}`
             : "❌ Not Active"
         },
         {
-          name: "🏢 Server",
+          name: "🏢 Server Status",
           value: guildValue
             ? `💎 Active\n${formatTTL(guildTTL)}`
             : "❌ Not Active"
@@ -92,19 +72,17 @@ module.exports = {
       );
 
     /* =========================
-       BUTTONS
+       BUTTON PANEL
     ========================= */
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId("view")
-        .setLabel("View")
-        .setEmoji("📊")
+        .setCustomId("refresh")
+        .setLabel("Refresh")
         .setStyle(ButtonStyle.Primary),
 
       new ButtonBuilder()
         .setCustomId("redeem")
-        .setLabel("Redeem")
-        .setEmoji("🎟️")
+        .setLabel("Redeem Code")
         .setStyle(ButtonStyle.Success)
     );
 
@@ -120,95 +98,92 @@ module.exports = {
     });
 
     collector.on("collect", async i => {
-      if (i.user.id !== userId)
-        return i.reply({ content: "Not your panel.", ephemeral: true });
+      if (i.user.id !== userId) {
+        return i.reply({
+          content: "❌ Not your panel.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
 
-      /* =========================
-         VIEW REFRESH
-      ========================= */
-      if (i.customId === "view") {
+      /* ================= REFRESH ================= */
+      if (i.customId === "refresh") {
         return i.update({ embeds: [embed] });
       }
 
-      /* =========================
-         REDEEM SYSTEM (FULL HERE)
-      ========================= */
+      /* ================= REDEEM MODAL ================= */
       if (i.customId === "redeem") {
-        await i.reply({
-          content: "🎟️ Send your redeem code in chat...",
-          ephemeral: true
-        });
+        const modal = new ModalBuilder()
+          .setCustomId("redeem_modal")
+          .setTitle("Redeem Premium Code");
 
-        const collected = await i.channel.awaitMessages({
-          filter: m => m.user.id === userId,
-          max: 1,
-          time: 30000
-        }).catch(() => null);
+        const input = new TextInputBuilder()
+          .setCustomId("code")
+          .setLabel("Enter redeem code")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true);
 
-        if (!collected) {
-          return i.followUp({
-            content: "⌛ Timed out.",
-            ephemeral: true
-          });
-        }
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(input)
+        );
 
-        const code = collected.first().content.trim().toUpperCase();
-        const raw = await redis.get(`redeem:${code}`);
-
-        if (!raw) {
-          return i.followUp({
-            content: "❌ Invalid code.",
-            ephemeral: true
-          });
-        }
-
-        const data = JSON.parse(raw);
-
-        if (data.uses <= 0) {
-          await redis.del(`redeem:${code}`);
-          return i.followUp({
-            content: "❌ Code expired.",
-            ephemeral: true
-          });
-        }
-
-        // apply premium
-        if (data.duration === "perm") {
-          await redis.set(`premium:user:${userId}`, "perm");
-        } else {
-          await redis.set(`premium:user:${userId}`, "active");
-          if (data.seconds > 0) {
-            await redis.expire(`premium:user:${userId}`, data.seconds);
-          }
-        }
-
-        // reduce uses
-        data.uses -= 1;
-
-        if (data.uses <= 0) {
-          await redis.del(`redeem:${code}`);
-        } else {
-          await redis.set(`redeem:${code}`, JSON.stringify(data));
-        }
-
-        return i.followUp({
-          content:
-            `💎 **Redeemed Successfully**\n` +
-            `🎟️ Code: **${code}**\n` +
-            `✨ Premium Activated`,
-          ephemeral: true
-        });
+        return i.showModal(modal);
       }
     });
 
     collector.on("end", async () => {
       const disabled = new ActionRowBuilder().addComponents(
-        row.components.map(b => ButtonBuilder.from(b).setDisabled(true))
+        row.components.map(btn =>
+          ButtonBuilder.from(btn).setDisabled(true)
+        )
       );
 
       await interaction.editReply({
         components: [disabled]
       }).catch(() => {});
     });
+
+    /* =========================
+       GLOBAL MODAL HANDLER
+       (SAFE SINGLE REGISTRATION)
+    ========================= */
+    if (!client.__redeemHandlerAdded) {
+      client.__redeemHandlerAdded = true;
+
+      client.on("interactionCreate", async i => {
+        if (!i.isModalSubmit()) return;
+        if (i.customId !== "redeem_modal") return;
+
+        const code = i.fields.getTextInputValue("code").trim().toUpperCase();
+        const raw = await redis.get(`redeem:${code}`);
+
+        if (!raw) {
+          return i.reply({
+            content: "❌ Invalid or expired code.",
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const data = JSON.parse(raw);
+
+        // 🔥 ALWAYS CONSUME CODE FIRST (prevents reuse exploit)
+        await redis.del(`redeem:${code}`);
+
+        if (data.type === "user") {
+          if (data.duration === "perm") {
+            await redis.set(`premium:user:${i.user.id}`, "perm");
+          } else {
+            await redis.set(`premium:user:${i.user.id}`, "active");
+            if (data.seconds > 0) {
+              await redis.expire(`premium:user:${i.user.id}`, data.seconds);
+            }
+          }
+        }
+
+        return i.reply({
+          content: "💎 Premium activated successfully!",
+          flags: MessageFlags.Ephemeral
+        });
+      });
+    }
   }
 };
