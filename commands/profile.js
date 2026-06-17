@@ -9,9 +9,7 @@ try {
   if (fs.existsSync(fontPath)) {
     GlobalFonts.registerFromPath(fontPath, "CustomFont");
   }
-} catch (err) {
-  console.log("Font load error:", err.message);
-}
+} catch {}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -41,62 +39,14 @@ module.exports = {
     const needed = 100 * level;
     const progress = Math.min(xp / needed, 1);
 
-    // =========================
-    // FRAME SYSTEM (DESIGN BASED)
-    // =========================
-    function getFrame(level) {
-      if (level >= 120) {
-        return {
-          type: "mythic",
-          glow: "#FFD700",
-          accent: "#FFF3A0"
-        };
-      }
-      if (level >= 100) {
-        return {
-          type: "fire",
-          glow: "#FF3B3B",
-          accent: "#FF8A00"
-        };
-      }
-      if (level >= 75) {
-        return {
-          type: "diamond",
-          glow: "#00D4FF",
-          accent: "#66F2FF"
-        };
-      }
-      if (level >= 50) {
-        return {
-          type: "elite",
-          glow: "#9B59B6",
-          accent: "#C39BD3"
-        };
-      }
-      if (level >= 25) {
-        return {
-          type: "rare",
-          glow: "#3498DB",
-          accent: "#85C1E9"
-        };
-      }
-
-      return {
-        type: "basic",
-        glow: "#5865F2",
-        accent: "#7289DA"
-      };
-    }
-
-    const frame = getFrame(level);
-
-    // =========================
-    // CANVAS
-    // =========================
     const canvas = createCanvas(800, 300);
     const ctx = canvas.getContext("2d");
 
-    // Background
+    const tick = Date.now() / 50; // animation driver
+
+    // =========================
+    // BACKGROUND
+    // =========================
     try {
       const image = bg
         ? await loadImage(bg)
@@ -112,96 +62,100 @@ module.exports = {
     ctx.fillRect(0, 0, 800, 300);
 
     // =========================
+    // FRAME SYSTEM
+    // =========================
+    function getFrame(level) {
+      if (level >= 120) return { glow: "#FFD700", accent: "#FFF3A0", name: "mythic" };
+      if (level >= 100) return { glow: "#FF3B3B", accent: "#FF8A00", name: "fire" };
+      if (level >= 75) return { glow: "#00D4FF", accent: "#66F2FF", name: "diamond" };
+      if (level >= 50) return { glow: "#9B59B6", accent: "#C39BD3", name: "elite" };
+      if (level >= 25) return { glow: "#3498DB", accent: "#85C1E9", name: "rare" };
+      return { glow: "#5865F2", accent: "#7289DA", name: "basic" };
+    }
+
+    const frame = getFrame(level);
+
+    // =========================
     // AVATAR
     // =========================
     const avatar = await loadImage(
       target.displayAvatarURL({ extension: "png", size: 256 })
     );
 
+    const ax = 110, ay = 130;
+
     ctx.save();
     ctx.beginPath();
-    ctx.arc(110, 130, 70, 0, Math.PI * 2);
+    ctx.arc(ax, ay, 70, 0, Math.PI * 2);
     ctx.clip();
     ctx.drawImage(avatar, 35, 55, 150, 150);
     ctx.restore();
 
     // =========================
-    // FRAME DESIGN SYSTEM
+    // FRAME DRAW (ADVANCED)
     // =========================
     function drawFrame() {
-      const x = 110;
-      const y = 130;
+      const t = tick / 10;
 
-      // OUTER GLOW (aura)
-      ctx.strokeStyle = hexToRGBA(frame.glow, 0.25);
-      ctx.lineWidth = 18;
+      // 🌌 outer aura
+      ctx.save();
+      ctx.globalAlpha = 0.25 + Math.sin(t) * 0.05;
+      ctx.strokeStyle = hexToRGBA(frame.glow, 0.3);
+      ctx.lineWidth = 28;
       ctx.beginPath();
-      ctx.arc(x, y, 78, 0, Math.PI * 2);
+      ctx.arc(ax, ay, 82, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.restore();
 
-      // MID GLOW ring
-      ctx.strokeStyle = hexToRGBA(frame.glow, 0.6);
-      ctx.lineWidth = 8;
-      ctx.beginPath();
-      ctx.arc(x, y, 74, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // INNER SHARP FRAME
+      // ⚡ main energy ring
+      ctx.save();
       ctx.strokeStyle = frame.glow;
-      ctx.lineWidth = 3;
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = 6 + Math.sin(t) * 1.5;
       ctx.beginPath();
-      ctx.arc(x, y, 70, 0, Math.PI * 2);
+      ctx.arc(ax, ay, 74, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.restore();
 
-      // SPECIAL SHAPES PER LEVEL TYPE
-      if (frame.type === "diamond") {
-        drawDiamondCorners(x, y);
-      }
-
-      if (frame.type === "fire") {
-        drawFireAura(x, y);
-      }
-
-      if (frame.type === "mythic") {
-        drawMythicGlow(x, y);
-      }
-    }
-
-    // Diamond corners (elite look)
-    function drawDiamondCorners(x, y) {
-      ctx.strokeStyle = "#00E5FF";
+      // 🧿 inner clean ring
+      ctx.save();
+      ctx.strokeStyle = "#fff";
+      ctx.globalAlpha = 0.2;
       ctx.lineWidth = 2;
-
-      for (let i = 0; i < 8; i++) {
-        const angle = (i / 8) * Math.PI * 2;
-        const dx = x + Math.cos(angle) * 85;
-        const dy = y + Math.sin(angle) * 85;
-
-        ctx.beginPath();
-        ctx.moveTo(dx, dy);
-        ctx.lineTo(dx + 6, dy + 6);
-        ctx.stroke();
-      }
-    }
-
-    // Fire aura effect
-    function drawFireAura(x, y) {
-      for (let i = 0; i < 6; i++) {
-        ctx.strokeStyle = `rgba(255, 80, 0, ${0.1 * i})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(x, y, 75 + i * 3, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
-
-    // Mythic golden pulse
-    function drawMythicGlow(x, y) {
-      ctx.strokeStyle = "rgba(255,215,0,0.8)";
-      ctx.lineWidth = 4;
-
       ctx.beginPath();
-      ctx.arc(x, y, 76, 0, Math.PI * 2);
+      ctx.arc(ax, ay, 70, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      // ✨ PARTICLES (ORBIT SYSTEM)
+      const particles = Math.min(4 + Math.floor(level / 10), 18);
+
+      for (let i = 0; i < particles; i++) {
+        const angle = (i / particles) * Math.PI * 2 + t;
+        const radius = 88;
+
+        const px = ax + Math.cos(angle) * radius;
+        const py = ay + Math.sin(angle) * radius;
+
+        ctx.fillStyle = frame.accent;
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        ctx.arc(px, py, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 1;
+
+      // ⚡ light sweep effect
+      const grad = ctx.createLinearGradient(0, 0, 800, 300);
+      grad.addColorStop(0, "transparent");
+      grad.addColorStop(0.5, "rgba(255,255,255,0.15)");
+      grad.addColorStop(1, "transparent");
+
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 12;
+      ctx.beginPath();
+      ctx.arc(ax, ay, 72, 0, Math.PI * 2);
       ctx.stroke();
     }
 
@@ -266,7 +220,6 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// convert hex → rgba
 function hexToRGBA(hex, a) {
   const c = hex.replace("#", "");
   const r = parseInt(c.substring(0, 2), 16);
