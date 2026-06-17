@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ChannelType } = require("discord.js");
+const { SlashCommandBuilder, EmbedBuilder, ChannelType, MessageFlags } = require("discord.js");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -8,42 +8,47 @@ module.exports = {
       option
         .setName("channel")
         .setDescription("The channel where welcome messages should be sent")
-        .addChannelTypes(ChannelType.GuildText) // Restricts selection to text channels
+        .addChannelTypes(ChannelType.GuildText)
         .setRequired(true)
     ),
 
   async execute(interaction, client, redis) {
-    // 1. Get the channel selected by the user
-    const targetChannel = interaction.options.getChannel("channel");
     const guildId = interaction.guild.id;
+    const targetChannel = interaction.options.getChannel("channel");
 
-    // 2. Save the new channel ID to Redis
+    // Safety check
+    if (!targetChannel) {
+      return interaction.reply({
+        content: "❌ Invalid channel selected.",
+        flags: [MessageFlags.Ephemeral]
+      });
+    }
+
+    // Save to Redis
     await redis.set(`welcome:${guildId}`, targetChannel.id);
 
-    // 3. Create a luxurious, clean success embed
-    const successEmbed = new EmbedBuilder()
-      .setColor(0x00FF7F) // Spring Green accent
-      .setTitle("⚙️ Configuration Updated")
-      .setDescription("The welcome system has been successfully updated.")
+    const embed = new EmbedBuilder()
+      .setColor(0x00FF7F)
+      .setTitle("⚙️ Welcome System Configured")
+      .setDescription("New members will now receive welcome messages here.")
       .addFields(
-        { 
-          name: "📍 System", 
-          value: "└ Welcome Messages", 
-          inline: true 
+        {
+          name: "📍 Module",
+          value: "Welcome System",
+          inline: true
         },
-        { 
-          name: "💬 Target Channel", 
-          value: `└ ${targetChannel}`, 
-          inline: true 
+        {
+          name: "💬 Channel",
+          value: `${targetChannel}`,
+          inline: true
         }
       )
       .setTimestamp()
-      .setFooter({ 
-        text: `Configured by ${interaction.user.username}`, 
-        iconURL: interaction.user.displayAvatarURL({ dynamic: true }) 
+      .setFooter({
+        text: `Updated by ${interaction.user.username}`,
+        iconURL: interaction.user.displayAvatarURL()
       });
 
-    // 4. Reply with the embed
-    await interaction.reply({ embeds: [successEmbed] });
+    return interaction.reply({ embeds: [embed] });
   }
 };
