@@ -12,6 +12,7 @@ const {
 const e = require("../emojis.js");
 
 module.exports = {
+  category: "Games",
   data: new SlashCommandBuilder()
     .setName("game")
     .setDescription("🪙 Play mini-games with interactive button panels.")
