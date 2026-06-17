@@ -1,3 +1,4 @@
+// commands/premium.js – FINAL FIXED
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -28,7 +29,7 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName("premium")
-    .setDescription("💎 Premium Control Dashboard"),
+    .setDescription("💎 Premium Dashboard"),
 
   async execute(interaction, client, redis) {
     const userId = interaction.user.id;
@@ -101,11 +102,10 @@ module.exports = {
 
     collector.on("collect", async i => {
       if (i.customId === "premium_refresh") {
-        // Re-fetch and update
+        // Re-fetch
         const newUser = await redis.get(`premium:user:${userId}`);
         const newGuild = await redis.get(`premium:guild:${guildId}`);
         userValue = newUser; guildValue = newGuild;
-        // update TTLs...
         if (newUser === "perm") userTTL = -1;
         else if (newUser) { userTTL = await redis.ttl(`premium:user:${userId}`); if (userTTL < 0) userTTL = 0; }
         else userTTL = 0;
@@ -153,8 +153,10 @@ module.exports = {
             return i.followUp({ content: "❌ You already used this code.", flags: MessageFlags.Ephemeral });
           }
 
-          // Apply premium based on type
+          // --- FIX: Determine premium type ---
           const premiumKey = data.type === "guild" ? `premium:guild:${guildId}` : `premium:user:${userId}`;
+
+          // Apply premium
           if (data.duration === "perm") {
             await redis.set(premiumKey, "perm");
           } else {
