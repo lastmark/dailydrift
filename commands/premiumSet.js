@@ -39,7 +39,7 @@ module.exports = {
     )
 
     .addSubcommand(sub =>
-      sub.setName("setup-stats")
+      sub.setName("stats")
         .setDescription("📊 Configure live server stats system")
         .addStringOption(opt =>
           opt.setName("type")
