@@ -25,6 +25,7 @@ function getFont(weight = "normal", size = 16) {
 }
 
 module.exports = {
+  category: "User",
   data: new SlashCommandBuilder()
     .setName("profile")
     .setDescription("View your profile")
