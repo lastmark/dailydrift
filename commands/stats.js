@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require("discord.js");
 
 module.exports = {
+  category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("stats")
     .setDescription(" Setup server performance statistics tracker channels.")
