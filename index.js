@@ -5,7 +5,7 @@ const e = require("./emojis.js");
 const fs = require("fs");
 const path = require("path");
 const setupLogger = require("./logger");
-setupLogger(client, redis);
+
 
 const client = new Client({
   intents: [
@@ -19,7 +19,7 @@ const client = new Client({
   ],
   partials: [Partials.Channel]
 });
-
+setupLogger(client, redis);
 client.commands = new Collection();
 
 // ==========================================
