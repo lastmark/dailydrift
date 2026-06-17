@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ChannelType } = require("discord.js");
+const { SlashCommandBuilder, EmbedBuilder, ChannelType, MessageFlags } = require("discord.js");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -7,43 +7,48 @@ module.exports = {
     .addChannelOption(option =>
       option
         .setName("channel")
-        .setDescription("The channel where leave/goodbye messages should be sent")
-        .addChannelTypes(ChannelType.GuildText) // Restricts selection to text channels
+        .setDescription("The channel where leave messages should be sent")
+        .addChannelTypes(ChannelType.GuildText)
         .setRequired(true)
     ),
 
   async execute(interaction, client, redis) {
-    // 1. Get the channel selected by the user
-    const targetChannel = interaction.options.getChannel("channel");
     const guildId = interaction.guild.id;
+    const targetChannel = interaction.options.getChannel("channel");
 
-    // 2. Save the new channel ID to Redis under the leave key
+    // Safety check
+    if (!targetChannel) {
+      return interaction.reply({
+        content: "❌ Invalid channel selected.",
+        flags: [MessageFlags.Ephemeral]
+      });
+    }
+
+    // Save config
     await redis.set(`leave:${guildId}`, targetChannel.id);
 
-    // 3. Create a clean, matching success embed
-    const successEmbed = new EmbedBuilder()
-      .setColor(0xFF4500) // Orange Red accent to distinguish from welcome
-      .setTitle("⚙️ Configuration Updated")
-      .setDescription("The leave system has been successfully updated.")
+    const embed = new EmbedBuilder()
+      .setColor(0xFF4500)
+      .setTitle("⚙️ Leave System Configured")
+      .setDescription("Leave messages will now be routed correctly.")
       .addFields(
-        { 
-          name: "📍 System", 
-          value: "└ Leave Messages", 
-          inline: true 
+        {
+          name: "📍 Module",
+          value: "Leave System",
+          inline: true
         },
-        { 
-          name: "💬 Target Channel", 
-          value: `└ ${targetChannel}`, 
-          inline: true 
+        {
+          name: "💬 Channel",
+          value: `${targetChannel}`,
+          inline: true
         }
       )
       .setTimestamp()
-      .setFooter({ 
-        text: `Configured by ${interaction.user.username}`, 
-        iconURL: interaction.user.displayAvatarURL({ dynamic: true }) 
+      .setFooter({
+        text: `Updated by ${interaction.user.username}`,
+        iconURL: interaction.user.displayAvatarURL()
       });
 
-    // 4. Reply with the embed
-    await interaction.reply({ embeds: [successEmbed] });
+    return interaction.reply({ embeds: [embed] });
   }
 };
