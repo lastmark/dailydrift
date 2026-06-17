@@ -1,10 +1,18 @@
-// games/counting.js - COMPLETE REWRITE
 const { EmbedBuilder } = require("discord.js");
+
+// Local cache to prevent duplicate processing of the same message
+const processedCountingMessages = new Set();
 
 module.exports = async (message, redis) => {
   try {
     // Ignore bots
     if (message.author.bot) return;
+
+    // 🛡️ Prevent double processing of the same message
+    if (processedCountingMessages.has(message.id)) return;
+    processedCountingMessages.add(message.id);
+    // Clean up after 5 seconds to free memory
+    setTimeout(() => processedCountingMessages.delete(message.id), 5000);
     
     const guildId = message.guild.id;
     const userId = message.author.id;
