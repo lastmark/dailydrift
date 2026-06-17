@@ -3,7 +3,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require("disco
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("stats")
-    .setDescription("📊 Setup server performance statistics tracker channels.")
+    .setDescription(" Setup server performance statistics tracker channels.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("setup")
