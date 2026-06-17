@@ -3,23 +3,23 @@ const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require("disco
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("stats")
-    .setDescription("📊 Setup completely free server performance statistics tracker channels.")
+    .setDescription("📊 Setup server performance statistics tracker channels.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("setup")
-        .setDescription("🛠️ Instantly deploy live community traction boards.")
+        .setDescription("Deploy live community tracking channels.")
         .addStringOption(opt =>
           opt.setName("type")
-            .setDescription("Select the public tracking metric type.")
+            .setDescription("Select tracking metric type.")
             .setRequired(true)
             .addChoices(
               { name: "👥 Total Members", value: "total" },
               { name: "🟢 Online Users", value: "online" }
             )
         )
-        .addChannelOption(opt => 
+        .addChannelOption(opt =>
           opt.setName("target_channel")
-            .setDescription("Connect to an existing voice channel (Leave empty to let bot auto-create one).")
+            .setDescription("Use existing voice channel (optional).")
             .addChannelTypes(ChannelType.GuildVoice)
             .setRequired(false)
         )
@@ -27,6 +27,8 @@ module.exports = {
 
   async execute(interaction, client, redis) {
     await interaction.deferReply();
+
+    const guild = interaction.guild;
     const guildId = interaction.guildId;
     const type = interaction.options.getString("type");
     const targetChannel = interaction.options.getChannel("target_channel");
@@ -34,50 +36,65 @@ module.exports = {
     let currentMetricValue = "0";
     let defaultDesignName = "";
 
+    // MEMBER COUNT
     if (type === "total") {
-      currentMetricValue = interaction.guild.memberCount.toLocaleString();
+      currentMetricValue = guild.memberCount.toLocaleString();
       defaultDesignName = "👥 ┃ Members";
-    } else if (type === "online") {
-      const onlineCount = interaction.guild.members.cache.filter(m => m.presence && m.presence.status !== "offline").size;
+    }
+
+    // ONLINE COUNT (safe version)
+    if (type === "online") {
+      const onlineCount = guild.members.cache.filter(
+        m => m.presence && m.presence.status && m.presence.status !== "offline"
+      ).size;
+
       currentMetricValue = onlineCount.toLocaleString();
       defaultDesignName = "🟢 ┃ Online";
     }
 
     let activeChannelId = null;
-    let displayMessage = "";
+    let responseText = "";
 
-    // 🔄 CASE 1: User provided an existing directory channel
+    // CASE 1: Use existing channel
     if (targetChannel) {
       activeChannelId = targetChannel.id;
-      displayMessage = `✅ **Free Data Sync Completed:** Connected to channel ${targetChannel}. It will now track public **${type.toUpperCase()}** metrics.`;
-      
-      const customName = targetChannel.name.split("•")[0] || `${defaultDesignName} `;
-      await targetChannel.setName(`${customName}• ${currentMetricValue}`).catch(() => null);
-    } 
-    // 🛠️ CASE 2: Auto-Create using our clean default structural layout
+
+      const baseName = targetChannel.name.split("•")[0] || defaultDesignName;
+
+      await targetChannel.setName(
+        `${baseName} • ${currentMetricValue}`
+      ).catch(() => null);
+
+      responseText = `✅ Connected to ${targetChannel}. Tracking **${type.toUpperCase()}** now.`;
+    }
+
+    // CASE 2: Auto create channel
     else {
-      const botDesignedName = `${defaultDesignName} • ${currentMetricValue}`;
-      
-      const newChannel = await interaction.guild.channels.create({
-        name: botDesignedName,
+      const channelName = `${defaultDesignName} • ${currentMetricValue}`;
+
+      const newChannel = await guild.channels.create({
+        name: channelName,
         type: ChannelType.GuildVoice,
         permissionOverwrites: [
           {
-            id: interaction.guild.roles.everyone.id,
-            deny: [PermissionFlagsBits.Connect], // Locks channel sidebar visual flow
-          },
-        ],
+            id: guild.roles.everyone.id,
+            deny: [PermissionFlagsBits.Connect]
+          }
+        ]
       }).catch(() => null);
 
       if (!newChannel) {
-        return interaction.editReply({ content: "❌ **Permissions Error:** Unsuccessful creating channel asset. Ensure my application roles have channel generation rights." });
+        return interaction.editReply({
+          content: "❌ Failed to create stats channel. Check bot permissions."
+        });
       }
 
       activeChannelId = newChannel.id;
-      displayMessage = `🛠️ **Public Counter Deployed:** Successfully generated brand new free voice asset <#${newChannel.id}>. *(You can edit its name inside Discord anytime, just keep the \`•\` symbol intact!)*`;
+      responseText = `🛠️ Created stats channel <#${newChannel.id}> for **${type.toUpperCase()}** tracking.`;
     }
 
     await redis.set(`stats:channel:${type}:${guildId}`, activeChannelId);
-    return interaction.editReply({ content: displayMessage });
+
+    return interaction.editReply({ content: responseText });
   }
 };
