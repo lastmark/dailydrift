@@ -9,17 +9,19 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName("game")
-    .setDescription("Economy system")
+    .setDescription("Economy system with shop & games")
 
     // ======================
     // BASIC
     // ======================
     .addSubcommand(s =>
-      s.setName("balance").setDescription("Check coins")
+      s.setName("balance")
+        .setDescription("Check your coins")
     )
 
     .addSubcommand(s =>
-      s.setName("daily").setDescription("Daily reward")
+      s.setName("daily")
+        .setDescription("Claim daily reward")
     )
 
     // ======================
@@ -29,23 +31,29 @@ module.exports = {
       s.setName("rps")
         .setDescription("Rock Paper Scissors")
         .addIntegerOption(o =>
-          o.setName("bet").setDescription("Bet").setRequired(true)
+          o.setName("bet")
+            .setDescription("Amount to bet")
+            .setRequired(true)
         )
     )
 
     .addSubcommand(s =>
       s.setName("coinflip")
-        .setDescription("Flip coin")
+        .setDescription("Flip a coin")
         .addIntegerOption(o =>
-          o.setName("bet").setDescription("Bet").setRequired(true)
+          o.setName("bet")
+            .setDescription("Amount to bet")
+            .setRequired(true)
         )
     )
 
     .addSubcommand(s =>
       s.setName("dice")
-        .setDescription("Dice game")
+        .setDescription("Roll dice")
         .addIntegerOption(o =>
-          o.setName("bet").setDescription("Bet").setRequired(true)
+          o.setName("bet")
+            .setDescription("Amount to bet")
+            .setRequired(true)
         )
     )
 
@@ -54,12 +62,16 @@ module.exports = {
     // ======================
     .addSubcommand(s =>
       s.setName("sendcash")
-        .setDescription("Send coins")
+        .setDescription("Send coins to a user")
         .addUserOption(o =>
-          o.setName("user").setRequired(true)
+          o.setName("user")
+            .setDescription("Recipient user")
+            .setRequired(true)
         )
         .addIntegerOption(o =>
-          o.setName("amount").setRequired(true)
+          o.setName("amount")
+            .setDescription("Amount to send")
+            .setRequired(true)
         )
     )
 
@@ -73,17 +85,21 @@ module.exports = {
 
     .addSubcommand(s =>
       s.setName("buybg")
-        .setDescription("Buy background")
+        .setDescription("Buy a background")
         .addStringOption(o =>
-          o.setName("id").setRequired(true)
+          o.setName("id")
+            .setDescription("Background ID")
+            .setRequired(true)
         )
     )
 
     .addSubcommand(s =>
       s.setName("equipbg")
-        .setDescription("Equip background")
+        .setDescription("Equip a background")
         .addStringOption(o =>
-          o.setName("id").setRequired(true)
+          o.setName("id")
+            .setDescription("Background ID")
+            .setRequired(true)
         )
     )
 
@@ -92,15 +108,21 @@ module.exports = {
     // ======================
     .addSubcommand(s =>
       s.setName("addbg")
-        .setDescription("Add background (admin)")
+        .setDescription("Add background (admin only)")
         .addStringOption(o =>
-          o.setName("id").setRequired(true)
+          o.setName("id")
+            .setDescription("Background ID")
+            .setRequired(true)
         )
         .addIntegerOption(o =>
-          o.setName("price").setRequired(true)
+          o.setName("price")
+            .setDescription("Price in coins")
+            .setRequired(true)
         )
         .addAttachmentOption(o =>
-          o.setName("image").setRequired(true)
+          o.setName("image")
+            .setDescription("Background image")
+            .setRequired(true)
         )
     ),
 
@@ -111,9 +133,6 @@ module.exports = {
 
     const DEVELOPER_ID = "1303357369622990889";
 
-    // ======================
-    // HELPERS
-    // ======================
     const getBal = async () =>
       Number(await redis.get(`eco:${guildId}:${userId}:money`) || 0);
 
@@ -174,7 +193,7 @@ module.exports = {
 
         embeds.push({
           title: `🖼 ${id}`,
-          description: `Price: **${item.price} coins**\nUse: /game buybg ${id}`,
+          description: `Price: **${item.price} coins**`,
           image: { url: item.url }
         });
       }
@@ -183,7 +202,7 @@ module.exports = {
     }
 
     // ======================
-    // BUY BACKGROUND
+    // BUY BG
     // ======================
     if (sub === "buybg") {
       const id = interaction.options.getString("id");
@@ -197,29 +216,20 @@ module.exports = {
         return interaction.reply("❌ Not enough coins");
 
       await takeBal(Number(item.price));
-
       await redis.sadd(`bg:owned:${userId}`, id);
       await redis.hset(`profile:${userId}`, "bg", id);
 
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor("#57F287")
-            .setTitle("✅ Purchased")
-            .setDescription(`You bought **${id}**`)
-            .setImage(item.url)
-        ]
-      });
+      return interaction.reply(`✅ Bought **${id}**`);
     }
 
     // ======================
-    // EQUIP BACKGROUND
+    // EQUIP BG
     // ======================
     if (sub === "equipbg") {
       const id = interaction.options.getString("id");
 
       const owned = await redis.sismember(`bg:owned:${userId}`, id);
-      if (!owned) return interaction.reply("❌ You don't own this");
+      if (!owned) return interaction.reply("❌ Not owned");
 
       await redis.hset(`profile:${userId}`, "bg", id);
 
@@ -227,7 +237,7 @@ module.exports = {
     }
 
     // ======================
-    // ADMIN ADD BG
+    // ADD BG
     // ======================
     if (sub === "addbg") {
       if (userId !== DEVELOPER_ID)
@@ -245,32 +255,7 @@ module.exports = {
         url: file.url
       });
 
-      return interaction.reply(`🛒 Added **${id}** to shop`);
-    }
-
-    // ======================
-    // GAME COMMANDS (short)
-    // ======================
-    if (sub === "coinflip" || sub === "dice" || sub === "rps") {
-      return interaction.reply("Game system already exists in your file (keep yours)");
-    }
-
-    // ======================
-    // SEND CASH
-    // ======================
-    if (sub === "sendcash") {
-      const target = interaction.options.getUser("user");
-      const amount = interaction.options.getInteger("amount");
-
-      const bal = await getBal();
-
-      if (amount > bal)
-        return interaction.reply("❌ Not enough coins");
-
-      await takeBal(amount);
-      await redis.incrby(`eco:${guildId}:${target.id}:money`, amount);
-
-      return interaction.reply(`💸 Sent **${amount} coins** to ${target.username}`);
+      return interaction.reply(`🛒 Added **${id}**`);
     }
   }
 };
