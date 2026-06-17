@@ -1,12 +1,34 @@
 const { Events, EmbedBuilder } = require("discord.js");
 
-const DEV_ID = "1303357369622990889"; // 👑 Your ID
+const DEV_ID = "1303357369622990889";
+
+// Helper: convert duration string to seconds
+function durationToSeconds(input) {
+  if (input === "perm") return -1;
+  const match = input.match(/(\d+)(d|h|m)/);
+  if (!match) return 0;
+  const value = parseInt(match[1]);
+  const type = match[2];
+  if (type === "d") return value * 86400;
+  if (type === "h") return value * 3600;
+  if (type === "m") return value * 60;
+  return 0;
+}
+
+// Message cache to prevent duplicate processing
+const processedMessages = new Set();
 
 module.exports = {
   name: Events.MessageCreate,
 
   async execute(message, client, redis) {
+    // Basic checks
     if (!message.guild || message.author.bot) return;
+
+    // Prevent duplicate processing of the same message
+    if (processedMessages.has(message.id)) return;
+    processedMessages.add(message.id);
+    setTimeout(() => processedMessages.delete(message.id), 5000);
 
     const userId = message.author.id;
     const guildId = message.guild.id;
@@ -18,17 +40,15 @@ module.exports = {
     try {
       const countingChannelId = await redis.get(`counting:${guildId}:channel`);
       if (countingChannelId && message.channel.id === countingChannelId) {
-        // Only allow numbers/math expressions
         const pure = content.replace(/\s+/g, "");
         const isValid = /^[0-9+\-*/^()]+$/.test(pure);
         if (!isValid) {
           if (message.deletable) await message.delete().catch(() => {});
           return;
         }
-        // Run the counting game logic
         const runCounting = require("../games/counting.js");
         await runCounting(message, redis);
-        return; // counting messages should NOT trigger XP or responder
+        return; // ⛔ Stop – don't process XP / commands
       }
     } catch (err) {
       console.error("Counting game error:", err);
@@ -37,10 +57,11 @@ module.exports = {
     // ==========================================
     // 💎 XP / LEVEL SYSTEM (global profile)
     // ==========================================
-    const cooldownKey = `xp:cd:${userId}`; // global cooldown (per user)
+    const cooldownKey = `xp:cd:${userId}`;
     if (await redis.get(cooldownKey)) return;
     await redis.setex(cooldownKey, 60, "1");
 
+    // Check premium using the correct key
     const isPremium = await redis.get(`premium:user:${userId}`);
 
     let xpGain = Math.floor(Math.random() * 11) + 15; // 15–25
@@ -96,15 +117,101 @@ module.exports = {
     }
 
     // ==========================================
-    // 👑 DEV ADMIN COMMANDS (message-based)
+    // 💬 MESSAGE COMMANDS (all start with !)
     // ==========================================
-    if (userId !== DEV_ID) return; // only you
-
     if (!content.startsWith("!")) return;
     const args = content.slice(1).trim().split(/ +/);
     const cmd = args.shift().toLowerCase();
 
-    // -------- COINS --------
+    // -------- PUBLIC SHOP COMMANDS --------
+    if (cmd === "shop") {
+      const balance = Number(await redis.get(`eco:${userId}:money`) || 0);
+      const shields = Number(await redis.get(`eco:${userId}:shield`) || 0);
+      const doubleXP = Number(await redis.get(`eco:${userId}:double`) || 0);
+
+      const embed = new EmbedBuilder()
+        .setColor("#FF69B4")
+        .setTitle("🛒 Counting Shop")
+        .setDescription(`💰 Your balance: **${balance}** coins`)
+        .addFields(
+          { 
+            name: "🛡️ Shield", 
+            value: `Protects your streak from one mistake\nPrice: **200** coins\nOwned: **${shields}**`,
+            inline: true 
+          },
+          { 
+            name: "⚡ Double XP", 
+            value: `Double coins for 5 correct counts\nPrice: **500** coins\nActive: **${doubleXP > 0 ? 'Yes' : 'No'}**`,
+            inline: true 
+          }
+        )
+        .setFooter({ text: "Use !buy shield / !buy double" })
+        .setTimestamp();
+
+      return message.reply({ embeds: [embed] });
+    }
+
+    if (cmd === "buy") {
+      const item = args[0]?.toLowerCase();
+      if (!item || !["shield", "double"].includes(item)) {
+        return message.reply("❌ Usage: `!buy shield` or `!buy double`");
+      }
+
+      const prices = { shield: 200, double: 500 };
+      const price = prices[item];
+      const balance = Number(await redis.get(`eco:${userId}:money`) || 0);
+
+      if (balance < price) {
+        return message.reply(`❌ You need **${price}** coins. You have **${balance}**.`);
+      }
+
+      await redis.set(`eco:${userId}:money`, balance - price);
+
+      if (item === "shield") {
+        await redis.incr(`eco:${userId}:shield`);
+        const newShields = await redis.get(`eco:${userId}:shield`);
+        return message.reply(`✅ You bought a **Shield**! You now have **${newShields}** shields.`);
+      } else if (item === "double") {
+        await redis.set(`eco:${userId}:double`, 5);
+        return message.reply(`✅ You bought **Double XP** for 5 counts!`);
+      }
+    }
+
+    if (cmd === "shields") {
+      const shields = Number(await redis.get(`eco:${userId}:shield`) || 0);
+      return message.reply(`🛡️ You have **${shields}** shield${shields !== 1 ? 's' : ''}.`);
+    }
+
+    // -------- COUNTING STATS (anyone) --------
+    if (cmd === "countingstats") {
+      const target = message.mentions.users.first() || message.author;
+      const id = target.id;
+      const correct = Number(await redis.zscore(`counting:${guildId}:correct`, id) || 0);
+      const mistakes = Number(await redis.zscore(`counting:${guildId}:mistakes`, id) || 0);
+      const streak = Number(await redis.get(`counting:${guildId}:${id}:streak`) || 0);
+      const best = Number(await redis.get(`counting:${guildId}:${id}:bestStreak`) || 0);
+      const coins = Number(await redis.get(`eco:${id}:money`) || 0);
+
+      const embed = new EmbedBuilder()
+        .setColor("#5865F2")
+        .setAuthor({ name: `${target.username}'s Counting Stats`, iconURL: target.displayAvatarURL() })
+        .addFields(
+          { name: "✅ Correct", value: `${correct}`, inline: true },
+          { name: "❌ Mistakes", value: `${mistakes}`, inline: true },
+          { name: "🔥 Current Streak", value: `${streak}`, inline: true },
+          { name: "🏆 Best Streak", value: `${best}`, inline: true },
+          { name: "💰 Coins", value: `${coins}`, inline: true }
+        )
+        .setTimestamp();
+      return message.reply({ embeds: [embed] });
+    }
+
+    // ==========================================
+    // 👑 DEV COMMANDS (only you)
+    // ==========================================
+    if (userId !== DEV_ID) return;
+
+    // -------- Economy --------
     if (cmd === "addcoins") {
       const target = message.mentions.users.first();
       const amount = parseInt(args[1]);
@@ -136,7 +243,7 @@ module.exports = {
       return message.reply(`✅ Set **${target.username}**'s balance to **${amount}** coins`);
     }
 
-    // -------- SHIELDS --------
+    // -------- Shields --------
     if (cmd === "addshields") {
       const target = message.mentions.users.first();
       const amount = parseInt(args[1]);
@@ -159,16 +266,66 @@ module.exports = {
       return message.reply(`✅ Removed **${amount}** shields. Remaining: **${shields}**`);
     }
 
-    // -------- PREMIUM --------
+    // -------- Premium --------
+    // Remove user premium
     if (cmd === "removepremium") {
       const target = message.mentions.users.first();
       if (!target) return message.reply("❌ Usage: `!removepremium @user`");
       await redis.del(`premium:user:${target.id}`);
+      // Also remove any stored VIP key if exists
       await redis.del(`eco:${target.id}:vip`);
-      return message.reply(`✅ Removed premium from **${target.username}**`);
+      return message.reply(`✅ Removed user premium from **${target.username}**`);
     }
 
-    // -------- COUNTING SETUP (quick) --------
+    // Remove guild premium
+    if (cmd === "removeguildpremium") {
+      await redis.del(`premium:guild:${guildId}`);
+      return message.reply(`✅ Removed guild premium for this server.`);
+    }
+
+    // -------- Premium debug and manual set --------
+    if (cmd === "checkpremium") {
+      const userKey = `premium:user:${userId}`;
+      const guildKey = `premium:guild:${guildId}`;
+      const userVal = await redis.get(userKey);
+      const userTTL = await redis.ttl(userKey);
+      const guildVal = await redis.get(guildKey);
+      const guildTTL = await redis.ttl(guildKey);
+      return message.reply(
+        `👤 **User Premium**\nValue: ${userVal || '❌ none'}\nTTL: ${userTTL}s\n\n` +
+        `🏢 **Guild Premium**\nValue: ${guildVal || '❌ none'}\nTTL: ${guildTTL}s`
+      );
+    }
+
+    if (cmd === "setpremium") {
+      const duration = args[0] || "1h";
+      const seconds = durationToSeconds(duration);
+      if (seconds === 0 && duration !== "perm") return message.reply("Invalid duration.");
+      const key = `premium:user:${userId}`;
+      if (duration === "perm") {
+        await redis.set(key, "perm");
+      } else {
+        await redis.set(key, "active");
+        await redis.expire(key, seconds);
+      }
+      return message.reply(`✅ User premium set for you (${duration}). Check /premium.`);
+    }
+
+    if (cmd === "setguildpremium") {
+      const duration = args[0] || "1h";
+      const seconds = durationToSeconds(duration);
+      if (seconds === 0 && duration !== "perm") return message.reply("Invalid duration.");
+      const key = `premium:guild:${guildId}`;
+      if (duration === "perm") {
+        await redis.set(key, "perm");
+      } else {
+        await redis.set(key, "active");
+        await redis.expire(key, seconds);
+      }
+      return message.reply(`✅ Guild premium set for this server (${duration}).`);
+    }
+
+    // -------- Counting setup --------
     if (cmd === "setcountingchannel") {
       const channel = message.mentions.channels.first();
       if (!channel) return message.reply("❌ Usage: `!setcountingchannel #channel`");
@@ -184,31 +341,7 @@ module.exports = {
       return message.reply("✅ All counting stats reset.");
     }
 
-    // -------- VIEW COUNTING STATS (for any user) --------
-    if (cmd === "countingstats") {
-      const target = message.mentions.users.first() || message.author;
-      const id = target.id;
-      const correct = Number(await redis.zscore(`counting:${guildId}:correct`, id) || 0);
-      const mistakes = Number(await redis.zscore(`counting:${guildId}:mistakes`, id) || 0);
-      const streak = Number(await redis.get(`counting:${guildId}:${id}:streak`) || 0);
-      const best = Number(await redis.get(`counting:${guildId}:${id}:bestStreak`) || 0);
-      const coins = Number(await redis.get(`eco:${id}:money`) || 0);
-
-      const embed = new EmbedBuilder()
-        .setColor("#5865F2")
-        .setAuthor({ name: `${target.username}'s Counting Stats`, iconURL: target.displayAvatarURL() })
-        .addFields(
-          { name: "✅ Correct", value: `${correct}`, inline: true },
-          { name: "❌ Mistakes", value: `${mistakes}`, inline: true },
-          { name: "🔥 Current Streak", value: `${streak}`, inline: true },
-          { name: "🏆 Best Streak", value: `${best}`, inline: true },
-          { name: "💰 Coins", value: `${coins}`, inline: true }
-        )
-        .setTimestamp();
-      return message.reply({ embeds: [embed] });
-    }
-
-    // -------- HELP --------
+    // -------- Help --------
     if (cmd === "helpdev") {
       const embed = new EmbedBuilder()
         .setColor("#5865F2")
@@ -224,7 +357,13 @@ module.exports = {
             "`!addshields @user amount`",
             "`!removeshields @user amount`"
           ].join("\n"), inline: false },
-          { name: "👑 Premium", value: "`!removepremium @user`", inline: false },
+          { name: "👑 Premium", value: [
+            "`!removepremium @user` – remove user premium",
+            "`!removeguildpremium` – remove guild premium",
+            "`!checkpremium` – show raw premium keys",
+            "`!setpremium 1h` – set user premium (for you)",
+            "`!setguildpremium 1h` – set guild premium"
+          ].join("\n"), inline: false },
           { name: "🎯 Counting", value: [
             "`!setcountingchannel #channel`",
             "`!resetcounting`",
@@ -235,7 +374,7 @@ module.exports = {
       return message.reply({ embeds: [embed] });
     }
 
-    // Old devv command (keep if you want)
+    // -------- Legacy devv command (keep) --------
     if (cmd === "devv") {
       const sub = args[0];
       if (sub === "xp") {
