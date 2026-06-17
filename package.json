@@ -14,7 +14,7 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "@napi-rs/canvas": "^0.1.33",
+    "canvas": "^2.11.2",
       "ioredis": "^5.3.2",
     "discord.js": "^14.14.1",
     "redis": "^4.6.10",
