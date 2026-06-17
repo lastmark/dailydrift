@@ -1,3 +1,4 @@
+// commands/counting.js - FIXED WITH NULL CHECKS
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
@@ -46,13 +47,25 @@ module.exports = {
 
   async execute(interaction, client, redis) {
     try {
+      // CHECK IF IN GUILD
+      if (!interaction.guild) {
+        return interaction.reply({
+          content: "❌ This command can only be used in a server.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
       const sub = interaction.options.getSubcommand();
       const guildId = interaction.guild.id;
       const userId = interaction.user.id;
 
+      // =========================
+      // ⚙️ SETUP
+      // =========================
       if (sub === "setup") {
-        const member = await interaction.guild.members.fetch(userId);
-        if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+        // Check admin
+        const member = await interaction.guild.members.fetch(userId).catch(() => null);
+        if (!member || !member.permissions.has(PermissionFlagsBits.Administrator)) {
           return interaction.reply({
             content: "❌ You need Administrator permission.",
             flags: MessageFlags.Ephemeral
@@ -87,6 +100,7 @@ module.exports = {
         }
 
         await redis.set(`counting:${guildId}:channel`, targetChannel.id);
+        
         if (!await redis.get(`count:${guildId}`)) {
           await redis.set(`count:${guildId}`, 0);
         }
@@ -104,6 +118,9 @@ module.exports = {
         return interaction.reply({ embeds: [embed] });
       }
 
+      // =========================
+      // 📊 STATS
+      // =========================
       if (sub === "stats") {
         const targetUser = interaction.options.getUser("target") || interaction.user;
         const targetId = targetUser.id;
@@ -147,6 +164,9 @@ module.exports = {
         return interaction.reply({ embeds: [embed] });
       }
 
+      // =========================
+      // 🏆 LEADERBOARD
+      // =========================
       if (sub === "leaderboard") {
         const type = interaction.options.getString("type") || "correct";
         let data;
@@ -200,6 +220,9 @@ module.exports = {
         return interaction.reply({ embeds: [embed] });
       }
 
+      // =========================
+      // 🛒 SHOP
+      // =========================
       if (sub === "shop") {
         const shieldPrice = 200;
         const doublePrice = 500;
