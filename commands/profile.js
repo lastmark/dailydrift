@@ -3,204 +3,9 @@ const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
 const path = require("path");
 
 try {
-  GlobalFonts.registerFromPath(
-    path.join(__dirname, "../font.ttf"),
-    "CustomFont"
-  );
-} catch (e) {
-  console.log("Font load failed:", e.message);
-}
+  GlobalFonts.registerFromPath(path.join(__dirname, "../font.ttf"), "CustomFont");
+} catch {}
 
-module.exports = {
-  data: new SlashCommandBuilder()
-    .setName("profile")
-    .setDescription("View and customize your profile system")
-
-    .addSubcommand(s =>
-      s.setName("view")
-        .setDescription("View a user profile card")
-        .addUserOption(o =>
-          o.setName("target")
-            .setDescription("User to view")
-            .setRequired(false)
-        )
-    )
-
-    .addSubcommand(s =>
-      s.setName("setbio")
-        .setDescription("Set your profile bio")
-        .addStringOption(o =>
-          o.setName("text")
-            .setDescription("Your bio (max 80 chars)")
-            .setRequired(true)
-        )
-    )
-
-    .addSubcommand(s =>
-      s.setName("upload")
-        .setDescription("Set custom profile background")
-        .addAttachmentOption(o =>
-          o.setName("image")
-            .setDescription("Background image")
-            .setRequired(true)
-        )
-    )
-
-    .addSubcommand(s =>
-      s.setName("reset")
-        .setDescription("Reset your background")
-    ),
-
-  async execute(interaction, client, redis) {
-    const sub = interaction.options.getSubcommand();
-    const userId = interaction.user.id;
-
-    /* ================= BIO ================= */
-    if (sub === "setbio") {
-      const text = interaction.options.getString("text");
-
-      if (text.length > 80) {
-        return interaction.reply({
-          content: "❌ Bio max is 80 characters",
-          ephemeral: true
-        });
-      }
-
-      await redis.hset(`profile:${userId}`, "bio", text);
-
-      return interaction.reply({
-        content: "✅ Bio updated",
-        ephemeral: true
-      });
-    }
-
-    /* ================= UPLOAD ================= */
-    if (sub === "upload") {
-      const file = interaction.options.getAttachment("image");
-
-      if (!file?.contentType?.startsWith("image/")) {
-        return interaction.reply({
-          content: "❌ Invalid image file",
-          ephemeral: true
-        });
-      }
-
-      await redis.hset(`profile:${userId}`, "custom_bg", file.url);
-
-      return interaction.reply({
-        content: "✅ Background saved",
-        ephemeral: true
-      });
-    }
-
-    /* ================= RESET ================= */
-    if (sub === "reset") {
-      await redis.hdel(`profile:${userId}`, "custom_bg");
-
-      return interaction.reply({
-        content: "🔄 Background reset",
-        ephemeral: true
-      });
-    }
-
-    /* ================= VIEW ================= */
-    if (sub === "view") {
-      await interaction.deferReply();
-
-      const target = interaction.options.getUser("target") || interaction.user;
-
-      const data = (await redis.hgetall(`profile:${target.id}`)) || {};
-
-      const bio = data.bio || "No bio set";
-      const bg = data.custom_bg;
-
-      const xp = Number(data.xp || 0);
-      const level = Number(data.level || 1);
-
-      const needed = 100 * level;
-      const progress = Math.min(xp / needed, 1);
-
-      /* ================= CANVAS ================= */
-      const canvas = createCanvas(800, 300);
-      const ctx = canvas.getContext("2d");
-
-      try {
-        const image = bg
-          ? await loadImage(bg)
-          : await loadImage(path.join(__dirname, "../backgrounds/classic.png"));
-
-        ctx.drawImage(image, 0, 0, 800, 300);
-      } catch {
-        ctx.fillStyle = "#111";
-        ctx.fillRect(0, 0, 800, 300);
-      }
-
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.fillRect(0, 0, 800, 300);
-
-      /* ================= AVATAR ================= */
-      const avatar = await loadImage(
-        target.displayAvatarURL({ extension: "png", size: 256 })
-      );
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(110, 130, 70, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(avatar, 35, 55, 150, 150);
-      ctx.restore();
-
-      ctx.strokeStyle = "#5865F2";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(110, 130, 72, 0, Math.PI * 2);
-      ctx.stroke();
-
-      /* ================= NAME ================= */
-      ctx.fillStyle = "#fff";
-      ctx.font = "28px CustomFont";
-      ctx.fillText(target.username, 220, 85);
-
-      /* ================= BIO ================= */
-      ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.font = "18px CustomFont";
-      ctx.fillText(bio, 220, 130);
-
-      /* ================= XP BAR BG ================= */
-      const x = 220;
-      const y = 190;
-      const w = 500;
-      const h = 18;
-
-      ctx.fillStyle = "rgba(255,255,255,0.15)";
-      roundRect(ctx, x, y, w, h, 10);
-      ctx.fill();
-
-      /* ================= XP BAR FILL ================= */
-      ctx.fillStyle = "#5865F2";
-      roundRect(ctx, x, y, w * progress, h, 10);
-      ctx.fill();
-
-      /* ================= XP TEXT ================= */
-      ctx.fillStyle = "#fff";
-      ctx.font = "14px CustomFont";
-      ctx.fillText(`${xp} / ${needed} XP`, x + 10, y + 13);
-
-      /* ================= LEVEL ================= */
-      ctx.fillStyle = "#5865F2";
-      ctx.font = "bold 22px CustomFont";
-      ctx.fillText(`LVL ${level}`, 680, 85);
-
-      const buffer = canvas.toBuffer("image/png");
-
-      return interaction.editReply({
-        files: [new AttachmentBuilder(buffer, { name: "profile.png" })]
-      });
-    }
-  }
-};
-
-/* ================= UTIL ================= */
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -212,3 +17,163 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.quadraticCurveTo(x, y + h, x, y + h - r);
   ctx.closePath();
 }
+
+function getFrameStyle(level) {
+  if (level >= 120) return ["#00f5ff", "#ff00ff", "#ffd700"];
+  if (level >= 100) return ["#ff3b3b", "#ff7a00"];
+  if (level >= 75) return ["#ffd700", "#ffcc00"];
+  if (level >= 50) return ["#a855f7", "#7c3aed"];
+  if (level >= 25) return ["#00b4ff", "#5865f2"];
+  return ["#2b2d31"];
+}
+
+function drawFrame(ctx, level, w, h) {
+  const colors = getFrameStyle(level);
+
+  // Outer glow layers
+  for (let i = 0; i < colors.length; i++) {
+    ctx.strokeStyle = colors[i];
+    ctx.globalAlpha = 0.25;
+    ctx.lineWidth = 10 + i * 3;
+
+    ctx.beginPath();
+    roundRect(ctx, 5 + i * 2, 5 + i * 2, w - 10 - i * 4, h - 10 - i * 4, 18);
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 1;
+
+  // Main border
+  ctx.strokeStyle = colors[0];
+  ctx.lineWidth = 3;
+  roundRect(ctx, 8, 8, w - 16, h - 16, 16);
+  ctx.stroke();
+
+  // Corner highlights
+  const corners = [
+    [20, 20],
+    [w - 20, 20],
+    [20, h - 20],
+    [w - 20, h - 20]
+  ];
+
+  ctx.fillStyle = colors[0];
+  for (const [x, y] of corners) {
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+module.exports = {
+  data: new SlashCommandBuilder()
+    .setName("profile")
+    .setDescription("View profile system")
+    .addSubcommand(s =>
+      s.setName("view")
+        .setDescription("View profile")
+        .addUserOption(o => o.setName("target"))
+    )
+    .addSubcommand(s =>
+      s.setName("setbio")
+        .setDescription("Set bio")
+        .addStringOption(o => o.setName("text").setRequired(true))
+    ),
+
+  async execute(interaction, client, redis) {
+    const sub = interaction.options.getSubcommand();
+
+    if (sub === "setbio") {
+      const text = interaction.options.getString("text");
+
+      if (text.length > 80)
+        return interaction.reply({ content: "Max 80 chars", ephemeral: true });
+
+      await redis.hset(`profile:${interaction.user.id}`, "bio", text);
+      return interaction.reply({ content: "Bio updated", ephemeral: true });
+    }
+
+    if (sub === "view") {
+      await interaction.deferReply();
+
+      const target = interaction.options.getUser("target") || interaction.user;
+      const data = (await redis.hgetall(`profile:${target.id}`)) || {};
+
+      const bio = data.bio || "No bio set";
+      const xp = Number(data.xp || 0);
+      const level = Number(data.level || 1);
+
+      const needed = 100 * level;
+      const progress = Math.min(xp / needed, 1);
+
+      const canvas = createCanvas(800, 300);
+      const ctx = canvas.getContext("2d");
+
+      // Background
+      try {
+        const bg = await loadImage(
+          path.join(__dirname, "../backgrounds/classic.png")
+        );
+        ctx.drawImage(bg, 0, 0, 800, 300);
+      } catch {
+        ctx.fillStyle = "#111";
+        ctx.fillRect(0, 0, 800, 300);
+      }
+
+      // Dark overlay
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0, 0, 800, 300);
+
+      // Avatar
+      const avatar = await loadImage(
+        target.displayAvatarURL({ extension: "png", size: 256 })
+      );
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(110, 130, 70, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(avatar, 35, 55, 150, 150);
+      ctx.restore();
+
+      // Name
+      ctx.fillStyle = "#fff";
+      ctx.font = "28px CustomFont";
+      ctx.fillText(target.username, 220, 85);
+
+      // Bio
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.font = "18px CustomFont";
+      ctx.fillText(bio, 220, 130);
+
+      // XP BAR
+      const x = 220, y = 190, w = 500, h = 18;
+
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      roundRect(ctx, x, y, w, h, 10);
+      ctx.fill();
+
+      ctx.fillStyle = "#5865f2";
+      roundRect(ctx, x, y, w * progress, h, 10);
+      ctx.fill();
+
+      ctx.fillStyle = "#fff";
+      ctx.font = "14px CustomFont";
+      ctx.fillText(`${xp} / ${needed} XP`, x + 10, y + 13);
+
+      // Level
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 22px CustomFont";
+      ctx.fillText(`LVL ${level}`, 680, 85);
+
+      // 🔥 CUSTOM CANVAS FRAME
+      drawFrame(ctx, level, 800, 300);
+
+      const buffer = canvas.toBuffer("image/png");
+
+      return interaction.editReply({
+        files: [new AttachmentBuilder(buffer, { name: "profile.png" })]
+      });
+    }
+  }
+};
