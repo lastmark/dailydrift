@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ChannelType, MessageFlags } = require("discord.js");
 
 module.exports = {
+  category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("setwelcome")
     .setDescription("Configure or update the welcome channel for this server.")
