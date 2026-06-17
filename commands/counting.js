@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const e = require("../emojis");
 
 module.exports = {
+  category: "Games",
   data: new SlashCommandBuilder()
     .setName("counting")
     .setDescription("View counting game analytics, server rankings, balance, or access the item shop.")
