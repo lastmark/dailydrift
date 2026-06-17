@@ -11,11 +11,6 @@ const {
   MessageFlags
 } = require("discord.js");
 
-const DEV_ID = "1303357369622990889";
-
-/* =========================
-   FORMAT TTL
-========================= */
 function formatTTL(ttlSeconds) {
   if (ttlSeconds === -1) return "♾️ Permanent Access";
   if (ttlSeconds <= 0) return "❌ Inactive";
@@ -38,42 +33,32 @@ module.exports = {
     const userId = interaction.user.id;
     const guildId = interaction.guild.id;
 
-    const userValue = await redis.get(`premium:user:${userId}`);
-    const guildValue = await redis.get(`premium:guild:${guildId}`);
+    const key = `premium:user:${userId}`;
 
-    const userTTL = userValue === "perm"
-      ? -1
-      : await redis.ttl(`premium:user:${userId}`);
+    const value = await redis.get(key);
+    const ttl = await redis.ttl(key);
 
-    const guildTTL = guildValue === "perm"
-      ? -1
-      : await redis.ttl(`premium:guild:${guildId}`);
+    const isPremium = value === "perm" || ttl > 0;
 
     /* =========================
-       DASHBOARD EMBED
+       DASHBOARD
     ========================= */
     const embed = new EmbedBuilder()
       .setColor("#F1C40F")
       .setTitle("💎 Premium Control Hub")
-      .setDescription("Manage your premium access below")
       .addFields(
         {
           name: "👤 User Status",
-          value: userValue
-            ? `💎 Active\n${formatTTL(userTTL)}`
+          value: isPremium
+            ? `💎 Active\n${formatTTL(value === "perm" ? -1 : ttl)}`
             : "❌ Not Active"
         },
         {
           name: "🏢 Server Status",
-          value: guildValue
-            ? `💎 Active\n${formatTTL(guildTTL)}`
-            : "❌ Not Active"
+          value: "⚙️ (Server system separate)"
         }
       );
 
-    /* =========================
-       BUTTON PANEL
-    ========================= */
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("refresh")
@@ -86,11 +71,12 @@ module.exports = {
         .setStyle(ButtonStyle.Success)
     );
 
-    const msg = await interaction.reply({
+    await interaction.reply({
       embeds: [embed],
-      components: [row],
-      fetchReply: true
+      components: [row]
     });
+
+    const msg = await interaction.fetchReply();
 
     const collector = msg.createMessageComponentCollector({
       componentType: ComponentType.Button,
@@ -107,7 +93,26 @@ module.exports = {
 
       /* ================= REFRESH ================= */
       if (i.customId === "refresh") {
-        return i.update({ embeds: [embed] });
+        const newValue = await redis.get(key);
+        const newTTL = await redis.ttl(key);
+
+        const newEmbed = new EmbedBuilder()
+          .setColor("#F1C40F")
+          .setTitle("💎 Premium Control Hub")
+          .addFields(
+            {
+              name: "👤 User Status",
+              value: newValue === "perm" || newTTL > 0
+                ? `💎 Active\n${formatTTL(newValue === "perm" ? -1 : newTTL)}`
+                : "❌ Not Active"
+            },
+            {
+              name: "🏢 Server Status",
+              value: "⚙️ (Server system separate)"
+            }
+          );
+
+        return i.update({ embeds: [newEmbed] });
       }
 
       /* ================= REDEEM MODAL ================= */
@@ -143,11 +148,10 @@ module.exports = {
     });
 
     /* =========================
-       GLOBAL MODAL HANDLER
-       (SAFE SINGLE REGISTRATION)
+       GLOBAL REDEEM HANDLER
     ========================= */
-    if (!client.__redeemHandlerAdded) {
-      client.__redeemHandlerAdded = true;
+    if (!client.__redeemHandler) {
+      client.__redeemHandler = true;
 
       client.on("interactionCreate", async i => {
         if (!i.isModalSubmit()) return;
@@ -165,22 +169,24 @@ module.exports = {
 
         const data = JSON.parse(raw);
 
-        // 🔥 ALWAYS CONSUME CODE FIRST (prevents reuse exploit)
+        // 🔥 ALWAYS DELETE FIRST (prevents reuse exploit)
         await redis.del(`redeem:${code}`);
 
-        if (data.type === "user") {
-          if (data.duration === "perm") {
-            await redis.set(`premium:user:${i.user.id}`, "perm");
-          } else {
-            await redis.set(`premium:user:${i.user.id}`, "active");
-            if (data.seconds > 0) {
-              await redis.expire(`premium:user:${i.user.id}`, data.seconds);
-            }
+        const userKey = `premium:user:${i.user.id}`;
+
+        /* ================= APPLY PREMIUM ================= */
+        if (data.duration === "perm") {
+          await redis.set(userKey, "perm");
+        } else {
+          await redis.set(userKey, "1");
+
+          if (data.seconds > 0) {
+            await redis.expire(userKey, data.seconds);
           }
         }
 
         return i.reply({
-          content: "💎 Premium activated successfully!",
+          content: "💎 Premium Activated Successfully!",
           flags: MessageFlags.Ephemeral
         });
       });
