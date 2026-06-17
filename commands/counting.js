@@ -3,135 +3,169 @@ const e = require("../emojis");
 
 module.exports = {
   category: "Games",
+
   data: new SlashCommandBuilder()
     .setName("counting")
-    .setDescription("View counting game analytics, server rankings, balance, or access the item shop.")
-    .addSubcommand(sub =>
-      sub.setName("balance").setDescription("Check how many counting coins you currently have in your wallet.")
+    .setDescription("Advanced counting system with stats, rewards, and leaderboard")
+    .addSubcommand(s =>
+      s.setName("balance").setDescription("View your coins and shields")
     )
-    .addSubcommand(sub =>
-      sub.setName("stats").setDescription("View your personal counting performance metrics.")
+    .addSubcommand(s =>
+      s.setName("stats").setDescription("View your full performance stats")
     )
-    .addSubcommand(sub =>
-      sub.setName("leaderboard").setDescription("Display the top 10 most accurate counters in the server.")
+    .addSubcommand(s =>
+      s.setName("leaderboard").setDescription("Top players in counting")
     )
-    .addSubcommand(sub =>
-      sub.setName("shop").setDescription("Purchase a Counting Shield to safeguard your server streaks.")
+    .addSubcommand(s =>
+      s.setName("shop").setDescription("Buy protection items")
     ),
 
   async execute(interaction, client, redis) {
     await interaction.deferReply();
+
     const guildId = interaction.guild.id;
     const userId = interaction.user.id;
     const sub = interaction.options.getSubcommand();
 
-    // ==========================================
-    // SUBCOMMAND: WALLET BALANCE VIEW 💰
-    // ==========================================
+    // =========================
+    // 💰 BALANCE
+    // =========================
     if (sub === "balance") {
-      const userBalance = await redis.get(`eco:${guildId}:${userId}:money`) || "0";
-      const shields = await redis.get(`eco:${guildId}:${userId}:shield`) || "0";
+      const coins = Number(await redis.get(`eco:${guildId}:${userId}:money`) || 0);
+      const shields = Number(await redis.get(`eco:${guildId}:${userId}:shield`) || 0);
+      const streak = Number(await redis.get(`counting:${guildId}:${userId}:streak`) || 0);
 
-      const balanceEmbed = new EmbedBuilder()
-        .setColor(0x2B2D31)
-        .setAuthor({ 
-          name: `${interaction.user.username}'s Economy Profile`, 
-          iconURL: interaction.user.displayAvatarURL() 
+      let badge = "Newbie";
+      if (streak >= 25) badge = "🔥 Elite Counter";
+      else if (streak >= 10) badge = "⚡ Skilled Counter";
+      else if (streak >= 5) badge = "📈 Rising Counter";
+
+      const embed = new EmbedBuilder()
+        .setColor("#F1C40F")
+        .setAuthor({
+          name: `${interaction.user.username}'s Profile`,
+          iconURL: interaction.user.displayAvatarURL()
         })
-        .setDescription(`Here is your current financial status inside the server structure. Maintain your counting streaks to earn more income!`)
+        .setDescription("Your live counting economy profile.")
         .addFields(
-          { name: `${e.money || "🪙"} Account Balance`, value: `\`${userBalance}\` coins`, inline: true },
-          { name: `${e.settings || "🛡️"} Inventory Shields`, value: `\`${shields}\` active`, inline: true }
-        );
+          { name: "💰 Coins", value: `\`${coins}\``, inline: true },
+          { name: "🛡️ Shields", value: `\`${shields}\``, inline: true },
+          { name: "🔥 Streak", value: `\`${streak}\``, inline: true },
+          { name: "🏅 Badge", value: badge, inline: false }
+        )
+        .setTimestamp();
 
-      return await interaction.editReply({ embeds: [balanceEmbed] });
+      return interaction.editReply({ embeds: [embed] });
     }
 
-    // ==========================================
-    // SUBCOMMAND: STATS VIEW
-    // ==========================================
+    // =========================
+    // 📊 STATS
+    // =========================
     if (sub === "stats") {
-      const totalCounts = await redis.zscore(`counting:${guildId}:scores`, userId) || 0;
-      const sabotages = await redis.zscore(`counting:${guildId}:sabotages`, userId) || 0;
-      const shields = await redis.get(`eco:${guildId}:${userId}:shield`) || 0;
-      const highScore = await redis.get(`counting:${guildId}:highscore`) || 0;
+      const correct = Number(await redis.zscore(`counting:${guildId}:scores`, userId) || 0);
+      const mistakes = Number(await redis.zscore(`counting:${guildId}:sabotages`, userId) || 0);
+      const streak = Number(await redis.get(`counting:${guildId}:${userId}:streak`) || 0);
+      const record = Number(await redis.get(`counting:${guildId}:highscore`) || 0);
 
-      const statsEmbed = new EmbedBuilder()
-        .setColor(0x2B2D31)
-        .setAuthor({ 
-          name: `${interaction.user.username}'s Game Analytics`, 
-          iconURL: interaction.user.displayAvatarURL() 
+      const embed = new EmbedBuilder()
+        .setColor("#5865F2")
+        .setAuthor({
+          name: `${interaction.user.username}'s Analytics`,
+          iconURL: interaction.user.displayAvatarURL()
         })
         .addFields(
-          { name: `${e.message || "✅"} Correct Counts`, value: `\`${totalCounts}\` entries`, inline: true },
-          { name: `${e.error || "🚨"} Sabotages`, value: `\`${sabotages}\` resets caused`, inline: true },
-          { name: `${e.settings || "🛡️"} Active Shields`, value: `\`${shields}\` remaining`, inline: true },
-          { name: `${e.coin || "🏆"} Server Record`, value: `Streak: \`${highScore}\``, inline: false }
-        );
+          { name: "✅ Correct Counts", value: `\`${correct}\``, inline: true },
+          { name: "❌ Mistakes", value: `\`${mistakes}\``, inline: true },
+          { name: "🔥 Current Streak", value: `\`${streak}\``, inline: true },
+          { name: "🏆 Server Record", value: `\`${record}\``, inline: false }
+        )
+        .setFooter({ text: "Keep your streak alive to earn more rewards" })
+        .setTimestamp();
 
-      return await interaction.editReply({ embeds: [statsEmbed] });
+      return interaction.editReply({ embeds: [embed] });
     }
 
-    // ==========================================
-    // SUBCOMMAND: LEADERBOARD RUNNER
-    // ==========================================
+    // =========================
+    // 🏆 LEADERBOARD
+    // =========================
     if (sub === "leaderboard") {
-      const topPlayers = await redis.zrevrange(`counting:${guildId}:scores`, 0, 9, "WITHSCORES");
-      const highScore = await redis.get(`counting:${guildId}:highscore`) || "0";
+      const data = await redis.zrevrange(
+        `counting:${guildId}:scores`,
+        0,
+        9,
+        "WITHSCORES"
+      );
 
-      const lbEmbed = new EmbedBuilder()
-        .setColor(0x2B2D31)
-        .setTitle(`${e.coin || "🏆"} Counting Championship Leaderboard`)
-        .setDescription(`*Current Server Record Streak:* **${highScore}**\n\n`);
+      const record = Number(await redis.get(`counting:${guildId}:highscore`) || 0);
 
-      if (topPlayers.length === 0) {
-        lbEmbed.setDescription(lbEmbed.data.description + `*No data logs available yet. Go start counting!*`);
+      let text = `🏆 **Server Record:** \`${record}\`\n\n`;
+
+      if (!data.length) {
+        text += "No players yet — start counting!";
       } else {
-        let listText = "";
-        let rank = 1;
-        for (let i = 0; i < topPlayers.length; i += 2) {
-          const pUserId = topPlayers[i];
-          const score = topPlayers[i + 1];
-          listText += `**#${rank}** • <@${pUserId}> — \`${score}\` correct counts\n`;
-          rank++;
+        for (let i = 0, rank = 1; i < data.length; i += 2, rank++) {
+          const user = data[i];
+          const score = data[i + 1];
+
+          let medal = "";
+          if (rank === 1) medal = "🥇";
+          else if (rank === 2) medal = "🥈";
+          else if (rank === 3) medal = "🥉";
+          else medal = `#${rank}`;
+
+          text += `${medal} <@${user}> — \`${score}\`\n`;
         }
-        lbEmbed.setDescription(lbEmbed.data.description + listText);
       }
 
-      return await interaction.editReply({ embeds: [lbEmbed] });
+      const embed = new EmbedBuilder()
+        .setColor("#FFD700")
+        .setTitle("🏆 Counting Champions")
+        .setDescription(text)
+        .setTimestamp();
+
+      return interaction.editReply({ embeds: [embed] });
     }
 
-    // ==========================================
-    // SUBCOMMAND: ECO SHIELD ITEM SHOP (👑 WITH DEV BYPASS)
-    // ==========================================
+    // =========================
+    // 🛒 SHOP
+    // =========================
     if (sub === "shop") {
-      const SHIELD_PRICE = 200; 
-      const isDeveloper = userId === "1303357369622990889"; // Put your ID string here!
+      const price = 200;
+      const isDev = userId === "1303357369622990889";
 
-      let userBalance = parseInt(await redis.get(`eco:${guildId}:${userId}:money`) || "0");
-      
-      if (!isDeveloper && userBalance < SHIELD_PRICE) {
-        return await interaction.editReply({ 
-          content: `${e.error || "❌"} **Insufficient funds!** A Counting Shield costs \`${SHIELD_PRICE}\` coins. You currently have \`${userBalance}\` ${e.money || "coins"}.` 
+      let coins = Number(await redis.get(`eco:${guildId}:${userId}:money`) || 0);
+
+      if (!isDev && coins < price) {
+        return interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#ED4245")
+              .setDescription(`❌ Not enough coins.\n\n💰 Required: \`${price}\`\n💰 You have: \`${coins}\``)
+          ]
         });
       }
 
-      if (!isDeveloper) {
-        await redis.set(`eco:${guildId}:${userId}:money`, userBalance - SHIELD_PRICE);
+      if (!isDev) {
+        await redis.set(`eco:${guildId}:${userId}:money`, coins - price);
       }
 
-      await redis.incrby(`eco:${guildId}:${userId}:shield`, 1);
+      await redis.incr(`eco:${guildId}:${userId}:shield`);
 
-      const purchaseEmbed = new EmbedBuilder()
-        .setColor(0x2ECC71)
-        .setTitle(`${e.money || "🛒"} Purchase Successful!`)
+      const embed = new EmbedBuilder()
+        .setColor("#57F287")
+        .setTitle("🛡️ Shield Purchased")
         .setDescription(
-          isDeveloper 
-            ? `👑 **Developer Bypass Activated!** You received **1 Counting Shield** completely free! \n└ *Your wallet balance was not touched.*`
-            : `You successfully purchased **1 Counting Shield** for \`${SHIELD_PRICE}\` ${e.money || "coins"}!\n\n🛡️ This shield will automatically absorb your next mistake inside the counting channel to save your server's streak record.`
-        );
+          isDev
+            ? "👑 Developer bypass active — free shield granted."
+            : `You purchased a **Shield** for \`${price}\` coins.`
+        )
+        .addFields({
+          name: "Effect",
+          value: "Protects your streak from one mistake"
+        })
+        .setTimestamp();
 
-      return await interaction.editReply({ embeds: [purchaseEmbed] });
+      return interaction.editReply({ embeds: [embed] });
     }
   }
 };
