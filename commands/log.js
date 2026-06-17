@@ -7,7 +7,7 @@ const {
 } = require("discord.js");
 
 module.exports = {
-  category: "Moderation",
+  category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("log")
     .setDescription("Audit logging system")
