@@ -17,6 +17,7 @@ function formatTTL(ttlSeconds) {
 }
 
 module.exports = {
+  category: "Premium",
   data: new SlashCommandBuilder()
     .setName("premium")
     .setDescription("💎 View the activation time remaining on your user and server premium licenses."),
