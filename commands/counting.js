@@ -1,4 +1,4 @@
-// commands/counting.js - FIXED WITH NULL CHECKS
+// commands/counting.js - WITH DEBUGGING
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
@@ -47,16 +47,30 @@ module.exports = {
 
   async execute(interaction, client, redis) {
     try {
-      // CHECK IF IN GUILD
-      if (!interaction.guild) {
+      // DEBUG: Log what we have
+      console.log("Interaction type:", interaction.type);
+      console.log("Has guild?", !!interaction.guild);
+      console.log("Has guildId?", !!interaction.guildId);
+      console.log("In DM?", interaction.inGuild ? "No" : "Yes");
+
+      // Check if in guild - FIXED
+      if (!interaction.inGuild()) {
         return interaction.reply({
           content: "❌ This command can only be used in a server.",
           flags: MessageFlags.Ephemeral
         });
       }
 
+      // Get guild ID safely
+      const guildId = interaction.guildId || interaction.guild?.id;
+      if (!guildId) {
+        return interaction.reply({
+          content: "❌ Could not find guild information.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
       const sub = interaction.options.getSubcommand();
-      const guildId = interaction.guild.id;
       const userId = interaction.user.id;
 
       // =========================
