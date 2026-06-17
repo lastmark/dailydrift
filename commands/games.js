@@ -1,4 +1,4 @@
-// commands/games.js - CLEAN VERSION WITHOUT SUIT EMOJIS
+// commands/games.js - NUMBERS ONLY VERSION
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 
 // =========================
@@ -14,8 +14,7 @@ class BlackjackGame {
     this.result = null;
     this.balance = 0;
     
-    // Card setup - NO EMOJIS
-    this.suits = ['S', 'H', 'D', 'C'];
+    // Card setup - NUMBERS ONLY
     this.values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
     this.deck = this.createDeck();
     this.shuffleDeck();
@@ -42,9 +41,10 @@ class BlackjackGame {
 
   createDeck() {
     const deck = [];
-    for (const suit of this.suits) {
-      for (const value of this.values) {
-        deck.push({ suit, value });
+    for (const value of this.values) {
+      // 4 copies of each value (like 4 suits but no suit symbols)
+      for (let i = 0; i < 4; i++) {
+        deck.push({ value });
       }
     }
     return deck;
@@ -84,9 +84,9 @@ class BlackjackGame {
 
   formatHand(hand, hideDealer = false) {
     if (hideDealer) {
-      return `${hand[0].value}${hand[0].suit} ?`;
+      return `${hand[0].value} ?`;
     }
-    return hand.map(card => `${card.value}${card.suit}`).join(' ');
+    return hand.map(card => card.value).join(' ');
   }
 
   hit() {
@@ -593,7 +593,8 @@ module.exports = {
         });
       }
 
-      const slots = ["🍒", "🍊", "🍋", "🍇", "💎", "7️⃣"];
+      // Numbers only slots
+      const slots = ["7", "7", "7", "7", "7", "7"];
       const result = [
         slots[Math.floor(Math.random() * slots.length)],
         slots[Math.floor(Math.random() * slots.length)],
@@ -604,16 +605,8 @@ module.exports = {
       let message = "";
       
       if (result[0] === result[1] && result[1] === result[2]) {
-        const multipliers = {
-          "7️⃣": 10,
-          "💎": 8,
-          "🍇": 4,
-          "🍋": 3,
-          "🍊": 3,
-          "🍒": 2
-        };
-        winAmount = bet * (multipliers[result[0]] || 2);
-        message = `JACKPOT! Three ${result[0]}!`;
+        winAmount = bet * 10;
+        message = `JACKPOT! Three ${result[0]}s!`;
         await redis.incr(`games:${userId}:slots_jackpots`);
       } else if (result[0] === result[1] || result[1] === result[2] || result[0] === result[2]) {
         winAmount = Math.floor(bet * 1.5);
