@@ -1,15 +1,29 @@
+// commands/profile.js – FULLY FIXED
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont } = require("canvas");
 const path = require("path");
 const fs = require("fs");
 
-// Font setup
+// ---------- FONT SETUP (with fallback) ----------
 const fontPath = path.join(__dirname, "../font.ttf");
+let customFontLoaded = false;
 try {
   if (fs.existsSync(fontPath)) {
     registerFont(fontPath, { family: "CustomFont" });
+    customFontLoaded = true;
+    console.log("✅ Custom font loaded.");
+  } else {
+    console.warn("⚠️ font.ttf not found – using fallback Arial.");
   }
-} catch {}
+} catch {
+  console.warn("⚠️ Font registration failed – using fallback Arial.");
+}
+
+// Helper to get font string with fallback
+function getFont(weight = "normal", size = 16) {
+  const family = customFontLoaded ? "CustomFont" : "Arial, sans-serif";
+  return `${weight} ${size}px ${family}`;
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -101,30 +115,28 @@ module.exports = {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // Username
+    // ---- TEXT WITH FALLBACK ----
     ctx.fillStyle = "#FFFFFF";
-    ctx.font = "bold 32px CustomFont";
+    ctx.font = getFont("bold", 32);
     ctx.fillText(user.username, 270, 100);
 
-    // Title (VIP or not)
     let title = "Member";
     if (isVip) title = "💎 VIP";
     if (userId === "1303357369622990889") title = "👑 Developer";
 
     ctx.fillStyle = color;
-    ctx.font = "bold 18px CustomFont";
+    ctx.font = getFont("bold", 18);
     ctx.fillText(title, 270, 140);
 
-    // Bio
     ctx.fillStyle = "rgba(255,255,255,0.8)";
-    ctx.font = "16px CustomFont";
+    ctx.font = getFont("normal", 16);
     let displayBio = bio;
     if (displayBio.length > 60) displayBio = displayBio.substring(0, 57) + "...";
     ctx.fillText(displayBio, 270, 175);
 
-    // Stats (balance, shield, level)
+    // Stats
     ctx.fillStyle = "rgba(255,255,255,0.9)";
-    ctx.font = "bold 16px CustomFont";
+    ctx.font = getFont("bold", 16);
     let xPos = 270;
     const stats = [
       { label: "💰", value: balance },
@@ -134,14 +146,15 @@ module.exports = {
     stats.forEach((stat, index) => {
       if (index > 0) {
         ctx.fillStyle = "rgba(255,255,255,0.2)";
+        ctx.font = getFont("normal", 16);
         ctx.fillText("|", xPos + 20, 205);
         xPos += 40;
       }
       ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.font = "bold 16px CustomFont";
+      ctx.font = getFont("bold", 16);
       ctx.fillText(stat.label, xPos, 205);
       xPos += 40;
-      ctx.font = "16px CustomFont";
+      ctx.font = getFont("normal", 16);
       ctx.fillStyle = color;
       ctx.fillText(stat.value, xPos, 205);
       xPos += 80;
@@ -168,7 +181,7 @@ module.exports = {
 
     ctx.shadowBlur = 0;
     ctx.fillStyle = "#FFFFFF";
-    ctx.font = "bold 14px CustomFont";
+    ctx.font = getFont("bold", 14);
     ctx.textAlign = "center";
     ctx.fillText(`${xp}/${needed} XP`, barX + barWidth / 2, barY + 17);
 
@@ -188,16 +201,16 @@ module.exports = {
     ctx.stroke();
     ctx.shadowBlur = 0;
     ctx.fillStyle = "#FFFFFF";
-    ctx.font = "bold 18px CustomFont";
+    ctx.font = getFont("bold", 18);
     ctx.fillText("LEVEL", levelX, levelY - 12);
     ctx.fillStyle = color;
-    ctx.font = "bold 28px CustomFont";
+    ctx.font = getFont("bold", 28);
     ctx.fillText(level, levelX, levelY + 22);
 
     // Footer
     ctx.textAlign = "left";
     ctx.fillStyle = "rgba(255,255,255,0.2)";
-    ctx.font = "12px CustomFont";
+    ctx.font = getFont("normal", 12);
     ctx.fillText(`ID: ${user.id.slice(0, 8)}...`, 20, 340);
     ctx.textAlign = "right";
     ctx.fillText("Profile v2.0", 880, 340);
