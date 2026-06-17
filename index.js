@@ -1,11 +1,10 @@
-const { Client, GatewayIntentBits, Partials, Collection } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, devId } = require("./config");
 const redis = require("./redis");
 const e = require("./emojis.js");
 const fs = require("fs");
 const path = require("path");
 const setupLogger = require("./logger");
-
 
 const client = new Client({
   intents: [
@@ -23,6 +22,7 @@ const client = new Client({
     Partials.GuildMember
   ]
 });
+
 setupLogger(client, redis);
 client.commands = new Collection();
 
@@ -75,6 +75,7 @@ for (const file of commandFiles) {
 // 🏎️ INTERACTION WORKFLOW HANDLER
 // ==========================================
 client.on("interactionCreate", async (interaction) => {
+  // Handle Slash Commands
   if (interaction.isChatInputCommand()) {
     const cmd = client.commands.get(interaction.commandName);
     if (!cmd) return;
@@ -84,9 +85,25 @@ client.on("interactionCreate", async (interaction) => {
     } catch (err) {
       console.error(err);
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: "An error occurred executing this command." });
+        await interaction.editReply({ content: "❌ An error occurred executing this command." });
       } else {
-        await interaction.reply({ content: "An error occurred executing this command.", ephemeral: true });
+        await interaction.reply({ content: "❌ An error occurred executing this command.", flags: MessageFlags.Ephemeral });
+      }
+    }
+  }
+
+  // Handle Buttons
+  if (interaction.isButton()) {
+    try {
+      const buttonHandler = require("./handlers/buttonHandler.js");
+      await buttonHandler(interaction, client, redis);
+    } catch (err) {
+      console.error("Button handler error:", err);
+      if (!interaction.replied) {
+        await interaction.reply({ 
+          content: "❌ Error handling button.", 
+          flags: MessageFlags.Ephemeral 
+        });
       }
     }
   }
@@ -94,7 +111,7 @@ client.on("interactionCreate", async (interaction) => {
   // Embed Modal Construction Subsystem
   if (interaction.isModalSubmit()) {
     if (interaction.customId.startsWith("embed_modal:")) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       try {
         const targetChannelId = interaction.customId.split(":")[1];
@@ -112,7 +129,6 @@ client.on("interactionCreate", async (interaction) => {
         if (!colorInput.startsWith("#")) colorInput = `#${colorInput}`;
         if (!/^#[0-9A-F]{6}$/i.test(colorInput)) colorInput = "#2B2D31"; 
 
-        const { EmbedBuilder } = require("discord.js");
         const customEmbed = new EmbedBuilder()
           .setTitle(title)
           .setDescription(description)
@@ -149,7 +165,7 @@ client.on("messageCreate", async (message) => {
   if (!message.guild || message.author.bot) return;
 
   try {
-    const countingChannelId = await redis.get(`counting_channel:${message.guild.id}`);
+    const countingChannelId = await redis.get(`counting:${message.guild.id}:channel`);
 
     if (countingChannelId && message.channel.id === countingChannelId) {
       const pureContent = message.content.replace(/\s+/g, "");
@@ -169,10 +185,6 @@ client.on("messageCreate", async (message) => {
     console.error("Error inside counting game message listener pipeline:", error);
   }
 });
-
-// ===================================================
-
-
 
 // ==========================================
 // 🖼️ GUILD MEMBER ENGAGEMENT CANVAS FLOWS
@@ -197,7 +209,7 @@ client.on("guildMemberAdd", async (member) => {
 client.once("ready", async () => {
   console.log(`${client.user.tag} online`);
 
-  const { ActivityType, EmbedBuilder } = require("discord.js");
+  const { ActivityType } = require("discord.js");
   client.user.setActivity("counting game 🪙", { type: ActivityType.Playing });
   client.user.setStatus("online");
 
@@ -206,7 +218,6 @@ client.once("ready", async () => {
   // ===================================================
   setInterval(async () => {
     const now = new Date();
-    // Only fire when the local time hits midnight (Hour 00, Minute 00)
     if (now.getHours() === 0 && now.getMinutes() === 0) {
       
       const todayStr = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -246,7 +257,7 @@ client.once("ready", async () => {
         }
       }
     }
-  }, 60000); // Scans the system clock once every 60 seconds safely
+  }, 60000);
 
   // Sync all application slash entries to Discord gateway API
   const commands = [];
