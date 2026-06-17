@@ -1,9 +1,9 @@
-// commands/games.js - COMPLETE WITH ALL GAMES
+// commands/games.js - COMPLETE WITH FIXED BLACKJACK
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 const Economy = require("../economy.js");
 
 // =========================
-// 🃏 BLACKJACK GAME CLASS
+// 🃏 BLACKJACK GAME CLASS (FIXED)
 // =========================
 class BlackjackGame {
   constructor(userId, bet, economy, redis) {
@@ -13,6 +13,7 @@ class BlackjackGame {
     this.redis = redis;
     this.gameOver = false;
     this.result = null;
+    this.balance = 0;
     
     // Card setup
     this.suits = ['♠️', '♥️', '♦️', '♣️'];
@@ -152,6 +153,7 @@ class BlackjackGame {
     return winAmount;
   }
 
+  // FIXED: Removed async/await from this method
   getEmbed() {
     const embed = new EmbedBuilder()
       .setColor(this.gameOver ? 
@@ -171,7 +173,7 @@ class BlackjackGame {
           inline: false
         }
       )
-      .setFooter({ text: `Balance: ${this.economy.getBalance ? await this.economy.getBalance(this.userId) : '...'} coins` })
+      .setFooter({ text: `Balance: ${this.balance} coins` })
       .setTimestamp();
 
     if (this.gameOver) {
@@ -188,6 +190,11 @@ class BlackjackGame {
     }
 
     return embed;
+  }
+
+  // FIXED: Added method to set balance
+  setBalance(balance) {
+    this.balance = balance;
   }
 
   getResultTitle() {
@@ -629,7 +636,7 @@ module.exports = {
     }
 
     // =========================
-    // 🃏 BLACKJACK
+    // 🃏 BLACKJACK (FIXED)
     // =========================
     if (sub === "blackjack") {
       const bet = interaction.options.getInteger("bet");
@@ -648,6 +655,7 @@ module.exports = {
 
       // Create game instance
       const game = new BlackjackGame(userId, bet, economy, redis);
+      game.setBalance(balance); // Set the balance for display
       
       // Send initial game message
       const embed = game.getEmbed();
@@ -672,6 +680,8 @@ module.exports = {
           
           if (game.gameOver) {
             await game.processResult();
+            const newBalance = await economy.getBalance(userId);
+            game.setBalance(newBalance);
             collector.stop();
           }
           
@@ -683,6 +693,8 @@ module.exports = {
           await i.deferUpdate();
           game.stand();
           await game.processResult();
+          const newBalance = await economy.getBalance(userId);
+          game.setBalance(newBalance);
           collector.stop();
           
           const newEmbed = game.getEmbed();
@@ -695,6 +707,8 @@ module.exports = {
           
           // Start new game with same bet
           const newGame = new BlackjackGame(userId, game.bet, economy, redis);
+          const newBalance = await economy.getBalance(userId);
+          newGame.setBalance(newBalance);
           const newEmbed = newGame.getEmbed();
           const newButtons = newGame.getButtons();
           
@@ -712,6 +726,8 @@ module.exports = {
           // Auto-stand if timer runs out
           game.stand();
           await game.processResult();
+          const newBalance = await economy.getBalance(userId);
+          game.setBalance(newBalance);
           
           const newEmbed = game.getEmbed();
           await reply.edit({ 
