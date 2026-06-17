@@ -1,5 +1,5 @@
 // commands/setup-vip.js
-const { SlashCommandBuilder, ChannelType, PermissionFlagsBits, MessageFlags } = require("discord.js");
+const { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require("discord.js");
 
 module.exports = {
   category: "Server Management",
