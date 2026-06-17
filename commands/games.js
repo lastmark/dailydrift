@@ -11,46 +11,55 @@ module.exports = {
     .setName("game")
     .setDescription("Balanced economy system")
 
-    .addSubcommand(s =>
-      s.setName("balance").setDescription("Check your coins & shields")
-    )
-
-    .addSubcommand(s =>
-      s.setName("daily").setDescription("Claim daily reward (max 100 coins)")
-    )
+    .addSubcommand(s => s.setName("balance").setDescription("Check your coins & shields"))
+    .addSubcommand(s => s.setName("daily").setDescription("Claim daily reward (max 100 coins)"))
 
     .addSubcommand(s =>
       s.setName("rps")
         .setDescription("Rock Paper Scissors")
-        .addIntegerOption(o =>
-          o.setName("bet").setDescription("Bet amount").setRequired(true)
-        )
+        .addIntegerOption(o => o.setName("bet").setRequired(true))
     )
 
     .addSubcommand(s =>
       s.setName("coinflip")
         .setDescription("Flip coin")
-        .addIntegerOption(o =>
-          o.setName("bet").setDescription("Bet amount").setRequired(true)
-        )
+        .addIntegerOption(o => o.setName("bet").setRequired(true))
     )
 
     .addSubcommand(s =>
       s.setName("dice")
         .setDescription("Roll dice")
-        .addIntegerOption(o =>
-          o.setName("bet").setDescription("Bet amount").setRequired(true)
-        )
+        .addIntegerOption(o => o.setName("bet").setRequired(true))
     )
 
     .addSubcommand(s =>
       s.setName("sendcash")
         .setDescription("Send coins to a user")
-        .addUserOption(o =>
-          o.setName("user").setDescription("Recipient").setRequired(true)
+        .addUserOption(o => o.setName("user").setRequired(true))
+        .addIntegerOption(o => o.setName("amount").setRequired(true))
+    )
+
+    // =========================
+    // 🛒 NEW SHOP SYSTEM
+    // =========================
+    .addSubcommand(s =>
+      s.setName("shopbg")
+        .setDescription("View background shop")
+    )
+
+    .addSubcommand(s =>
+      s.setName("buybg")
+        .setDescription("Buy background")
+        .addStringOption(o =>
+          o.setName("id").setRequired(true)
         )
-        .addIntegerOption(o =>
-          o.setName("amount").setDescription("Amount").setRequired(true)
+    )
+
+    .addSubcommand(s =>
+      s.setName("equipbg")
+        .setDescription("Equip background")
+        .addStringOption(o =>
+          o.setName("id").setRequired(true)
         )
     ),
 
@@ -66,10 +75,10 @@ module.exports = {
       Number(await redis.get(`eco:${guildId}:${userId}:money`) || 0);
 
     const addBal = async (amt) =>
-      await redis.incrby(`eco:${guildId}:${userId}:money`, amt);
+      redis.incrby(`eco:${guildId}:${userId}:money`, amt);
 
     const takeBal = async (amt) =>
-      await redis.decrby(`eco:${guildId}:${userId}:money`, amt);
+      redis.decrby(`eco:${guildId}:${userId}:money`, amt);
 
     // =========================
     // 💰 BALANCE
@@ -92,21 +101,15 @@ module.exports = {
     }
 
     // =========================
-    // 🎁 DAILY (MAX 100)
+    // 🎁 DAILY
     // =========================
     if (sub === "daily") {
       const key = `daily:${userId}`;
       const last = await redis.get(key);
 
       const now = Date.now();
-      const cooldown = 86400000;
-
-      if (last && now - last < cooldown) {
-        return interaction.reply({
-          content: "⏳ Already claimed daily.",
-          flags: [MessageFlags.Ephemeral]
-        });
-      }
+      if (last && now - last < 86400000)
+        return interaction.reply({ content: "⏳ Already claimed daily.", flags: [MessageFlags.Ephemeral] });
 
       const reward = Math.floor(Math.random() * 100) + 1;
 
@@ -124,27 +127,19 @@ module.exports = {
     }
 
     // =========================
-    // 🎮 RPS (BALANCED)
+    // 🎮 RPS
     // =========================
     if (sub === "rps") {
       const bet = interaction.options.getInteger("bet");
       const bal = await getBal();
 
-      if (bet <= 0)
+      if (bet <= 0 || bet > bal)
         return interaction.reply({ content: "❌ Invalid bet", flags: [MessageFlags.Ephemeral] });
-
-      if (bet > bal)
-        return interaction.reply({ content: "❌ Not enough coins", flags: [MessageFlags.Ephemeral] });
 
       const moves = ["rock", "paper", "scissors"];
 
       const user = moves[Math.floor(Math.random() * 3)];
-
-      // 60% chance bot forces draw or advantage
-      const bot =
-        Math.random() < 0.6
-          ? user
-          : moves[Math.floor(Math.random() * 3)];
+      const bot = Math.random() < 0.6 ? user : moves[Math.floor(Math.random() * 3)];
 
       let win =
         user === bot ? null :
@@ -161,17 +156,13 @@ module.exports = {
         embeds: [
           new EmbedBuilder()
             .setColor("#5865F2")
-            .setTitle("RPS Result")
-            .setDescription(
-              `You: ${user}\nBot: ${bot}\n\n` +
-              `${win === null ? "Draw" : win ? "Win" : "Lose"}`
-            )
+            .setDescription(`You: ${user}\nBot: ${bot}\nResult: ${win === null ? "Draw" : win ? "Win" : "Lose"}`)
         ]
       });
     }
 
     // =========================
-    // 🪙 COINFLIP (48% WIN)
+    // 🪙 COINFLIP
     // =========================
     if (sub === "coinflip") {
       const bet = interaction.options.getInteger("bet");
@@ -196,7 +187,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎲 DICE (33% WIN)
+    // 🎲 DICE
     // =========================
     if (sub === "dice") {
       const bet = interaction.options.getInteger("bet");
@@ -206,8 +197,7 @@ module.exports = {
         return interaction.reply({ content: "❌ Not enough coins", flags: [MessageFlags.Ephemeral] });
 
       const roll = Math.floor(Math.random() * 6) + 1;
-
-      const win = roll >= 5; // HARDER WIN RATE (33%)
+      const win = roll >= 5;
 
       const reward = win ? Math.floor(bet * 2) : -bet;
 
@@ -233,12 +223,9 @@ module.exports = {
       if (target.id === userId)
         return interaction.reply({ content: "❌ You can't send to yourself", flags: [MessageFlags.Ephemeral] });
 
-      if (amount <= 0)
-        return interaction.reply({ content: "❌ Invalid amount", flags: [MessageFlags.Ephemeral] });
-
       const bal = await getBal();
 
-      if (bal < amount)
+      if (amount <= 0 || bal < amount)
         return interaction.reply({ content: "❌ Not enough coins", flags: [MessageFlags.Ephemeral] });
 
       await takeBal(amount);
@@ -249,11 +236,79 @@ module.exports = {
           new EmbedBuilder()
             .setColor("#57F287")
             .setTitle("💸 Transfer Complete")
-            .addFields(
-              { name: "From", value: `<@${userId}>`, inline: true },
-              { name: "To", value: `<@${target.id}>`, inline: true },
-              { name: "Amount", value: `\`${amount}\`` }
-            )
+            .setDescription(`Sent **${amount} coins** to <@${target.id}>`)
+        ]
+      });
+    }
+
+    // =========================
+    // 🛒 SHOP LIST
+    // =========================
+    if (sub === "shopbg") {
+      const keys = await redis.keys("shop:bg:*");
+
+      if (!keys.length)
+        return interaction.reply({ content: "🛒 No backgrounds available" });
+
+      let msg = "🛒 **Background Shop**\n\n";
+
+      for (const key of keys) {
+        const id = key.split(":")[2];
+        const item = await redis.hgetall(key);
+
+        msg += `🎨 **${id}** — 💰 ${item.price}\n`;
+      }
+
+      return interaction.reply({ content: msg });
+    }
+
+    // =========================
+    // 💸 BUY BG
+    // =========================
+    if (sub === "buybg") {
+      const id = interaction.options.getString("id");
+
+      const item = await redis.hgetall(`shop:bg:${id}`);
+      if (!item?.price)
+        return interaction.reply({ content: "❌ Not found", ephemeral: true });
+
+      const bal = await getBal();
+
+      if (bal < Number(item.price))
+        return interaction.reply({ content: "❌ Not enough coins", ephemeral: true });
+
+      await takeBal(userId, Number(item.price));
+      await redis.sadd(`bg:owned:${userId}`, id);
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#57F287")
+            .setTitle("🛍️ Purchased")
+            .setDescription(`You bought **${id}**`)
+        ]
+      });
+    }
+
+    // =========================
+    // 🎨 EQUIP BG
+    // =========================
+    if (sub === "equipbg") {
+      const id = interaction.options.getString("id");
+
+      const owned = await redis.sismember(`bg:owned:${userId}`, id);
+
+      if (!owned)
+        return interaction.reply({ content: "❌ You don't own this background", ephemeral: true });
+
+      await redis.hset(`profile:${userId}`, "bg", id);
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#5865F2")
+            .setTitle("🎨 Equipped")
+            .setDescription(`Background set to **${id}**`)
         ]
       });
     }
