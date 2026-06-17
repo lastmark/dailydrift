@@ -2,7 +2,8 @@ const {
   SlashCommandBuilder,
   PermissionFlagsBits,
   ChannelType,
-  EmbedBuilder
+  EmbedBuilder,
+  MessageFlags
 } = require("discord.js");
 
 const e = require("../emojis.js");
@@ -47,6 +48,7 @@ module.exports = {
 
   async execute(interaction, client, redis) {
     const sub = interaction.options.getSubcommand();
+    const guildId = interaction.guild.id;
 
     /* =========================
        🎂 SET BIRTHDAY
@@ -62,7 +64,7 @@ module.exports = {
               .setColor("#ED4245")
               .setDescription(`${e.error || "❌"} February can't exceed 29 days`)
           ],
-          flags: 64
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -73,14 +75,16 @@ module.exports = {
               .setColor("#ED4245")
               .setDescription(`${e.error || "❌"} This month has only 30 days`)
           ],
-          flags: 64
+          flags: MessageFlags.Ephemeral
         });
       }
 
       const formatted = `${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const userId = interaction.user.id;
 
-      await redis.hset(`profile:${interaction.user.id}`, "birthday", formatted);
-      await redis.sadd(`birthdays:date:${formatted}`, interaction.user.id);
+      // FIXED: consistent storage (no WRONGTYPE anymore)
+      await redis.hset(`birthday:user:${guildId}`, userId, formatted);
+      await redis.sadd(`birthday:date:${guildId}:${formatted}`, userId);
 
       return interaction.reply({
         embeds: [
@@ -92,7 +96,7 @@ module.exports = {
             })
             .setDescription(`${e.success || "🎉"} Saved successfully!\n📅 **Date:** \`${formatted}\``)
         ],
-        flags: 64
+        flags: MessageFlags.Ephemeral
       });
     }
 
@@ -109,7 +113,7 @@ module.exports = {
               .setColor("#ED4245")
               .setDescription(`${e.error || "❌"} Missing Manage Server permission`)
           ],
-          flags: 64
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -123,7 +127,7 @@ module.exports = {
               .setColor("#ED4245")
               .setDescription(`${e.error || "❌"} Select channel or enable auto-create`)
           ],
-          flags: 64
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -132,11 +136,7 @@ module.exports = {
       if (!target && autoCreate) {
         await interaction.deferReply();
 
-        const botPerms = interaction.guild.members.me.permissions.has(
-          PermissionFlagsBits.ManageChannels
-        );
-
-        if (!botPerms) {
+        if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels)) {
           return interaction.editReply({
             embeds: [
               new EmbedBuilder()
@@ -146,74 +146,57 @@ module.exports = {
           });
         }
 
-        try {
-          target = await interaction.guild.channels.create({
-            name: "🎂-birthdays",
-            type: ChannelType.GuildText,
-            topic: "Birthday celebration system"
-          });
+        target = await interaction.guild.channels.create({
+          name: "🎂-birthdays",
+          type: ChannelType.GuildText,
+          topic: "Birthday celebration system"
+        });
 
-          await target.send({
-            embeds: [
-              new EmbedBuilder()
-                .setColor("#FF69B4")
-                .setTitle("🎂 Birthday System Active")
-                .setDescription("This channel will show birthday celebrations!")
-            ]
-          }).catch(() => null);
-
-        } catch (err) {
-          return interaction.editReply({
-            embeds: [
-              new EmbedBuilder()
-                .setColor("#ED4245")
-                .setDescription(`${e.error || "❌"} Failed to create channel`)
-            ]
-          });
-        }
+        await target.send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#FF69B4")
+              .setTitle("🎂 Birthday System Active")
+              .setDescription("This channel will show birthday celebrations!")
+          ]
+        }).catch(() => null);
       }
 
-      await redis.set(`birthday_channel:${interaction.guild.id}`, target.id);
+      await redis.set(`birthday:channel:${guildId}`, target.id);
 
-      const embed = new EmbedBuilder()
-        .setColor("#57F287")
-        .setAuthor({
-          name: "Birthday System Enabled",
-          iconURL: interaction.guild.iconURL()
-        })
-        .setDescription(`${e.success || "✅"} Channel set to ${target}`)
-        .setTimestamp();
-
-      if (interaction.deferred || interaction.replied) {
-        return interaction.editReply({ embeds: [embed] });
-      }
-
-      return interaction.reply({ embeds: [embed] });
+      return interaction.editReply
+        ? interaction.editReply({
+            embeds: [
+              new EmbedBuilder()
+                .setColor("#57F287")
+                .setDescription(`${e.success || "✅"} Channel set to ${target}`)
+            ]
+          })
+        : interaction.reply({
+            embeds: [
+              new EmbedBuilder()
+                .setColor("#57F287")
+                .setDescription(`${e.success || "✅"} Channel set to ${target}`)
+            ]
+          });
     }
 
     /* =========================
        📜 LIST BIRTHDAYS
     ========================= */
     if (sub === "list") {
-      const keys = await redis.keys("profile:*");
-      const list = [];
+      const data = await redis.hgetall(`birthday:user:${guildId}`) || {};
 
-      for (const key of keys) {
-        const id = key.split(":")[1];
-        const data = await redis.hget(key, "birthday");
-        if (data) list.push({ id, birthday: data });
-      }
+      const list = Object.entries(data).map(([id, bday]) => {
+        return `<@${id}> → **${bday}**`;
+      });
 
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
             .setColor("#5865F2")
             .setTitle("🎂 Server Birthdays")
-            .setDescription(
-              list.length
-                ? list.map(u => `<@${u.id}> → **${u.birthday}**`).join("\n")
-                : "No birthdays set yet."
-            )
+            .setDescription(list.length ? list.join("\n") : "No birthdays set yet.")
         ]
       });
     }
@@ -222,23 +205,13 @@ module.exports = {
        ⏳ UPCOMING BIRTHDAYS
     ========================= */
     if (sub === "upcoming") {
-      const keys = await redis.keys("profile:*");
-      const now = new Date();
-      const current = now.getMonth() + 1;
+      const data = await redis.hgetall(`birthday:user:${guildId}`) || {};
+      const now = new Date().getMonth() + 1;
 
-      const upcoming = [];
-
-      for (const key of keys) {
-        const id = key.split(":")[1];
-        const bday = await redis.hget(key, "birthday");
-        if (!bday) continue;
-
-        const [m] = bday.split("-").map(Number);
-
-        if (m >= current) {
-          upcoming.push({ id, birthday: bday });
-        }
-      }
+      const upcoming = Object.entries(data)
+        .map(([id, bday]) => ({ id, bday, month: parseInt(bday.split("-")[0]) }))
+        .filter(x => x.month >= now)
+        .sort((a, b) => a.month - b.month);
 
       return interaction.reply({
         embeds: [
@@ -247,7 +220,7 @@ module.exports = {
             .setTitle("🎉 Upcoming Birthdays")
             .setDescription(
               upcoming.length
-                ? upcoming.map(u => `<@${u.id}> → **${u.birthday}**`).join("\n")
+                ? upcoming.map(u => `<@${u.id}> → **${u.bday}**`).join("\n")
                 : "No upcoming birthdays found."
             )
         ]
