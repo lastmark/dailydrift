@@ -10,10 +10,7 @@ module.exports = {
     const userId = interaction.user.id;
     const guildId = interaction.guildId;
 
-    const [userPremium, guildPremium] = await Promise.all([
-      redis.get(`premium:user:${userId}`),
-      redis.get(`premium:guild:${guildId}`)
-    ]);
+    
 
     const color = userPremium || guildPremium ? "#FFD700" : "#5865F2";
 
@@ -37,8 +34,6 @@ module.exports = {
       })
       .setDescription(
         `${e.info} Hello ${interaction.user.username}\n\n` +
-        `${e.premium} **User:** ${userPremium ? "Premium" : "Standard"}\n` +
-        `${e.server} **Server:** ${guildPremium ? "Premium" : "Standard"}\n\n` +
         `All available commands are listed below.`
       )
       .setTimestamp();
