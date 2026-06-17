@@ -1,4 +1,3 @@
-// commands/premium.js – FINAL FIXED
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -71,6 +70,15 @@ module.exports = {
         )
         .setFooter({ text: "Redeem a code using the button below." })
         .setTimestamp();
+
+      // Debug info for dev
+      if (userId === DEV_ID) {
+        embed.addFields({
+          name: "🔧 Debug (DEV only)",
+          value: `User raw: \`${userValue || 'null'}\` (TTL: ${userTTL}s)\nGuild raw: \`${guildValue || 'null'}\` (TTL: ${guildTTL}s)`,
+          inline: false
+        });
+      }
       return embed;
     };
 
@@ -102,7 +110,6 @@ module.exports = {
 
     collector.on("collect", async i => {
       if (i.customId === "premium_refresh") {
-        // Re-fetch
         const newUser = await redis.get(`premium:user:${userId}`);
         const newGuild = await redis.get(`premium:guild:${guildId}`);
         userValue = newUser; guildValue = newGuild;
@@ -153,15 +160,18 @@ module.exports = {
             return i.followUp({ content: "❌ You already used this code.", flags: MessageFlags.Ephemeral });
           }
 
-          // --- FIX: Determine premium type ---
-          const premiumKey = data.type === "guild" ? `premium:guild:${guildId}` : `premium:user:${userId}`;
+          // --- Determine premium type (fallback to 'user') ---
+          const premiumType = data.type || 'user';
+          const premiumKey = premiumType === 'guild' ? `premium:guild:${guildId}` : `premium:user:${userId}`;
 
           // Apply premium
           if (data.duration === "perm") {
             await redis.set(premiumKey, "perm");
           } else {
             await redis.set(premiumKey, "active");
-            await redis.expire(premiumKey, data.seconds);
+            // Ensure TTL is set correctly
+            const ttl = (data.seconds && data.seconds > 0) ? data.seconds : 3600; // default 1h
+            await redis.expire(premiumKey, ttl);
           }
 
           // Give coins if any
@@ -179,13 +189,18 @@ module.exports = {
             await redis.set(`redeem:${code}`, JSON.stringify(data));
           }
 
+          // Verify key was set
+          const newVal = await redis.get(premiumKey);
+          const newTTL = await redis.ttl(premiumKey);
+
           const rewardEmbed = new EmbedBuilder()
             .setColor("#57F287")
             .setTitle("✅ Premium Activated!")
-            .setDescription(`You redeemed **${code}** for **${data.type === 'guild' ? 'Guild' : 'User'}** premium.`)
+            .setDescription(`You redeemed **${code}** for **${premiumType === 'guild' ? 'Guild' : 'User'}** premium.`)
             .addFields(
               { name: "Duration", value: data.duration === "perm" ? "♾️ Lifetime" : data.duration, inline: true },
-              { name: "Coins", value: data.giveCoins ? `+${data.coinAmount}` : "None", inline: true }
+              { name: "Coins", value: data.giveCoins ? `+${data.coinAmount}` : "None", inline: true },
+              { name: "🔍 Debug", value: `Key: \`${premiumKey}\`\nValue: \`${newVal}\`\nTTL: ${newTTL}s`, inline: false }
             )
             .setTimestamp();
 
