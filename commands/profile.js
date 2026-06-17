@@ -7,36 +7,48 @@ try {
     path.join(__dirname, "../font.ttf"),
     "CustomFont"
   );
-} catch {}
+} catch (e) {
+  console.log("Font load failed:", e.message);
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("profile")
-    .setDescription("View your profile system")
+    .setDescription("View and customize your profile system")
+
     .addSubcommand(s =>
-      s
-        .setName("view")
-        .setDescription("View profile")
-        .addUserOption(o => o.setName("target"))
+      s.setName("view")
+        .setDescription("View a user profile card")
+        .addUserOption(o =>
+          o.setName("target")
+            .setDescription("User to view")
+            .setRequired(false)
+        )
     )
+
     .addSubcommand(s =>
-      s
-        .setName("setbio")
-        .setDescription("Set bio")
+      s.setName("setbio")
+        .setDescription("Set your profile bio")
         .addStringOption(o =>
-          o.setName("text").setRequired(true)
+          o.setName("text")
+            .setDescription("Your bio (max 80 chars)")
+            .setRequired(true)
         )
     )
+
     .addSubcommand(s =>
-      s
-        .setName("upload")
-        .setDescription("Set background")
+      s.setName("upload")
+        .setDescription("Set custom profile background")
         .addAttachmentOption(o =>
-          o.setName("image").setRequired(true)
+          o.setName("image")
+            .setDescription("Background image")
+            .setRequired(true)
         )
     )
+
     .addSubcommand(s =>
-      s.setName("reset").setDescription("Reset background")
+      s.setName("reset")
+        .setDescription("Reset your background")
     ),
 
   async execute(interaction, client, redis) {
@@ -47,29 +59,48 @@ module.exports = {
     if (sub === "setbio") {
       const text = interaction.options.getString("text");
 
-      if (text.length > 80)
-        return interaction.reply({ content: "Max 80 chars", ephemeral: true });
+      if (text.length > 80) {
+        return interaction.reply({
+          content: "❌ Bio max is 80 characters",
+          ephemeral: true
+        });
+      }
 
       await redis.hset(`profile:${userId}`, "bio", text);
-      return interaction.reply({ content: "Bio updated", ephemeral: true });
+
+      return interaction.reply({
+        content: "✅ Bio updated",
+        ephemeral: true
+      });
     }
 
-    /* ================= UPLOAD BG ================= */
+    /* ================= UPLOAD ================= */
     if (sub === "upload") {
       const file = interaction.options.getAttachment("image");
 
-      if (!file.contentType?.startsWith("image/"))
-        return interaction.reply({ content: "Invalid image", ephemeral: true });
+      if (!file?.contentType?.startsWith("image/")) {
+        return interaction.reply({
+          content: "❌ Invalid image file",
+          ephemeral: true
+        });
+      }
 
       await redis.hset(`profile:${userId}`, "custom_bg", file.url);
 
-      return interaction.reply({ content: "Background saved", ephemeral: true });
+      return interaction.reply({
+        content: "✅ Background saved",
+        ephemeral: true
+      });
     }
 
     /* ================= RESET ================= */
     if (sub === "reset") {
       await redis.hdel(`profile:${userId}`, "custom_bg");
-      return interaction.reply({ content: "Reset done", ephemeral: true });
+
+      return interaction.reply({
+        content: "🔄 Background reset",
+        ephemeral: true
+      });
     }
 
     /* ================= VIEW ================= */
@@ -83,7 +114,6 @@ module.exports = {
       const bio = data.bio || "No bio set";
       const bg = data.custom_bg;
 
-      // SAFE XP SYSTEM
       const xp = Number(data.xp || 0);
       const level = Number(data.level || 1);
 
@@ -136,23 +166,22 @@ module.exports = {
       ctx.font = "18px CustomFont";
       ctx.fillText(bio, 220, 130);
 
-      /* ================= XP BAR ================= */
+      /* ================= XP BAR BG ================= */
       const x = 220;
       const y = 190;
       const w = 500;
       const h = 18;
 
-      // BG bar
       ctx.fillStyle = "rgba(255,255,255,0.15)";
       roundRect(ctx, x, y, w, h, 10);
       ctx.fill();
 
-      // XP fill
+      /* ================= XP BAR FILL ================= */
       ctx.fillStyle = "#5865F2";
       roundRect(ctx, x, y, w * progress, h, 10);
       ctx.fill();
 
-      // XP TEXT
+      /* ================= XP TEXT ================= */
       ctx.fillStyle = "#fff";
       ctx.font = "14px CustomFont";
       ctx.fillText(`${xp} / ${needed} XP`, x + 10, y + 13);
