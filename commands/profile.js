@@ -11,17 +11,11 @@ try {
   }
 } catch {}
 
-const bgList = {
-  cyber1: "https://yourcdn.com/bg/cyber1.png",
-  fire1: "https://yourcdn.com/bg/fire1.png",
-  void1: "https://yourcdn.com/bg/void1.png",
-  neon1: "https://yourcdn.com/bg/neon1.png"
-};
-
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("profile")
     .setDescription("View profile system")
+
     .addSubcommand(s =>
       s.setName("view")
         .setDescription("View profile")
@@ -29,6 +23,7 @@ module.exports = {
           o.setName("target").setDescription("User").setRequired(false)
         )
     )
+
     .addSubcommand(s =>
       s.setName("setbio")
         .setDescription("Set bio")
@@ -36,6 +31,7 @@ module.exports = {
           o.setName("text").setDescription("Bio").setRequired(true)
         )
     )
+
     .addSubcommand(s =>
       s.setName("upload")
         .setDescription("Premium custom background")
@@ -43,6 +39,7 @@ module.exports = {
           o.setName("image").setDescription("Image").setRequired(true)
         )
     )
+
     .addSubcommand(s =>
       s.setName("reset")
         .setDescription("Reset background")
@@ -52,23 +49,27 @@ module.exports = {
     await interaction.deferReply();
 
     const sub = interaction.options.getSubcommand();
-    const user = interaction.options.getUser("target") || interaction.user;
-    const userId = user.id;
+    const target = interaction.options.getUser("target") || interaction.user;
+    const userId = target.id;
 
-    const data = (await redis.hgetall(`profile:${userId}`)) || {};
+    const profile = await redis.hgetall(`profile:${userId}`) || {};
 
-    /* ================= BIO ================= */
+    // =========================
+    // BIO
+    // =========================
     if (sub === "setbio") {
       const text = interaction.options.getString("text");
 
       if (text.length > 80)
-        return interaction.reply({ content: "Max 80 chars", ephemeral: true });
+        return interaction.editReply("Max 80 chars");
 
       await redis.hset(`profile:${interaction.user.id}`, "bio", text);
       return interaction.editReply("Bio updated");
     }
 
-    /* ================= PREMIUM BG ================= */
+    // =========================
+    // PREMIUM BG
+    // =========================
     if (sub === "upload") {
       const file = interaction.options.getAttachment("image");
 
@@ -79,17 +80,22 @@ module.exports = {
       return interaction.editReply("Premium background saved");
     }
 
-    /* ================= RESET ================= */
+    // =========================
+    // RESET BG
+    // =========================
     if (sub === "reset") {
       await redis.hdel(`profile:${interaction.user.id}`, "custom_bg");
+      await redis.hdel(`profile:${interaction.user.id}`, "bg");
       return interaction.editReply("Reset done");
     }
 
-    /* ================= VIEW ================= */
+    // =========================
+    // VIEW PROFILE
+    // =========================
     if (sub === "view") {
-      const bio = data.bio || "No bio set";
-      const level = Number(data.level || 1);
-      const xp = Number(data.xp || 0);
+      const bio = profile.bio || "No bio set";
+      const level = Number(profile.level || 1);
+      const xp = Number(profile.xp || 0);
       const needed = 100 * level;
       const progress = Math.min(xp / needed, 1);
 
@@ -99,15 +105,19 @@ module.exports = {
       let bg;
 
       try {
-        // 1. Premium BG
-        if (data.custom_bg) {
-          bg = await loadImage(data.custom_bg);
+        // 1. PREMIUM UPLOADED BACKGROUND (HIGHEST PRIORITY)
+        if (profile.custom_bg) {
+          bg = await loadImage(profile.custom_bg);
 
-        // 2. Shop BG
-        } else if (data.bg && bgList[data.bg]) {
-          bg = await loadImage(bgList[data.bg]);
+        // 2. SHOP BACKGROUND (NEW SYSTEM FROM game.js)
+        } else if (profile.bg) {
+          const shopItem = await redis.hgetall(`shop:bg:${profile.bg}`);
 
-        // 3. Default
+          if (shopItem?.url) {
+            bg = await loadImage(shopItem.url);
+          }
+
+        // 3. DEFAULT BACKGROUND
         } else {
           bg = await loadImage(path.join(__dirname, "../backgrounds/classic.png"));
         }
@@ -115,8 +125,9 @@ module.exports = {
         bg = null;
       }
 
-      if (bg) ctx.drawImage(bg, 0, 0, 800, 300);
-      else {
+      if (bg) {
+        ctx.drawImage(bg, 0, 0, 800, 300);
+      } else {
         ctx.fillStyle = "#111";
         ctx.fillRect(0, 0, 800, 300);
       }
@@ -124,33 +135,45 @@ module.exports = {
       ctx.fillStyle = "rgba(0,0,0,0.55)";
       ctx.fillRect(0, 0, 800, 300);
 
+      // =========================
+      // AVATAR
+      // =========================
       const avatar = await loadImage(
-        user.displayAvatarURL({ extension: "png", size: 256 })
+        target.displayAvatarURL({ extension: "png", size: 256 })
       );
+
+      const ax = 110, ay = 130;
 
       ctx.save();
       ctx.beginPath();
-      ctx.arc(110, 130, 70, 0, Math.PI * 2);
+      ctx.arc(ax, ay, 70, 0, Math.PI * 2);
       ctx.clip();
       ctx.drawImage(avatar, 35, 55, 150, 150);
       ctx.restore();
 
-      // frame
+      // =========================
+      // FRAME
+      // =========================
       ctx.strokeStyle = "#5865F2";
       ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.arc(110, 130, 72, 0, Math.PI * 2);
+      ctx.arc(ax, ay, 72, 0, Math.PI * 2);
       ctx.stroke();
 
+      // =========================
+      // TEXT
+      // =========================
       ctx.fillStyle = "#fff";
       ctx.font = "28px CustomFont";
-      ctx.fillText(user.username, 220, 85);
+      ctx.fillText(target.username, 220, 85);
 
       ctx.fillStyle = "rgba(255,255,255,0.75)";
       ctx.font = "18px CustomFont";
       ctx.fillText(bio, 220, 130);
 
-      // XP bar
+      // =========================
+      // XP BAR
+      // =========================
       const x = 220, y = 190, w = 500, h = 18;
 
       ctx.fillStyle = "rgba(255,255,255,0.15)";
@@ -178,7 +201,9 @@ module.exports = {
   }
 };
 
-/* ================= HELPERS ================= */
+// =========================
+// HELPERS
+// =========================
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
