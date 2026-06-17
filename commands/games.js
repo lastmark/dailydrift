@@ -1,7 +1,243 @@
-// commands/games.js - FULLY FIXED
+// commands/games.js - COMPLETE WITH ALL GAMES
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 const Economy = require("../economy.js");
 
+// =========================
+// 🃏 BLACKJACK GAME CLASS
+// =========================
+class BlackjackGame {
+  constructor(userId, bet, economy, redis) {
+    this.userId = userId;
+    this.bet = bet;
+    this.economy = economy;
+    this.redis = redis;
+    this.gameOver = false;
+    this.result = null;
+    
+    // Card setup
+    this.suits = ['♠️', '♥️', '♦️', '♣️'];
+    this.values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+    this.deck = this.createDeck();
+    this.shuffleDeck();
+    
+    // Deal initial hands
+    this.playerHand = [this.drawCard(), this.drawCard()];
+    this.dealerHand = [this.drawCard(), this.drawCard()];
+    
+    this.playerValue = this.getHandValue(this.playerHand);
+    this.dealerValue = this.getHandValue(this.dealerHand);
+    
+    // Check for instant blackjack
+    if (this.playerValue === 21 && this.dealerValue === 21) {
+      this.gameOver = true;
+      this.result = 'push';
+    } else if (this.playerValue === 21) {
+      this.gameOver = true;
+      this.result = 'blackjack';
+    } else if (this.dealerValue === 21) {
+      this.gameOver = true;
+      this.result = 'lose';
+    }
+  }
+
+  createDeck() {
+    const deck = [];
+    for (const suit of this.suits) {
+      for (const value of this.values) {
+        deck.push({ suit, value });
+      }
+    }
+    return deck;
+  }
+
+  shuffleDeck() {
+    for (let i = this.deck.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.deck[i], this.deck[j]] = [this.deck[j], this.deck[i]];
+    }
+  }
+
+  drawCard() {
+    return this.deck.pop();
+  }
+
+  getCardValue(card) {
+    if (card.value === 'A') return 11;
+    if (['J', 'Q', 'K'].includes(card.value)) return 10;
+    return parseInt(card.value);
+  }
+
+  getHandValue(hand) {
+    let value = 0;
+    let aces = 0;
+    for (const card of hand) {
+      const cardVal = this.getCardValue(card);
+      if (cardVal === 11) aces++;
+      value += cardVal;
+    }
+    while (value > 21 && aces > 0) {
+      value -= 10;
+      aces--;
+    }
+    return value;
+  }
+
+  formatHand(hand, hideDealer = false) {
+    if (hideDealer) {
+      return `${hand[0].value}${hand[0].suit} ❓`;
+    }
+    return hand.map(card => `${card.value}${card.suit}`).join(' ');
+  }
+
+  hit() {
+    if (this.gameOver) return false;
+    
+    this.playerHand.push(this.drawCard());
+    this.playerValue = this.getHandValue(this.playerHand);
+    
+    if (this.playerValue > 21) {
+      this.gameOver = true;
+      this.result = 'bust';
+    }
+    return true;
+  }
+
+  stand() {
+    if (this.gameOver) return false;
+    
+    // Dealer draws until 17+
+    while (this.dealerValue < 17) {
+      this.dealerHand.push(this.drawCard());
+      this.dealerValue = this.getHandValue(this.dealerHand);
+    }
+    
+    this.gameOver = true;
+    
+    if (this.dealerValue > 21) {
+      this.result = 'win';
+    } else if (this.playerValue > this.dealerValue) {
+      this.result = 'win';
+    } else if (this.playerValue === this.dealerValue) {
+      this.result = 'push';
+    } else {
+      this.result = 'lose';
+    }
+    
+    return true;
+  }
+
+  async processResult() {
+    let winAmount = 0;
+    
+    if (this.result === 'blackjack') {
+      winAmount = Math.floor(this.bet * 2.5);
+      await this.economy.addBalance(this.userId, winAmount);
+      await this.economy.addTotalEarned(this.userId, winAmount);
+      await this.redis.incr(`games:${this.userId}:blackjack_wins`);
+    } else if (this.result === 'win') {
+      winAmount = this.bet * 2;
+      await this.economy.addBalance(this.userId, winAmount);
+      await this.economy.addTotalEarned(this.userId, winAmount);
+      await this.redis.incr(`games:${this.userId}:blackjack_wins`);
+    } else if (this.result === 'push') {
+      winAmount = this.bet;
+      await this.economy.addBalance(this.userId, winAmount);
+      await this.redis.incr(`games:${this.userId}:blackjack_ties`);
+    } else if (this.result === 'bust' || this.result === 'lose') {
+      await this.economy.takeBalance(this.userId, this.bet);
+      await this.economy.addTotalSpent(this.userId, this.bet);
+      await this.redis.incr(`games:${this.userId}:blackjack_losses`);
+    }
+    
+    return winAmount;
+  }
+
+  getEmbed() {
+    const embed = new EmbedBuilder()
+      .setColor(this.gameOver ? 
+        (this.result === 'win' || this.result === 'blackjack' ? '#57F287' : 
+         this.result === 'push' ? '#F1C40F' : '#ED4245') : '#2B2D31')
+      .setTitle(this.gameOver ? this.getResultTitle() : '🃏 **BLACKJACK**')
+      .setDescription(this.gameOver ? this.getResultDescription() : `💰 **Bet:** ${this.bet} coins`)
+      .addFields(
+        {
+          name: `🎯 **Your Hand** (${this.playerValue})`,
+          value: this.formatHand(this.playerHand),
+          inline: false
+        },
+        {
+          name: `🤖 **Dealer's Hand** (${this.gameOver ? this.dealerValue : '?'})`,
+          value: this.gameOver ? this.formatHand(this.dealerHand) : this.formatHand(this.dealerHand, true),
+          inline: false
+        }
+      )
+      .setFooter({ text: `Balance: ${this.economy.getBalance ? await this.economy.getBalance(this.userId) : '...'} coins` })
+      .setTimestamp();
+
+    if (this.gameOver) {
+      const winAmount = this.result === 'blackjack' ? Math.floor(this.bet * 2.5) :
+                        this.result === 'win' ? this.bet * 2 :
+                        this.result === 'push' ? this.bet : 0;
+      embed.addFields({
+        name: '💰 Result',
+        value: winAmount > this.bet ? `You won **${winAmount}** coins! 🎉` :
+               winAmount === this.bet ? "Push! Bet returned! 🤝" :
+               `You lost **${this.bet}** coins! 😢`,
+        inline: false
+      });
+    }
+
+    return embed;
+  }
+
+  getResultTitle() {
+    if (this.result === 'blackjack') return '🎉 **BLACKJACK!**';
+    if (this.result === 'win') return '🎉 **YOU WIN!**';
+    if (this.result === 'push') return '🤝 **PUSH!**';
+    if (this.result === 'bust') return '💥 **BUST!**';
+    return '😢 **YOU LOSE!**';
+  }
+
+  getResultDescription() {
+    if (this.result === 'blackjack') return `💰 **Bet:** ${this.bet} coins\n🎯 Perfect 21! You hit Blackjack!`;
+    if (this.result === 'win') return `💰 **Bet:** ${this.bet} coins\n🎯 You beat the dealer!`;
+    if (this.result === 'push') return `💰 **Bet:** ${this.bet} coins\n🤝 It's a tie!`;
+    if (this.result === 'bust') return `💰 **Bet:** ${this.bet} coins\n💥 You went over 21!`;
+    return `💰 **Bet:** ${this.bet} coins\n😢 Dealer beats you!`;
+  }
+
+  getButtons() {
+    if (this.gameOver) {
+      return new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId('blackjack_play_again')
+            .setLabel('🔄 Play Again')
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId('blackjack_end')
+            .setLabel('🚪 End Game')
+            .setStyle(ButtonStyle.Secondary)
+        );
+    }
+
+    return new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId('blackjack_hit')
+          .setLabel('🃏 Hit')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('blackjack_stand')
+          .setLabel('🛑 Stand')
+          .setStyle(ButtonStyle.Danger)
+      );
+  }
+}
+
+// =========================
+// 📦 COMMAND EXPORT
+// =========================
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("games")
@@ -410,83 +646,80 @@ module.exports = {
         });
       }
 
-      const getCard = () => {
-        const values = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11];
-        return values[Math.floor(Math.random() * values.length)];
-      };
-
-      const playerCards = [getCard(), getCard()];
-      const dealerCards = [getCard(), getCard()];
-
-      const getHandValue = (cards) => {
-        let sum = cards.reduce((a, b) => a + b, 0);
-        let aces = cards.filter(c => c === 11).length;
-        while (sum > 21 && aces > 0) {
-          sum -= 10;
-          aces--;
-        }
-        return sum;
-      };
-
-      let playerValue = getHandValue(playerCards);
-      let dealerValue = getHandValue(dealerCards);
-
-      while (dealerValue < 17) {
-        dealerCards.push(getCard());
-        dealerValue = getHandValue(dealerCards);
-      }
-
-      let winAmount = 0;
-      let won = false;
+      // Create game instance
+      const game = new BlackjackGame(userId, bet, economy, redis);
       
-      if (playerValue > 21) {
-        won = false;
-      } else if (dealerValue > 21) {
-        won = true;
-        winAmount = bet * 2;
-      } else if (playerValue > dealerValue) {
-        won = true;
-        winAmount = bet * 2;
-      } else if (playerValue === dealerValue) {
-        winAmount = bet;
-      } else {
-        won = false;
-      }
+      // Send initial game message
+      const embed = game.getEmbed();
+      const buttons = game.getButtons();
+      
+      const reply = await interaction.reply({
+        embeds: [embed],
+        components: [buttons],
+        fetchReply: true
+      });
 
-      if (winAmount > 0 && winAmount !== bet) {
-        await economy.addBalance(userId, winAmount);
-        await economy.addTotalEarned(userId, winAmount);
-        await redis.incr(`games:${userId}:blackjack_wins`);
-      } else if (winAmount === bet) {
-        await economy.addBalance(userId, bet);
-        await redis.incr(`games:${userId}:blackjack_ties`);
-      } else {
-        await economy.takeBalance(userId, bet);
-        await economy.addTotalSpent(userId, bet);
-        await redis.incr(`games:${userId}:blackjack_losses`);
-      }
+      // Create collector for button interactions
+      const collector = reply.createMessageComponentCollector({
+        filter: i => i.user.id === userId,
+        time: 60000
+      });
 
-      const embed = new EmbedBuilder()
-        .setColor(won ? "#57F287" : "#ED4245")
-        .setTitle("🃏 Blackjack")
-        .setDescription(`**Your hand:** ${playerCards.join(", ")} = **${playerValue}**\n**Dealer's hand:** ${dealerCards.join(", ")} = **${dealerValue}**`)
-        .addFields(
-          { 
-            name: "💰 Result", 
-            value: winAmount > bet ? `You won **${winAmount}** coins!` : 
-                   winAmount === bet ? "Tie! Bet returned!" :
-                   `You lost **${bet}** coins!`,
-            inline: false
-          },
-          {
-            name: "💳 New Balance",
-            value: `\`${await economy.getBalance(userId)} coins\``,
-            inline: true
+      collector.on('collect', async (i) => {
+        if (i.customId === 'blackjack_hit') {
+          await i.deferUpdate();
+          game.hit();
+          
+          if (game.gameOver) {
+            await game.processResult();
+            collector.stop();
           }
-        )
-        .setTimestamp();
+          
+          const newEmbed = game.getEmbed();
+          const newButtons = game.getButtons();
+          await i.editReply({ embeds: [newEmbed], components: [newButtons] });
+          
+        } else if (i.customId === 'blackjack_stand') {
+          await i.deferUpdate();
+          game.stand();
+          await game.processResult();
+          collector.stop();
+          
+          const newEmbed = game.getEmbed();
+          const newButtons = game.getButtons();
+          await i.editReply({ embeds: [newEmbed], components: [newButtons] });
+          
+        } else if (i.customId === 'blackjack_play_again') {
+          await i.deferUpdate();
+          collector.stop();
+          
+          // Start new game with same bet
+          const newGame = new BlackjackGame(userId, game.bet, economy, redis);
+          const newEmbed = newGame.getEmbed();
+          const newButtons = newGame.getButtons();
+          
+          await i.editReply({ embeds: [newEmbed], components: [newButtons] });
+          
+        } else if (i.customId === 'blackjack_end') {
+          await i.deferUpdate();
+          collector.stop();
+          await i.editReply({ components: [] });
+        }
+      });
 
-      return interaction.reply({ embeds: [embed] });
+      collector.on('end', async (collected, reason) => {
+        if (reason === 'time' && !game.gameOver) {
+          // Auto-stand if timer runs out
+          game.stand();
+          await game.processResult();
+          
+          const newEmbed = game.getEmbed();
+          await reply.edit({ 
+            embeds: [newEmbed], 
+            components: [] 
+          });
+        }
+      });
     }
 
     // =========================
