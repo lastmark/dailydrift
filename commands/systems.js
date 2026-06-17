@@ -2,6 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const e = require("../emojis");
 
 module.exports = {
+  category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("configs")
     .setDescription("Display the currently configured welcome and leave channels."),
