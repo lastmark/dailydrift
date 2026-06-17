@@ -1,10 +1,10 @@
-// commands/profile.js – FULLY FIXED
+// commands/profile.js – PREMIUM FROM REDEEM CODES
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont } = require("canvas");
 const path = require("path");
 const fs = require("fs");
 
-// ---------- FONT SETUP (with fallback) ----------
+// ---------- FONT SETUP ----------
 const fontPath = path.join(__dirname, "../font.ttf");
 let customFontLoaded = false;
 try {
@@ -19,7 +19,6 @@ try {
   console.warn("⚠️ Font registration failed – using fallback Arial.");
 }
 
-// Helper to get font string with fallback
 function getFont(weight = "normal", size = 16) {
   const family = customFontLoaded ? "CustomFont" : "Arial, sans-serif";
   return `${weight} ${size}px ${family}`;
@@ -41,17 +40,15 @@ module.exports = {
     const userId = user.id;
 
     // ---- GLOBAL ECONOMY KEYS ----
-    const balanceKey = `eco:${userId}:money`;
-    const shieldKey = `eco:${userId}:shield`;
-    const vipKey = `eco:${userId}:vip`;
+    const balance = Number(await redis.get(`eco:${userId}:money`) || 0);
+    const shield = Number(await redis.get(`eco:${userId}:shield`) || 0);
+    
+    // ---- PREMIUM CHECK (from redeem codes) ----
+    const premiumValue = await redis.get(`premium:user:${userId}`);
+    const isPremium = premiumValue !== null; // "active", "perm", or any value
 
-    const balance = Number(await redis.get(balanceKey) || 0);
-    const shield = Number(await redis.get(shieldKey) || 0);
-    const isVip = await redis.get(vipKey) === "true";
-
-    // ---- PROFILE DATA (global) ----
-    const profileKey = `profile:${userId}`;
-    const profile = await redis.hgetall(profileKey) || {};
+    // ---- PROFILE DATA ----
+    const profile = await redis.hgetall(`profile:${userId}`) || {};
     const level = Number(profile.level || 1);
     const xp = Number(profile.xp || 0);
     const bio = profile.bio || "No bio set";
@@ -115,33 +112,35 @@ module.exports = {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // ---- TEXT WITH FALLBACK ----
+    // ---- TEXT ----
     ctx.fillStyle = "#FFFFFF";
     ctx.font = getFont("bold", 32);
     ctx.fillText(user.username, 270, 100);
 
+    // Title based on premium
     let title = "Member";
-    if (isVip) title = "💎 VIP";
-    if (userId === "1303357369622990889") title = "👑 Developer";
+    if (isPremium) title = "Premium";
+    if (userId === "1303357369622990889") title = "Developer";
 
     ctx.fillStyle = color;
     ctx.font = getFont("bold", 18);
     ctx.fillText(title, 270, 140);
 
+    // Bio
     ctx.fillStyle = "rgba(255,255,255,0.8)";
     ctx.font = getFont("normal", 16);
     let displayBio = bio;
     if (displayBio.length > 60) displayBio = displayBio.substring(0, 57) + "...";
     ctx.fillText(displayBio, 270, 175);
 
-    // Stats
+    // Stats (clean labels)
     ctx.fillStyle = "rgba(255,255,255,0.9)";
     ctx.font = getFont("bold", 16);
     let xPos = 270;
     const stats = [
-      { label: "💰", value: balance },
-      { label: "🛡️", value: shield },
-      { label: "⭐", value: level }
+      { label: "Coins:", value: balance },
+      { label: "Shields:", value: shield },
+      { label: "Level:", value: level }
     ];
     stats.forEach((stat, index) => {
       if (index > 0) {
@@ -153,7 +152,7 @@ module.exports = {
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.font = getFont("bold", 16);
       ctx.fillText(stat.label, xPos, 205);
-      xPos += 40;
+      xPos += 70;
       ctx.font = getFont("normal", 16);
       ctx.fillStyle = color;
       ctx.fillText(stat.value, xPos, 205);
@@ -222,9 +221,9 @@ module.exports = {
       .setTitle(`${user.username}'s Profile`)
       .setDescription(`Level ${level} • ${title}`)
       .addFields(
-        { name: "💰 Balance", value: `${balance} coins`, inline: true },
-        { name: "🛡️ Shields", value: `${shield}`, inline: true },
-        { name: "📊 Progress", value: `${Math.round(progress * 100)}% to next level`, inline: true }
+        { name: "Coins", value: `${balance}`, inline: true },
+        { name: "Shields", value: `${shield}`, inline: true },
+        { name: "Progress", value: `${Math.round(progress * 100)}% to next level`, inline: true }
       )
       .setImage("attachment://profile.png")
       .setFooter({ text: `Requested by ${interaction.user.username}` })
