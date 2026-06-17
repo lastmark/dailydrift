@@ -2,8 +2,7 @@ const {
   SlashCommandBuilder,
   EmbedBuilder,
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
+  StringSelectMenuBuilder,
   ComponentType
 } = require("discord.js");
 
@@ -24,13 +23,10 @@ module.exports = {
       if (!categories.has(category))
         categories.set(category, []);
 
-      categories.get(category).push({
-        name: command.data.name,
-        description: command.data.description || "No description"
-      });
+      categories.get(category).push(command);
     }
 
-    const mainEmbed = new EmbedBuilder()
+    const embed = new EmbedBuilder()
       .setColor("#5865F2")
       .setAuthor({
         name: `${client.user.username} Help Menu`,
@@ -39,64 +35,63 @@ module.exports = {
       .setThumbnail(client.user.displayAvatarURL())
       .setDescription(
         `Welcome ${interaction.user}!\n\n` +
-        `Choose a category below.\n\n` +
+        `Select a category from the dropdown below.\n\n` +
         `📚 **${client.commands.size} Commands**\n` +
         `📂 **${categories.size} Categories**`
-      )
-      .setFooter({
-        text: `${client.user.username} • Help System`
-      });
-
-    const buttons = [];
-    let count = 0;
-
-    for (const [category] of categories) {
-      buttons.push(
-        new ButtonBuilder()
-          .setCustomId(`help_${category}`)
-          .setLabel(category)
-          .setStyle(ButtonStyle.Secondary)
       );
 
-      count++;
-      if (count >= 5) break;
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId("help-category")
+      .setPlaceholder("Select a category");
+
+    for (const [category, commands] of categories) {
+      menu.addOptions({
+        label: category,
+        description: `${commands.length} commands`,
+        value: category
+      });
     }
 
-    const row = new ActionRowBuilder().addComponents(buttons);
+    const row = new ActionRowBuilder().addComponents(menu);
 
     const msg = await interaction.reply({
-      embeds: [mainEmbed],
+      embeds: [embed],
       components: [row],
       fetchReply: true
     });
 
     const collector = msg.createMessageComponentCollector({
-      componentType: ComponentType.Button,
+      componentType: ComponentType.StringSelect,
       time: 300000
     });
 
     collector.on("collect", async i => {
       if (i.user.id !== interaction.user.id) {
         return i.reply({
-          content: "This help menu isn't yours.",
+          content: "This menu isn't yours.",
           ephemeral: true
         });
       }
 
-      const category = i.customId.replace("help_", "");
+      const category = i.values[0];
       const commands = categories.get(category);
 
-      const embed = new EmbedBuilder()
+      const categoryEmbed = new EmbedBuilder()
         .setColor("#5865F2")
         .setTitle(`📂 ${category}`)
         .setDescription(
           commands
-            .map(cmd => `\`/${cmd.name}\`\n> ${cmd.description}`)
+            .map(cmd =>
+              `**/${cmd.data.name}**\n${cmd.data.description || "No description"}`
+            )
             .join("\n\n")
-        );
+        )
+        .setFooter({
+          text: `${commands.length} commands`
+        });
 
       await i.update({
-        embeds: [embed],
+        embeds: [categoryEmbed],
         components: [row]
       });
     });
