@@ -27,7 +27,7 @@ module.exports = {
     }
 
     const embed = new EmbedBuilder()
-      .setColor("RED")
+      .setColor("#F1C40")
       .setAuthor({
         name: `${client.user.username} Command Center`,
         iconURL: client.user.displayAvatarURL()
