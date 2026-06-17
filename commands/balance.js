@@ -3,6 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const Economy = require("../economy.js");
 
 module.exports = {
+  category: "Economy",
   data: new SlashCommandBuilder()
     .setName("balance")
     .setDescription("💰 Check your balance and economy stats")
