@@ -1,39 +1,58 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ChannelType, MessageFlags } = require("discord.js");
+const {
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  EmbedBuilder,
+  ChannelType,
+  MessageFlags
+} = require("discord.js");
 
 module.exports = {
   category: "Premium",
+
   data: new SlashCommandBuilder()
     .setName("premium-set")
-    .setDescription("💎 Premium Suite: Configure advanced premium metrics and server protections.")
+    .setDescription("💎 Premium system configuration panel")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+
     .addSubcommand(sub =>
       sub.setName("antispam")
-        .setDescription("⚡ Toggle high-speed anti-spam protection shield.")
+        .setDescription("⚡ Configure anti-spam event system")
         .addStringOption(opt =>
           opt.setName("status")
-            .setDescription("Turn the protection stream ON or OFF")
+            .setDescription("Enable or disable system")
             .setRequired(true)
             .addChoices(
-              { name: "Enabled (Active Shielding)", value: "true" },
-              { name: "Disabled (Unprotected Stream)", value: "false" }
+              { name: "Enabled", value: "true" },
+              { name: "Disabled", value: "false" }
+            )
+        )
+        .addStringOption(opt =>
+          opt.setName("level")
+            .setDescription("Detection sensitivity")
+            .setRequired(false)
+            .addChoices(
+              { name: "Low (Safer)", value: "low" },
+              { name: "Medium (Balanced)", value: "medium" },
+              { name: "High (Strict)", value: "high" }
             )
         )
     )
+
     .addSubcommand(sub =>
       sub.setName("setup-stats")
-        .setDescription("📊 Deploy premium analytics live tracker panels.")
+        .setDescription("📊 Configure live server stats system")
         .addStringOption(opt =>
           opt.setName("type")
-            .setDescription("Select the advanced tracking metric type.")
+            .setDescription("Stat type")
             .setRequired(true)
             .addChoices(
-              { name: "🎙️ Peoples in Voices", value: "voice" },
-              { name: "📈 Members Joined Today", value: "today" }
+              { name: "Voice Activity", value: "voice" },
+              { name: "Members Joined Today", value: "today" }
             )
         )
-        .addChannelOption(opt => 
-          opt.setName("target_channel")
-            .setDescription("Connect to an existing voice channel (Leave empty to let bot auto-create one).")
+        .addChannelOption(opt =>
+          opt.setName("channel")
+            .setDescription("Optional voice channel")
             .addChannelTypes(ChannelType.GuildVoice)
             .setRequired(false)
         )
@@ -41,89 +60,119 @@ module.exports = {
 
   async execute(interaction, client, redis) {
     const guildId = interaction.guildId;
-    const subcommand = interaction.options.getSubcommand();
+    const sub = interaction.options.getSubcommand();
 
-    // Strict premium verification checking gate right at the entrypoint
-    const isGuildPremium = await redis.get(`premium:guild:${guildId}`);
-    if (!isGuildPremium || isGuildPremium === "false") {
-      const accessDeniedEmbed = new EmbedBuilder()
-        .setColor("#FF3366")
-        .setTitle("🔒 Premium License Required")
-        .setDescription("This system configuration utility belongs exclusively to **Premium Tier Guilds**.\n\n💰 Contact the application developer to activate a premium subscription.");
-      return interaction.reply({ embeds: [accessDeniedEmbed], flags: [MessageFlags.Ephemeral] });
+    /* =========================
+       PREMIUM CHECK
+    ========================= */
+    const premium = await redis.get(`premium:guild:${guildId}`);
+
+    if (!premium || premium === "false") {
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#FF3B6B")
+            .setTitle("🔒 Premium Required")
+            .setDescription("This server does not have an active premium license.")
+        ],
+        flags: [MessageFlags.Ephemeral]
+      });
     }
 
-    // ==========================================
-    // ⚡ SUBCOMMAND: ANTI-SPAM
-    // ==========================================
-    if (subcommand === "antispam") {
-      const statusValue = interaction.options.getString("status");
-      await redis.set(`antispam:toggle:${guildId}`, statusValue);
+    /* =========================
+       ANTI-SPAM CONFIG (EVENT CONTROL)
+    ========================= */
+    if (sub === "antispam") {
+      const status = interaction.options.getString("status");
+      const level = interaction.options.getString("level") || "medium";
 
-      const isEnabled = statusValue === "true";
-      const configEmbed = new EmbedBuilder()
-        .setColor(isEnabled ? "#00FFAC" : "#FF3366")
-        .setDescription(`**Anti-Spam State Updated:**\n• **System Status:** ${isEnabled ? "🟢 **MAXIMUM ACTIVE SHIELDING**" : "🔴 **INACTIVE**"}`);
-      return interaction.reply({ embeds: [configEmbed] });
+      await redis.set(`antispam:${guildId}:enabled`, status);
+      await redis.set(`antispam:${guildId}:level`, level);
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(status === "true" ? "#00FFAA" : "#FF4D4D")
+            .setTitle("⚙️ Anti-Spam Configuration Updated")
+            .addFields(
+              {
+                name: "Status",
+                value: status === "true" ? "🟢 Enabled" : "🔴 Disabled",
+                inline: true
+              },
+              {
+                name: "Sensitivity",
+                value: level.toUpperCase(),
+                inline: true
+              },
+              {
+                name: "Note",
+                value: "This affects the event system in `/events/antiSpam.js`",
+                inline: false
+              }
+            )
+        ]
+      });
     }
 
-    // ==========================================
-    // 📊 SUBCOMMAND: SETUP STATS (PREMIUM MODULES)
-    // ==========================================
-    if (subcommand === "setup-stats") {
+    /* =========================
+       STATS SYSTEM
+    ========================= */
+    if (sub === "setup-stats") {
       await interaction.deferReply();
 
       const type = interaction.options.getString("type");
-      const targetChannel = interaction.options.getChannel("target_channel");
+      const channel = interaction.options.getChannel("channel");
 
-      let currentMetricValue = "0";
-      let defaultDesignName = "";
+      let value = 0;
+      let label = "";
 
       if (type === "voice") {
-        const voiceChannels = interaction.guild.channels.cache.filter(c => c.type === ChannelType.GuildVoice);
-        let voiceCount = 0;
-        voiceChannels.forEach(ch => voiceCount += ch.members.size);
-        currentMetricValue = voiceCount.toLocaleString();
-        defaultDesignName = "🎙️ ┃ In Voices";
-      } else if (type === "today") {
-        const joinedTodayCount = await redis.get(`stats:joinedtoday:${guildId}`) || "0";
-        currentMetricValue = parseInt(joinedTodayCount).toLocaleString();
-        defaultDesignName = "📈 ┃ Joined Today";
+        value = interaction.guild.channels.cache
+          .filter(c => c.type === ChannelType.GuildVoice)
+          .reduce((a, c) => a + (c.members?.size || 0), 0);
+
+        label = "🎙️ Voice Activity";
       }
 
-      let activeChannelId = null;
-      let displayMessage = "";
-
-      if (targetChannel) {
-        activeChannelId = targetChannel.id;
-        displayMessage = `✅ **Premium Data Sync Completed:** Connected to channel ${targetChannel}. It will now track advanced **${type.toUpperCase()}** metrics.`;
-        
-        const customName = targetChannel.name.split("•")[0] || `${defaultDesignName} `;
-        await targetChannel.setName(`${customName}• ${currentMetricValue}`).catch(() => null);
-      } else {
-        const botDesignedName = `${defaultDesignName} • ${currentMetricValue}`;
-        
-        const newChannel = await interaction.guild.channels.create({
-          name: botDesignedName,
-          type: ChannelType.GuildVoice,
-          permissionOverwrites: [
-            {
-              id: interaction.guild.roles.everyone.id,
-              deny: [PermissionFlagsBits.Connect],
-            },
-          ],
-        }).catch(() => null);
-
-        if (!newChannel) {
-          return interaction.editReply({ content: "❌ **Permissions Error:** Unsuccessful creating channel asset. Ensure my application roles have channel generation rights." });
-        }
-
-        activeChannelId = newChannel.id;
-        displayMessage = `🛠️ **Premium Channel Deployed:** Successfully generated brand new voice asset <#${newChannel.id}> using premium design parameters. *(You can rename it inside Discord anytime, just keep the \`•\` symbol intact!)*`;
+      if (type === "today") {
+        value = parseInt(await redis.get(`stats:joinedtoday:${guildId}`) || "0");
+        label = "📈 Joined Today";
       }
 
-      await redis.set(`stats:channel:${type}:${guildId}`, activeChannelId);
-      return interaction.editReply({ content: displayMessage });
+      const name = `${label} • ${value}`;
+
+      if (channel) {
+        await channel.setName(name).catch(() => null);
+        await redis.set(`stats:${type}:${guildId}`, channel.id);
+
+        return interaction.editReply({
+          content: `📊 Linked stats to ${channel}`
+        });
+      }
+
+      const newChannel = await interaction.guild.channels.create({
+        name,
+        type: ChannelType.GuildVoice,
+        permissionOverwrites: [
+          {
+            id: interaction.guild.roles.everyone.id,
+            deny: ["Connect"]
+          }
+        ]
+      }).catch(() => null);
+
+      if (!newChannel) {
+        return interaction.editReply({
+          content: "❌ Failed to create stats channel."
+        });
+      }
+
+      await redis.set(`stats:${type}:${guildId}`, newChannel.id);
+
+      return interaction.editReply({
+        content: `📊 Created stats channel: <#${newChannel.id}>`
+      });
     }
   }
 };
