@@ -54,25 +54,30 @@ module.exports = {
     ),
 
   async execute(interaction, client, redis) {
-    await interaction.deferReply();
+    // Don't defer for setup, defer for others
+    const sub = interaction.options.getSubcommand();
+    
+    // Only defer for commands that need it
+    if (sub !== "setup") {
+      await interaction.deferReply();
+    }
 
     const guildId = interaction.guild.id;
     const userId = interaction.user.id;
-    const sub = interaction.options.getSubcommand();
 
     // =========================
     // ⚙️ SETUP
     // =========================
     if (sub === "setup") {
-      // Check permissions
       const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
       if (!isAdmin) {
-        return interaction.editReply({
+        return interaction.reply({
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
               .setDescription("❌ You need **Administrator** permission to setup counting.")
-          ]
+          ],
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -80,30 +85,29 @@ module.exports = {
       const autoCreate = interaction.options.getBoolean("auto_create") || false;
       const clearOnReset = interaction.options.getBoolean("clear_on_reset") || false;
 
-      // Validate input
       if (!channel && !autoCreate) {
-        return interaction.editReply({
+        return interaction.reply({
           embeds: [
             new EmbedBuilder()
               .setColor("#ED4245")
               .setDescription("❌ Please select a channel or enable auto-create.")
-          ]
+          ],
+          flags: MessageFlags.Ephemeral
         });
       }
 
       let targetChannel = channel;
 
-      // Auto-create channel
       if (!targetChannel && autoCreate) {
-        // Check bot permissions
         const botMember = interaction.guild.members.me;
         if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
-          return interaction.editReply({
+          return interaction.reply({
             embeds: [
               new EmbedBuilder()
                 .setColor("#ED4245")
                 .setDescription("❌ I need **Manage Channels** permission to create a channel.")
-            ]
+            ],
+            flags: MessageFlags.Ephemeral
           });
         }
 
@@ -121,7 +125,6 @@ module.exports = {
             ]
           });
 
-          // Send welcome message
           await targetChannel.send({
             embeds: [
               new EmbedBuilder()
@@ -139,21 +142,20 @@ module.exports = {
           });
         } catch (error) {
           console.error("Failed to create counting channel:", error);
-          return interaction.editReply({
+          return interaction.reply({
             embeds: [
               new EmbedBuilder()
                 .setColor("#ED4245")
                 .setDescription("❌ Failed to create counting channel. Check my permissions.")
-            ]
+            ],
+            flags: MessageFlags.Ephemeral
           });
         }
       }
 
-      // Save setup data
       await redis.set(`counting:${guildId}:channel`, targetChannel.id);
       await redis.set(`counting:${guildId}:clear_on_reset`, clearOnReset ? "true" : "false");
 
-      // Set initial count if not exists
       const countKey = `count:${guildId}`;
       const existingCount = await redis.get(countKey);
       if (!existingCount) {
@@ -172,7 +174,7 @@ module.exports = {
         .setFooter({ text: "Users can now start counting!" })
         .setTimestamp();
 
-      return interaction.editReply({ embeds: [embed] });
+      return interaction.reply({ embeds: [embed] });
     }
 
     // =========================
@@ -452,7 +454,6 @@ module.exports = {
             await redis.del(key);
           }
           
-          // Reset count
           await redis.set(`count:${guildId}`, 0);
           
           return interaction.editReply({
