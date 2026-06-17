@@ -1,109 +1,251 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder } = require("discord.js");
+const {
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  ChannelType,
+  EmbedBuilder
+} = require("discord.js");
+
+const e = require("../emojis.js");
 
 module.exports = {
   category: "Events",
+
   data: new SlashCommandBuilder()
     .setName("birthday")
-    .setDescription("🎂 Manage and configure the community birthday celebration matrix.")
+    .setDescription("Manage birthdays system")
     .addSubcommand(sub =>
       sub.setName("set")
-        .setDescription("Save your birthday to the global network.")
-        .addIntegerOption(opt => opt.setName("month").setDescription("Month of birth (1-12)").setRequired(true).setMinValue(1).setMaxValue(12))
-        .addIntegerOption(opt => opt.setName("day").setDescription("Day of birth (1-31)").setRequired(true).setMinValue(1).setMaxValue(31))
+        .setDescription("Save your birthday")
+        .addIntegerOption(opt =>
+          opt.setName("month").setDescription("Month (1-12)").setRequired(true).setMinValue(1).setMaxValue(12)
+        )
+        .addIntegerOption(opt =>
+          opt.setName("day").setDescription("Day (1-31)").setRequired(true).setMinValue(1).setMaxValue(31)
+        )
     )
     .addSubcommand(sub =>
       sub.setName("setup")
-        .setDescription("⚙️ Configure your birthday destination (Admins Only).")
-        .addChannelOption(opt => opt.setName("channel").setDescription("Select an existing text channel").setRequired(false).addChannelTypes(ChannelType.GuildText))
-        .addBooleanOption(opt => opt.setName("auto_create").setDescription("Set to true if you want the bot to create a new channel for you").setRequired(false))
+        .setDescription("Configure birthday channel")
+        .addChannelOption(opt =>
+          opt.setName("channel")
+            .setDescription("Select channel")
+            .addChannelTypes(ChannelType.GuildText)
+        )
+        .addBooleanOption(opt =>
+          opt.setName("auto_create")
+            .setDescription("Auto create channel")
+        )
+    )
+    .addSubcommand(sub =>
+      sub.setName("list")
+        .setDescription("Show all saved birthdays in this server")
+    )
+    .addSubcommand(sub =>
+      sub.setName("upcoming")
+        .setDescription("Show next upcoming birthdays")
     ),
 
   async execute(interaction, client, redis) {
-    const subcommand = interaction.options.getSubcommand();
+    const sub = interaction.options.getSubcommand();
 
-    // ==========================================
-    // 🎂 SUBCOMMAND: SET GLOBAL USER BIRTHDAY
-    // ==========================================
-    if (subcommand === "set") {
+    // =========================
+    // 🎂 SET BIRTHDAY
+    // =========================
+    if (sub === "set") {
       const month = interaction.options.getInteger("month");
       const day = interaction.options.getInteger("day");
 
-      if (month === 2 && day > 29) return interaction.reply({ content: "❌ **Error:** February does not have more than 29 days.", ephemeral: true });
-      if ([4, 6, 9, 11].includes(month) && day > 30) return interaction.reply({ content: "❌ **Error:** That month only has 30 days.", ephemeral: true });
-
-      const formattedDate = `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      
-      await redis.hset(`profile:${interaction.user.id}`, "birthday", formattedDate);
-      await redis.sadd(`birthdays:date:${formattedDate}`, interaction.user.id);
-
-      return interaction.reply({ content: `🎂 **Success:** Your birthday has been logged globally as \`${formattedDate}\`!`, ephemeral: true });
-    }
-
-    // ==========================================
-    // ⚙️ SUBCOMMAND: DYNAMIC SERVER SETUP
-    // ==========================================
-    if (subcommand === "setup") {
-      if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-        return interaction.reply({ content: "❌ **Access Denied:** You need `Manage Server` permissions to run setup configurations.", ephemeral: true });
-      }
-
-      const selectedChannel = interaction.options.getChannel("channel");
-      const autoCreate = interaction.options.getBoolean("auto_create");
-
-      // Error guard: Admin provided absolutely no options
-      if (!selectedChannel && !autoCreate) {
-        return interaction.reply({ 
-          content: "❌ **Setup Error:** You must either select an existing channel **OR** set `auto_create` to `True`.", 
-          ephemeral: true 
+      if (month === 2 && day > 29) {
+        return interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#ED4245")
+              .setDescription(`${e.error || "❌"} February can't exceed 29 days`)
+          ],
+          ephemeral: true
         });
       }
 
-      let targetChannel = selectedChannel;
+      if ([4, 6, 9, 11].includes(month) && day > 30) {
+        return interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#ED4245")
+              .setDescription(`${e.error || "❌"} This month has only 30 days`)
+          ],
+          ephemeral: true
+        });
+      }
 
-      // 🛠️ Handle Automated Channel Creation
-      if (!targetChannel && autoCreate === true) {
+      const formatted = `${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+      await redis.hset(`profile:${interaction.user.id}`, "birthday", formatted);
+      await redis.sadd(`birthdays:date:${formatted}`, interaction.user.id);
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#FF69B4")
+            .setAuthor({
+              name: "Birthday Saved",
+              iconURL: interaction.user.displayAvatarURL()
+            })
+            .setDescription(
+              `${e.success || "🎉"} Saved successfully!\n\n` +
+              `📅 **Date:** \`${formatted}\``
+            )
+            .setTimestamp()
+        ],
+        ephemeral: true
+      });
+    }
+
+    // =========================
+    // ⚙️ SETUP CHANNEL
+    // =========================
+    if (sub === "setup") {
+      if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#ED4245")
+              .setDescription(`${e.error || "❌"} Missing Manage Server permission`)
+          ],
+          ephemeral: true
+        });
+      }
+
+      const channel = interaction.options.getChannel("channel");
+      const autoCreate = interaction.options.getBoolean("auto_create");
+
+      if (!channel && !autoCreate) {
+        return interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#ED4245")
+              .setDescription(`${e.error || "❌"} Select channel or enable auto-create`)
+          ],
+          ephemeral: true
+        });
+      }
+
+      let target = channel;
+
+      if (!target && autoCreate) {
         await interaction.deferReply();
 
-        try {
-          // Check bot application permissions inside the server before building paths
-          if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels)) {
-            return interaction.editReply({ content: "❌ **System Error:** I am missing the `Manage Channels` permission required to automatically generate text rooms." });
-          }
+        if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels)) {
+          return interaction.editReply({
+            embeds: [
+              new EmbedBuilder()
+                .setColor("#ED4245")
+                .setDescription(`${e.error || "❌"} I need Manage Channels permission`)
+            ]
+          });
+        }
 
-          // Build a brand new channel layer inside the guild matrix
-          targetChannel = await interaction.guild.channels.create({
-            name: "🎁-birthdays",
+        try {
+          target = await interaction.guild.channels.create({
+            name: "🎂-birthdays",
             type: ChannelType.GuildText,
-            topic: "🎂 Daily community automated birthday celebration zone.",
-            reason: "Automated birthday generation framework setup."
+            topic: "Birthday celebration system"
           });
 
-          // Drop an introductory setup embed explaining the channel's purpose
-          const welcomeEmbed = new EmbedBuilder()
-            .setColor("#FF69B4")
-            .setTitle("🎁 Birthday Central Loaded")
-            .setDescription("This channel has been automatically created and configured. Celebrations will be broadcasted here every single day at midnight! 🎉\n\n💬 Use `/birthday set` to log your birthday.");
-          
-          await targetChannel.send({ embeds: [welcomeEmbed] }).catch(() => null);
+          await target.send({
+            embeds: [
+              new EmbedBuilder()
+                .setColor("#FF69B4")
+                .setTitle("🎂 Birthday System Active")
+                .setDescription("This channel will show birthday celebrations!")
+            ]
+          }).catch(() => null);
 
-        } catch (error) {
-          console.error("Failed to execute dynamic channel creation:", error);
-          return interaction.editReply({ content: "❌ Failed to automatically generate the channel. Please manually select an existing text channel instead." });
+        } catch (err) {
+          console.error(err);
+          return interaction.editReply({
+            embeds: [
+              new EmbedBuilder()
+                .setColor("#ED4245")
+                .setDescription(`${e.error || "❌"} Failed to create channel`)
+            ]
+          });
         }
       }
 
-      // Commit the chosen/created channel ID straight into your Redis database
-      if (targetChannel) {
-        await redis.set(`birthday_channel:${interaction.guild.id}`, targetChannel.id);
+      await redis.set(`birthday_channel:${interaction.guild.id}`, target.id);
 
-        const responseMessage = `✅ **Configuration Locked:** Birthday celebrations are fully activated and routed to ${targetChannel}.`;
-        
-        if (interaction.deferred) {
-          return await interaction.editReply({ content: responseMessage });
-        } else {
-          return await interaction.reply({ content: responseMessage });
+      const embed = new EmbedBuilder()
+        .setColor("#57F287")
+        .setAuthor({
+          name: "Birthday System Enabled",
+          iconURL: interaction.guild.iconURL()
+        })
+        .setDescription(`${e.success || "✅"} Channel set to ${target}`)
+        .setTimestamp();
+
+      return interaction.deferred
+        ? interaction.editReply({ embeds: [embed] })
+        : interaction.reply({ embeds: [embed] });
+    }
+
+    // =========================
+    // 📜 LIST BIRTHDAYS
+    // =========================
+    if (sub === "list") {
+      const keys = await redis.keys("profile:*");
+      const list = [];
+
+      for (const key of keys) {
+        const id = key.split(":")[1];
+        const data = await redis.hget(key, "birthday");
+        if (data) list.push({ id, birthday: data });
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor("#5865F2")
+        .setTitle("🎂 Server Birthdays")
+        .setDescription(
+          list.length
+            ? list.map(u => `<@${u.id}> → **${u.birthday}**`).join("\n")
+            : "No birthdays set yet."
+        )
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    // =========================
+    // ⏳ UPCOMING BIRTHDAYS
+    // =========================
+    if (sub === "upcoming") {
+      const keys = await redis.keys("profile:*");
+      const now = new Date();
+      const current = now.getMonth() + 1;
+
+      const upcoming = [];
+
+      for (const key of keys) {
+        const id = key.split(":")[1];
+        const bday = await redis.hget(key, "birthday");
+        if (!bday) continue;
+
+        const [m] = bday.split("-").map(Number);
+
+        if (m >= current) {
+          upcoming.push({ id, birthday: bday });
         }
       }
+
+      const embed = new EmbedBuilder()
+        .setColor("#FF69B4")
+        .setTitle("🎉 Upcoming Birthdays")
+        .setDescription(
+          upcoming.length
+            ? upcoming.map(u => `<@${u.id}> → **${u.birthday}**`).join("\n")
+            : "No upcoming birthdays found."
+        );
+
+      return interaction.reply({ embeds: [embed] });
     }
   }
 };
