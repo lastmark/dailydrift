@@ -1,9 +1,8 @@
-// commands/games.js - COMPLETE WITH FIXED BLACKJACK
+// commands/games.js - COMPLETE WORKING VERSION
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
-const Economy = require("../economy.js");
 
 // =========================
-// 🃏 BLACKJACK GAME CLASS (FIXED)
+// 🃏 BLACKJACK GAME CLASS
 // =========================
 class BlackjackGame {
   constructor(userId, bet, economy, redis) {
@@ -106,7 +105,6 @@ class BlackjackGame {
   stand() {
     if (this.gameOver) return false;
     
-    // Dealer draws until 17+
     while (this.dealerValue < 17) {
       this.dealerHand.push(this.drawCard());
       this.dealerValue = this.getHandValue(this.dealerHand);
@@ -153,7 +151,10 @@ class BlackjackGame {
     return winAmount;
   }
 
-  // FIXED: Removed async/await from this method
+  setBalance(balance) {
+    this.balance = balance;
+  }
+
   getEmbed() {
     const embed = new EmbedBuilder()
       .setColor(this.gameOver ? 
@@ -190,11 +191,6 @@ class BlackjackGame {
     }
 
     return embed;
-  }
-
-  // FIXED: Added method to set balance
-  setBalance(balance) {
-    this.balance = balance;
   }
 
   getResultTitle() {
@@ -355,7 +351,35 @@ module.exports = {
   async execute(interaction, client, redis) {
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
-    const economy = new Economy(redis);
+    
+    // =========================
+    // ECONOMY HELPER FUNCTIONS (inlined to avoid import issues)
+    // =========================
+    const getBalance = async (id) => Number(await redis.get(`eco:${id}:money`) || 0);
+    const addBalance = async (id, amount) => await redis.incrby(`eco:${id}:money`, amount);
+    const takeBalance = async (id, amount) => {
+      const current = await getBalance(id);
+      if (current < amount) return false;
+      await redis.decrby(`eco:${id}:money`, amount);
+      return true;
+    };
+    const getShield = async (id) => Number(await redis.get(`eco:${id}:shield`) || 0);
+    const addShield = async (id, amount = 1) => await redis.incrby(`eco:${id}:shield`, amount);
+    const getDoubleXP = async (id) => Number(await redis.get(`eco:${id}:double`) || 0);
+    const addDoubleXP = async (id, amount = 1) => await redis.incrby(`eco:${id}:double`, amount);
+    const getVIP = async (id) => await redis.get(`eco:${id}:vip`) === 'true';
+    const setVIP = async (id, status) => await redis.set(`eco:${id}:vip`, status.toString());
+    const getTotalEarned = async (id) => Number(await redis.get(`eco:${id}:total_earned`) || 0);
+    const addTotalEarned = async (id, amount) => await redis.incrby(`eco:${id}:total_earned`, amount);
+    const getTotalSpent = async (id) => Number(await redis.get(`eco:${id}:total_spent`) || 0);
+    const addTotalSpent = async (id, amount) => await redis.incrby(`eco:${id}:total_spent`, amount);
+
+    // Create economy object for Blackjack
+    const economy = {
+      getBalance, addBalance, takeBalance, getShield, addShield,
+      getDoubleXP, addDoubleXP, getVIP, setVIP,
+      getTotalEarned, addTotalEarned, getTotalSpent, addTotalSpent
+    };
 
     // =========================
     // 🎮 RPS
@@ -364,7 +388,7 @@ module.exports = {
       const choice = interaction.options.getString("choice");
       const bet = interaction.options.getInteger("bet");
 
-      const balance = await economy.getBalance(userId);
+      const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
           embeds: [
@@ -400,12 +424,12 @@ module.exports = {
       }
 
       if (result === "win") {
-        await economy.addBalance(userId, winAmount);
-        await economy.addTotalEarned(userId, winAmount);
+        await addBalance(userId, winAmount);
+        await addTotalEarned(userId, winAmount);
         await redis.incr(`games:${userId}:rps_wins`);
       } else if (result === "lose") {
-        await economy.takeBalance(userId, bet);
-        await economy.addTotalSpent(userId, bet);
+        await takeBalance(userId, bet);
+        await addTotalSpent(userId, bet);
         await redis.incr(`games:${userId}:rps_losses`);
       } else {
         await redis.incr(`games:${userId}:rps_ties`);
@@ -425,7 +449,7 @@ module.exports = {
           },
           {
             name: "💳 New Balance",
-            value: `\`${await economy.getBalance(userId)} coins\``,
+            value: `\`${await getBalance(userId)} coins\``,
             inline: true
           }
         )
@@ -442,7 +466,7 @@ module.exports = {
       const side = interaction.options.getString("side");
       const bet = interaction.options.getInteger("bet");
 
-      const balance = await economy.getBalance(userId);
+      const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
           embeds: [
@@ -459,12 +483,12 @@ module.exports = {
       const winAmount = won ? Math.floor(bet * 1.8) : 0;
 
       if (won) {
-        await economy.addBalance(userId, winAmount);
-        await economy.addTotalEarned(userId, winAmount);
+        await addBalance(userId, winAmount);
+        await addTotalEarned(userId, winAmount);
         await redis.incr(`games:${userId}:coinflip_wins`);
       } else {
-        await economy.takeBalance(userId, bet);
-        await economy.addTotalSpent(userId, bet);
+        await takeBalance(userId, bet);
+        await addTotalSpent(userId, bet);
         await redis.incr(`games:${userId}:coinflip_losses`);
       }
 
@@ -481,7 +505,7 @@ module.exports = {
           },
           {
             name: "💳 New Balance",
-            value: `\`${await economy.getBalance(userId)} coins\``,
+            value: `\`${await getBalance(userId)} coins\``,
             inline: true
           }
         )
@@ -497,7 +521,7 @@ module.exports = {
       const number = interaction.options.getInteger("number");
       const bet = interaction.options.getInteger("bet");
 
-      const balance = await economy.getBalance(userId);
+      const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
           embeds: [
@@ -524,12 +548,12 @@ module.exports = {
       const winAmount = won ? Math.floor(bet * multipliers[number]) : 0;
 
       if (won) {
-        await economy.addBalance(userId, winAmount);
-        await economy.addTotalEarned(userId, winAmount);
+        await addBalance(userId, winAmount);
+        await addTotalEarned(userId, winAmount);
         await redis.incr(`games:${userId}:dice_wins`);
       } else {
-        await economy.takeBalance(userId, bet);
-        await economy.addTotalSpent(userId, bet);
+        await takeBalance(userId, bet);
+        await addTotalSpent(userId, bet);
         await redis.incr(`games:${userId}:dice_losses`);
       }
 
@@ -546,7 +570,7 @@ module.exports = {
           },
           {
             name: "💳 New Balance",
-            value: `\`${await economy.getBalance(userId)} coins\``,
+            value: `\`${await getBalance(userId)} coins\``,
             inline: true
           }
         )
@@ -561,7 +585,7 @@ module.exports = {
     if (sub === "slots") {
       const bet = interaction.options.getInteger("bet");
 
-      const balance = await economy.getBalance(userId);
+      const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
           embeds: [
@@ -604,12 +628,12 @@ module.exports = {
       }
 
       if (winAmount > 0) {
-        await economy.addBalance(userId, winAmount);
-        await economy.addTotalEarned(userId, winAmount);
+        await addBalance(userId, winAmount);
+        await addTotalEarned(userId, winAmount);
         await redis.incr(`games:${userId}:slots_wins`);
       } else {
-        await economy.takeBalance(userId, bet);
-        await economy.addTotalSpent(userId, bet);
+        await takeBalance(userId, bet);
+        await addTotalSpent(userId, bet);
         await redis.incr(`games:${userId}:slots_losses`);
       }
 
@@ -626,7 +650,7 @@ module.exports = {
           },
           {
             name: "💳 New Balance",
-            value: `\`${await economy.getBalance(userId)} coins\``,
+            value: `\`${await getBalance(userId)} coins\``,
             inline: true
           }
         )
@@ -636,12 +660,12 @@ module.exports = {
     }
 
     // =========================
-    // 🃏 BLACKJACK (FIXED)
+    // 🃏 BLACKJACK
     // =========================
     if (sub === "blackjack") {
       const bet = interaction.options.getInteger("bet");
       
-      const balance = await economy.getBalance(userId);
+      const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
           embeds: [
@@ -653,11 +677,9 @@ module.exports = {
         });
       }
 
-      // Create game instance
       const game = new BlackjackGame(userId, bet, economy, redis);
-      game.setBalance(balance); // Set the balance for display
+      game.setBalance(balance);
       
-      // Send initial game message
       const embed = game.getEmbed();
       const buttons = game.getButtons();
       
@@ -667,7 +689,6 @@ module.exports = {
         fetchReply: true
       });
 
-      // Create collector for button interactions
       const collector = reply.createMessageComponentCollector({
         filter: i => i.user.id === userId,
         time: 60000
@@ -680,7 +701,7 @@ module.exports = {
           
           if (game.gameOver) {
             await game.processResult();
-            const newBalance = await economy.getBalance(userId);
+            const newBalance = await getBalance(userId);
             game.setBalance(newBalance);
             collector.stop();
           }
@@ -693,7 +714,7 @@ module.exports = {
           await i.deferUpdate();
           game.stand();
           await game.processResult();
-          const newBalance = await economy.getBalance(userId);
+          const newBalance = await getBalance(userId);
           game.setBalance(newBalance);
           collector.stop();
           
@@ -705,9 +726,8 @@ module.exports = {
           await i.deferUpdate();
           collector.stop();
           
-          // Start new game with same bet
           const newGame = new BlackjackGame(userId, game.bet, economy, redis);
-          const newBalance = await economy.getBalance(userId);
+          const newBalance = await getBalance(userId);
           newGame.setBalance(newBalance);
           const newEmbed = newGame.getEmbed();
           const newButtons = newGame.getButtons();
@@ -723,10 +743,9 @@ module.exports = {
 
       collector.on('end', async (collected, reason) => {
         if (reason === 'time' && !game.gameOver) {
-          // Auto-stand if timer runs out
           game.stand();
           await game.processResult();
-          const newBalance = await economy.getBalance(userId);
+          const newBalance = await getBalance(userId);
           game.setBalance(newBalance);
           
           const newEmbed = game.getEmbed();
@@ -759,8 +778,8 @@ module.exports = {
       }
 
       const bonus = 100 + Math.floor(Math.random() * 50);
-      await economy.addBalance(userId, bonus);
-      await economy.addTotalEarned(userId, bonus);
+      await addBalance(userId, bonus);
+      await addTotalEarned(userId, bonus);
       await redis.set(`games:${userId}:daily`, now.toString());
 
       const embed = new EmbedBuilder()
@@ -769,7 +788,7 @@ module.exports = {
         .setDescription(`You received **${bonus}** coins!`)
         .addFields({
           name: "💳 New Balance",
-          value: `\`${await economy.getBalance(userId)} coins\``,
+          value: `\`${await getBalance(userId)} coins\``,
           inline: true
         })
         .setFooter({ text: "Come back tomorrow for more!" })
@@ -785,21 +804,21 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor("#FF69B4")
         .setTitle("🛒 Game Shop")
-        .setDescription(`💰 Your balance: **${await economy.getBalance(userId)}** coins`)
+        .setDescription(`💰 Your balance: **${await getBalance(userId)}** coins`)
         .addFields(
           {
             name: "🛡️ Shield",
-            value: `Protects your counting streak\nPrice: **200** coins\nOwned: **${await economy.getShield(userId)}**`,
+            value: `Protects your counting streak\nPrice: **200** coins\nOwned: **${await getShield(userId)}**`,
             inline: true
           },
           {
             name: "⚡ Double XP",
-            value: `Double coins for 5 counts\nPrice: **500** coins\nActive: **${await economy.getDoubleXP(userId) > 0 ? '✅' : '❌'}**`,
+            value: `Double coins for 5 counts\nPrice: **500** coins\nActive: **${await getDoubleXP(userId) > 0 ? '✅' : '❌'}**`,
             inline: true
           },
           {
             name: "👑 VIP Access",
-            value: `Exclusive profile features\nPrice: **2000** coins\nStatus: **${await economy.getVIP(userId) ? '✅ Active' : '❌ Inactive'}**`,
+            value: `Exclusive profile features\nPrice: **2000** coins\nStatus: **${await getVIP(userId) ? '✅ Active' : '❌ Inactive'}**`,
             inline: true
           }
         )
@@ -821,7 +840,7 @@ module.exports = {
       };
 
       const price = prices[item];
-      const balance = await economy.getBalance(userId);
+      const balance = await getBalance(userId);
       
       if (balance < price) {
         return interaction.reply({
@@ -834,15 +853,15 @@ module.exports = {
         });
       }
 
-      await economy.takeBalance(userId, price);
-      await economy.addTotalSpent(userId, price);
+      await takeBalance(userId, price);
+      await addTotalSpent(userId, price);
 
       if (item === "shield") {
-        await economy.addShield(userId);
+        await addShield(userId);
       } else if (item === "double") {
-        await economy.addDoubleXP(userId, 5);
+        await addDoubleXP(userId, 5);
       } else if (item === "vip") {
-        await economy.setVIP(userId, true);
+        await setVIP(userId, true);
       }
 
       const itemNames = {
@@ -857,7 +876,7 @@ module.exports = {
         .setDescription(`You bought **${itemNames[item]}** for **${price}** coins!`)
         .addFields({
           name: "💰 New Balance",
-          value: `\`${await economy.getBalance(userId)} coins\``,
+          value: `\`${await getBalance(userId)} coins\``,
           inline: true
         })
         .setTimestamp();
