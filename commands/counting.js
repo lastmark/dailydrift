@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
   category: "Games",
@@ -6,6 +6,23 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("counting")
     .setDescription("📊 Advanced counting system with stats & shop")
+    .addSubcommand(s =>
+      s.setName("setup")
+        .setDescription("Setup the counting channel")
+        .addChannelOption(o =>
+          o.setName("channel")
+            .setDescription("Select an existing channel for counting")
+            .addChannelTypes(ChannelType.GuildText)
+        )
+        .addBooleanOption(o =>
+          o.setName("auto_create")
+            .setDescription("Auto-create a counting channel")
+        )
+        .addBooleanOption(o =>
+          o.setName("clear_on_reset")
+            .setDescription("Clear channel messages on reset?")
+        )
+    )
     .addSubcommand(s =>
       s.setName("stats")
         .setDescription("View your full performance stats")
@@ -42,29 +59,142 @@ module.exports = {
     const guildId = interaction.guild.id;
     const userId = interaction.user.id;
     const sub = interaction.options.getSubcommand();
-    const targetUser = interaction.options.getUser("target") || interaction.user;
-    const targetId = targetUser.id;
+
+    // =========================
+    // ⚙️ SETUP
+    // =========================
+    if (sub === "setup") {
+      // Check permissions
+      const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
+      if (!isAdmin) {
+        return interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#ED4245")
+              .setDescription("❌ You need **Administrator** permission to setup counting.")
+          ]
+        });
+      }
+
+      const channel = interaction.options.getChannel("channel");
+      const autoCreate = interaction.options.getBoolean("auto_create") || false;
+      const clearOnReset = interaction.options.getBoolean("clear_on_reset") || false;
+
+      // Validate input
+      if (!channel && !autoCreate) {
+        return interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#ED4245")
+              .setDescription("❌ Please select a channel or enable auto-create.")
+          ]
+        });
+      }
+
+      let targetChannel = channel;
+
+      // Auto-create channel
+      if (!targetChannel && autoCreate) {
+        // Check bot permissions
+        const botMember = interaction.guild.members.me;
+        if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
+          return interaction.editReply({
+            embeds: [
+              new EmbedBuilder()
+                .setColor("#ED4245")
+                .setDescription("❌ I need **Manage Channels** permission to create a channel.")
+            ]
+          });
+        }
+
+        try {
+          targetChannel = await interaction.guild.channels.create({
+            name: "🔢-counting",
+            type: ChannelType.GuildText,
+            topic: "📊 Counting Game Channel - Keep the count going!",
+            permissionOverwrites: [
+              {
+                id: interaction.guild.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
+                deny: [PermissionFlagsBits.CreateInstantInvite]
+              }
+            ]
+          });
+
+          // Send welcome message
+          await targetChannel.send({
+            embeds: [
+              new EmbedBuilder()
+                .setColor("#5865F2")
+                .setTitle("🔢 Counting Game Started!")
+                .setDescription("Welcome to the counting game! Start counting from **1**.")
+                .addFields(
+                  { name: "📝 How to Play", value: "Type the next number in the sequence.\nFirst number should be **1**.", inline: true },
+                  { name: "⚠️ Rules", value: "• No double counting\n• Type the correct number\n• Have fun!", inline: true },
+                  { name: "💡 Tips", value: "You can also type math expressions!\nExample: `5+5` = 10", inline: true }
+                )
+                .setFooter({ text: "Good luck and have fun!" })
+                .setTimestamp()
+            ]
+          });
+        } catch (error) {
+          console.error("Failed to create counting channel:", error);
+          return interaction.editReply({
+            embeds: [
+              new EmbedBuilder()
+                .setColor("#ED4245")
+                .setDescription("❌ Failed to create counting channel. Check my permissions.")
+            ]
+          });
+        }
+      }
+
+      // Save setup data
+      await redis.set(`counting:${guildId}:channel`, targetChannel.id);
+      await redis.set(`counting:${guildId}:clear_on_reset`, clearOnReset ? "true" : "false");
+
+      // Set initial count if not exists
+      const countKey = `count:${guildId}`;
+      const existingCount = await redis.get(countKey);
+      if (!existingCount) {
+        await redis.set(countKey, 0);
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor("#57F287")
+        .setTitle("✅ Counting System Setup Complete!")
+        .setDescription(`Counting channel set to ${targetChannel}`)
+        .addFields(
+          { name: "📢 Channel", value: `${targetChannel}`, inline: true },
+          { name: "🔄 Clear on Reset", value: clearOnReset ? "✅ Yes" : "❌ No", inline: true },
+          { name: "🔢 Current Count", value: `\`${await redis.get(countKey) || 0}\``, inline: true }
+        )
+        .setFooter({ text: "Users can now start counting!" })
+        .setTimestamp();
+
+      return interaction.editReply({ embeds: [embed] });
+    }
 
     // =========================
     // 📊 STATS
     // =========================
     if (sub === "stats") {
+      const targetUser = interaction.options.getUser("target") || interaction.user;
+      const targetId = targetUser.id;
+
       const correct = Number(await redis.zscore(`counting:${guildId}:scores`, targetId) || 0);
       const mistakes = Number(await redis.zscore(`counting:${guildId}:sabotages`, targetId) || 0);
       const streak = Number(await redis.get(`counting:${guildId}:${targetId}:streak`) || 0);
       const record = Number(await redis.get(`counting:${guildId}:${targetId}:highscore`) || 0);
       const shield = Number(await redis.get(`eco:${guildId}:${targetId}:shield`) || 0);
       
-      // Calculate success rate
       const total = correct + mistakes;
       const successRate = total > 0 ? Math.round((correct / total) * 100) : 0;
       
-      // Calculate level based on correct answers
       const level = Math.floor(correct / 10) + 1;
       const nextLevel = level * 10;
       const progress = correct % 10;
       
-      // Get rank
       const rank = await redis.zrevrank(`counting:${guildId}:scores`, targetId);
       const rankDisplay = rank !== null ? `#${rank + 1}` : "Unranked";
 
@@ -93,11 +223,10 @@ module.exports = {
           }
         )
         .setFooter({ 
-          text: `Total attempts: ${total} • ${targetUser.id === userId ? "Your stats" : "Viewing stats"}`
+          text: `Total attempts: ${total} • ${targetUser.id === interaction.user.id ? "Your stats" : "Viewing stats"}`
         })
         .setTimestamp();
 
-      // Add progress bar
       if (progress > 0) {
         const barLength = 20;
         const filled = Math.floor((progress / nextLevel) * barLength);
@@ -120,7 +249,6 @@ module.exports = {
         title = "🏆 Most Correct Counts";
         description = "Top players with the most correct counts";
       } else if (type === "streak") {
-        // Get all user keys for streaks
         const keys = await redis.keys(`counting:${guildId}:*:highscore`);
         const streakData = [];
         for (const key of keys) {
@@ -133,8 +261,6 @@ module.exports = {
         title = "🔥 Best Streaks";
         description = "Players with the longest counting streaks";
       } else {
-        // Most improved (gained the most today)
-        const today = new Date().toISOString().slice(0, 10);
         const keys = await redis.keys(`counting:${guildId}:*:daily`);
         const improvedData = [];
         for (const key of keys) {
@@ -181,7 +307,6 @@ module.exports = {
         .setFooter({ text: description || "Counting leaderboard" })
         .setTimestamp();
 
-      // Add buttons for switching leaderboard types
       const row = new ActionRowBuilder()
         .addComponents(
           new ButtonBuilder()
@@ -244,7 +369,6 @@ module.exports = {
         .setFooter({ text: "Use /counting buy <item> to purchase" })
         .setTimestamp();
 
-      // Add buttons for quick purchase
       const row = new ActionRowBuilder()
         .addComponents(
           new ButtonBuilder()
@@ -271,7 +395,7 @@ module.exports = {
     // 🔄 RESET (Admin only)
     // =========================
     if (sub === "reset") {
-      const isAdmin = interaction.memberPermissions?.has("Administrator");
+      const isAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
       if (!isAdmin) {
         return interaction.editReply({
           embeds: [
@@ -282,11 +406,9 @@ module.exports = {
         });
       }
 
-      // Check if they want to reset all or just a user
       const target = interaction.options.getUser("target");
       
       if (target) {
-        // Reset single user
         await redis.zrem(`counting:${guildId}:scores`, target.id);
         await redis.zrem(`counting:${guildId}:sabotages`, target.id);
         await redis.del(`counting:${guildId}:${target.id}:streak`);
@@ -301,14 +423,12 @@ module.exports = {
         });
       }
 
-      // Reset all (with confirmation)
       const embed = new EmbedBuilder()
         .setColor("#ED4245")
         .setTitle("⚠️ Reset All Stats")
         .setDescription("This will reset **ALL** counting stats in this server. Are you sure?")
         .setFooter({ text: "React with ✅ to confirm" });
 
-      // Send confirmation message
       const msg = await interaction.editReply({
         embeds: [embed],
         fetchReply: true
@@ -327,11 +447,13 @@ module.exports = {
         });
         
         if (collected.size > 0) {
-          // Get all counting keys for this guild
           const keys = await redis.keys(`counting:${guildId}:*`);
           for (const key of keys) {
             await redis.del(key);
           }
+          
+          // Reset count
+          await redis.set(`count:${guildId}`, 0);
           
           return interaction.editReply({
             embeds: [
@@ -343,7 +465,6 @@ module.exports = {
           });
         }
       } catch {
-        // Timeout
         return interaction.editReply({
           embeds: [
             new EmbedBuilder()
