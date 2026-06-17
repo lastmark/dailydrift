@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ChannelType, MessageFlags } = require("discord.js");
 
 module.exports = {
+  category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("setleave")
     .setDescription("Configure or update the leave channel for this server.")
