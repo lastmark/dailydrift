@@ -1,4 +1,4 @@
-// commands/games.js – Blackjack fixed (deduct bet upfront)
+// commands/games.js – FULL WITH UPDATED SLOTS (exact probabilities)
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 
 // =========================
@@ -104,21 +104,18 @@ class BlackjackGame {
     return true;
   }
 
-  // ─── FIXED: bet is already deducted, so we add winnings only ───
   async processResult() {
     let winAmount = 0;
-    // Blackjack and normal win: profit = bet (since bet already deducted)
     if (this.result === 'blackjack' || this.result === 'win') {
-      winAmount = this.bet * 2; // returned bet + profit
+      winAmount = this.bet * 2;
       await this.economy.addBalance(this.userId, winAmount);
-      await this.economy.addTotalEarned(this.userId, this.bet); // profit = bet
+      await this.economy.addTotalEarned(this.userId, this.bet);
       await this.redis.incr(`games:${this.userId}:blackjack_wins`);
     } else if (this.result === 'push') {
-      winAmount = this.bet; // return the deducted bet
+      winAmount = this.bet;
       await this.economy.addBalance(this.userId, winAmount);
       await this.redis.incr(`games:${this.userId}:blackjack_ties`);
     } else {
-      // lose or bust – bet already deducted, no addition
       winAmount = 0;
       await this.economy.addTotalSpent(this.userId, this.bet);
       await this.redis.incr(`games:${this.userId}:blackjack_losses`);
@@ -481,7 +478,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎰 SLOTS (unchanged)
+    // 🎰 SLOTS – exact probabilities (loss 35%, tie 15%, 2x 35%, 3x 10%, 5x 5%)
     // =========================
     if (sub === "slots") {
       const bet = interaction.options.getInteger("bet");
@@ -500,46 +497,81 @@ module.exports = {
         });
       }
 
-      const pool = [
-        '🍉','🍉','🍉','🍉','🍉',
-        '🍇','🍇','🍇','🍇',
-        '🎰','🎰','🎰'
+      // Weighted outcomes: [outcome, multiplier, symbol, weight]
+      const outcomes = [
+        { outcome: 'lose', multiplier: 0, symbol: null, weight: 35 },
+        { outcome: 'tie', multiplier: 1, symbol: '🫐', weight: 15 },
+        { outcome: '2x', multiplier: 2, symbol: '🍇', weight: 35 },
+        { outcome: '3x', multiplier: 3, symbol: '🥥', weight: 10 },
+        { outcome: '5x', multiplier: 5, symbol: '🎰', weight: 5 }
       ];
-      const getRandom = () => pool[Math.floor(Math.random() * pool.length)];
-      const result = [getRandom(), getRandom(), getRandom()];
 
-      let winAmount = 0;
-      let message = "";
-      let multiplier = 0;
-
-      if (result[0] === result[1] && result[1] === result[2]) {
-        const symbol = result[0];
-        const multipliers = { '🍉': 4, '🍇': 8, '🎰': 18 };
-        multiplier = multipliers[symbol] || 0;
-        winAmount = bet * multiplier;
-        message = `🎉 **${symbol} ${symbol} ${symbol}** – ${multiplier}x win!`;
-        await redis.incr(`games:${userId}:slots_wins`);
-        if (symbol === '🎰') await redis.incr(`games:${userId}:slots_jackpots`);
-      } else {
-        winAmount = 0;
-        message = "😢 No match – you lose!";
-        await redis.incr(`games:${userId}:slots_losses`);
+      // Select outcome based on weights
+      const totalWeight = outcomes.reduce((sum, o) => sum + o.weight, 0);
+      let rand = Math.random() * totalWeight;
+      let selected = outcomes[0];
+      for (const o of outcomes) {
+        rand -= o.weight;
+        if (rand <= 0) {
+          selected = o;
+          break;
+        }
       }
 
-      if (winAmount > 0) {
-        await addBalance(userId, winAmount);
-        await addTotalEarned(userId, winAmount);
+      const symbol = selected.symbol;
+      const multiplier = selected.multiplier;
+      let winAmount = 0;
+      let message = "";
+
+      // Build result display
+      let resultDisplay = [];
+      if (symbol) {
+        // Win or tie – show three of the same
+        resultDisplay = [symbol, symbol, symbol];
       } else {
+        // Loss – show three random symbols, ensuring not all same
+        const allSymbols = ['🫐', '🍇', '🥥', '🎰'];
+        let attempts = 0;
+        let r1, r2, r3;
+        while (attempts < 20) {
+          r1 = allSymbols[Math.floor(Math.random() * allSymbols.length)];
+          r2 = allSymbols[Math.floor(Math.random() * allSymbols.length)];
+          r3 = allSymbols[Math.floor(Math.random() * allSymbols.length)];
+          if (!(r1 === r2 && r2 === r3)) break;
+          attempts++;
+        }
+        if (attempts === 20) { r1 = '🫐'; r2 = '🍇'; r3 = '🥥'; } // fallback
+        resultDisplay = [r1, r2, r3];
+      }
+
+      // Process outcome
+      if (selected.outcome === 'lose') {
+        winAmount = 0;
+        message = "😢 No match – you lose!";
         await takeBalance(userId, bet);
         await addTotalSpent(userId, bet);
+        await redis.incr(`games:${userId}:slots_losses`);
+      } else if (selected.outcome === 'tie') {
+        winAmount = bet; // return bet
+        message = `🫐 **${symbol} ${symbol} ${symbol}** – Tie! Bet returned.`;
+        await addBalance(userId, winAmount);
+        await redis.incr(`games:${userId}:slots_ties`);
+      } else {
+        // Win
+        winAmount = bet * multiplier;
+        message = `🎉 **${symbol} ${symbol} ${symbol}** – ${multiplier}x win!`;
+        await addBalance(userId, winAmount);
+        await addTotalEarned(userId, winAmount);
+        await redis.incr(`games:${userId}:slots_wins`);
+        if (multiplier === 5) await redis.incr(`games:${userId}:slots_jackpots`);
       }
 
       const embed = new EmbedBuilder()
-        .setColor(winAmount > 0 ? "#57F287" : "#ED4245")
+        .setColor(selected.outcome === 'lose' ? "#ED4245" : (selected.outcome === 'tie' ? "#F1C40F" : "#57F287"))
         .setTitle("🎰 Slot Machine")
-        .setDescription(`${result.join(" | ")}\n\n${message}`)
+        .setDescription(`${resultDisplay.join(" | ")}\n\n${message}`)
         .addFields(
-          { name: "💰 Result", value: winAmount > 0 ? `You won **${winAmount}** coins!` : `You lost **${bet}** coins!`, inline: false },
+          { name: "💰 Result", value: winAmount > bet ? `You won **${winAmount}** coins!` : (winAmount === bet ? "Tie – bet returned." : `You lost **${bet}** coins!`), inline: false },
           { name: "💳 New Balance", value: `${await getBalance(userId)} coins`, inline: true }
         )
         .setTimestamp();
@@ -548,7 +580,7 @@ module.exports = {
     }
 
     // =========================
-    // 🃏 BLACKJACK – FIXED (deduct bet upfront)
+    // 🃏 BLACKJACK – fixed (deduct bet upfront)
     // =========================
     if (sub === "blackjack") {
       const bet = interaction.options.getInteger("bet");
@@ -559,7 +591,6 @@ module.exports = {
         });
       }
       
-      // ─── DEDUCT BET UPFRONT ───
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
@@ -570,7 +601,7 @@ module.exports = {
       await takeBalance(userId, bet);
 
       const game = new BlackjackGame(userId, bet, economy, redis);
-      game.setBalance(balance - bet); // update balance after deduction
+      game.setBalance(balance - bet);
 
       if (game.gameOver) {
         await game.processResult();
