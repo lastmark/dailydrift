@@ -1,8 +1,8 @@
-// commands/games.js – FULL WITH UPDATED SLOTS (exact probabilities)
+// commands/games.js – FULL WITH SLOTS FIXED (bet deducted upfront)
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 
 // =========================
-// 🃏 BLACKJACK GAME CLASS
+// 🃏 BLACKJACK GAME CLASS (unchanged)
 // =========================
 class BlackjackGame {
   constructor(userId, bet, economy, redis) {
@@ -478,7 +478,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎰 SLOTS – exact probabilities (loss 35%, tie 15%, 2x 35%, 3x 10%, 5x 5%)
+    // 🎰 SLOTS – FIXED (bet deducted upfront)
     // =========================
     if (sub === "slots") {
       const bet = interaction.options.getInteger("bet");
@@ -497,13 +497,17 @@ module.exports = {
         });
       }
 
+      // ─── DEDUCT BET UPFRONT ───
+      await takeBalance(userId, bet);
+
       // Weighted outcomes: [outcome, multiplier, symbol, weight]
+      // Probabilities: lose 70%, tie 15%, 2x 10%, 3x 4%, 5x 1%
       const outcomes = [
-        { outcome: 'lose', multiplier: 0, symbol: null, weight: 35 },
+        { outcome: 'lose', multiplier: 0, symbol: null, weight: 70 },
         { outcome: 'tie', multiplier: 1, symbol: '🫐', weight: 15 },
-        { outcome: '2x', multiplier: 2, symbol: '🍇', weight: 35 },
-        { outcome: '3x', multiplier: 3, symbol: '🥥', weight: 10 },
-        { outcome: '5x', multiplier: 5, symbol: '🎰', weight: 5 }
+        { outcome: '2x', multiplier: 2, symbol: '🍇', weight: 10 },
+        { outcome: '3x', multiplier: 3, symbol: '🥥', weight: 4 },
+        { outcome: '5x', multiplier: 5, symbol: '🎰', weight: 1 }
       ];
 
       // Select outcome based on weights
@@ -544,35 +548,35 @@ module.exports = {
         resultDisplay = [r1, r2, r3];
       }
 
-      // Process outcome
+      // Process outcome (balance already deducted)
       if (selected.outcome === 'lose') {
         winAmount = 0;
         message = "😢 No match – you lose!";
-        await takeBalance(userId, bet);
         await addTotalSpent(userId, bet);
         await redis.incr(`games:${userId}:slots_losses`);
       } else if (selected.outcome === 'tie') {
-        winAmount = bet; // return bet
-        message = `🫐 **${symbol} ${symbol} ${symbol}** – Tie! Bet returned.`;
+        winAmount = bet; // return the bet (net zero)
         await addBalance(userId, winAmount);
+        message = `🫐 **${symbol} ${symbol} ${symbol}** – Tie! Bet returned.`;
         await redis.incr(`games:${userId}:slots_ties`);
       } else {
-        // Win
+        // Win – payout is bet * multiplier (includes the bet)
         winAmount = bet * multiplier;
-        message = `🎉 **${symbol} ${symbol} ${symbol}** – ${multiplier}x win!`;
         await addBalance(userId, winAmount);
-        await addTotalEarned(userId, winAmount);
+        await addTotalEarned(userId, winAmount - bet); // profit
+        message = `🎉 **${symbol} ${symbol} ${symbol}** – ${multiplier}x win!`;
         await redis.incr(`games:${userId}:slots_wins`);
         if (multiplier === 5) await redis.incr(`games:${userId}:slots_jackpots`);
       }
 
+      const newBalance = await getBalance(userId);
       const embed = new EmbedBuilder()
         .setColor(selected.outcome === 'lose' ? "#ED4245" : (selected.outcome === 'tie' ? "#F1C40F" : "#57F287"))
         .setTitle("🎰 Slot Machine")
         .setDescription(`${resultDisplay.join(" | ")}\n\n${message}`)
         .addFields(
           { name: "💰 Result", value: winAmount > bet ? `You won **${winAmount}** coins!` : (winAmount === bet ? "Tie – bet returned." : `You lost **${bet}** coins!`), inline: false },
-          { name: "💳 New Balance", value: `${await getBalance(userId)} coins`, inline: true }
+          { name: "💳 New Balance", value: `${newBalance} coins`, inline: true }
         )
         .setTimestamp();
 
