@@ -1,5 +1,7 @@
-// commands/games.js – FULL WITH SLOTS FIXED (bet deducted upfront)
+// commands/games.js – FULL WITH SPINNING SLOTS
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // =========================
 // 🃏 BLACKJACK GAME CLASS (unchanged)
@@ -238,7 +240,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("slots")
-        .setDescription("Play the slot machine")
+        .setDescription("🎰 Spin the slot machine (with animation!)")
         .addIntegerOption(opt =>
           opt.setName("bet")
             .setDescription("Amount to bet (min 10, max 300,000)")
@@ -478,7 +480,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎰 SLOTS – FIXED (bet deducted upfront)
+    // 🎰 SLOTS – WITH SPINNING ANIMATION
     // =========================
     if (sub === "slots") {
       const bet = interaction.options.getInteger("bet");
@@ -500,8 +502,7 @@ module.exports = {
       // ─── DEDUCT BET UPFRONT ───
       await takeBalance(userId, bet);
 
-      // Weighted outcomes: [outcome, multiplier, symbol, weight]
-      // Probabilities: lose 70%, tie 15%, 2x 10%, 3x 4%, 5x 1%
+      // Weighted outcomes: lose 70%, tie 15%, 2x 10%, 3x 4%, 5x 1%
       const outcomes = [
         { outcome: 'lose', multiplier: 0, symbol: null, weight: 70 },
         { outcome: 'tie', multiplier: 1, symbol: '🫐', weight: 15 },
@@ -526,61 +527,86 @@ module.exports = {
       const multiplier = selected.multiplier;
       let winAmount = 0;
       let message = "";
+      let color = "#2B2D31";
 
-      // Build result display
-      let resultDisplay = [];
+      // Build final result display
+      let finalDisplay = [];
       if (symbol) {
-        // Win or tie – show three of the same
-        resultDisplay = [symbol, symbol, symbol];
+        finalDisplay = [symbol, symbol, symbol];
       } else {
-        // Loss – show three random symbols, ensuring not all same
+        // Loss – show three different symbols
         const allSymbols = ['🫐', '🍇', '🥥', '🎰'];
-        let attempts = 0;
         let r1, r2, r3;
-        while (attempts < 20) {
+        do {
           r1 = allSymbols[Math.floor(Math.random() * allSymbols.length)];
           r2 = allSymbols[Math.floor(Math.random() * allSymbols.length)];
           r3 = allSymbols[Math.floor(Math.random() * allSymbols.length)];
-          if (!(r1 === r2 && r2 === r3)) break;
-          attempts++;
-        }
-        if (attempts === 20) { r1 = '🫐'; r2 = '🍇'; r3 = '🥥'; } // fallback
-        resultDisplay = [r1, r2, r3];
+        } while (r1 === r2 && r2 === r3);
+        finalDisplay = [r1, r2, r3];
       }
 
       // Process outcome (balance already deducted)
       if (selected.outcome === 'lose') {
         winAmount = 0;
         message = "😢 No match – you lose!";
+        color = "#ED4245";
         await addTotalSpent(userId, bet);
         await redis.incr(`games:${userId}:slots_losses`);
       } else if (selected.outcome === 'tie') {
-        winAmount = bet; // return the bet (net zero)
+        winAmount = bet;
         await addBalance(userId, winAmount);
         message = `🫐 **${symbol} ${symbol} ${symbol}** – Tie! Bet returned.`;
+        color = "#F1C40F";
         await redis.incr(`games:${userId}:slots_ties`);
       } else {
-        // Win – payout is bet * multiplier (includes the bet)
         winAmount = bet * multiplier;
         await addBalance(userId, winAmount);
-        await addTotalEarned(userId, winAmount - bet); // profit
+        await addTotalEarned(userId, winAmount - bet);
         message = `🎉 **${symbol} ${symbol} ${symbol}** – ${multiplier}x win!`;
+        color = "#57F287";
         await redis.incr(`games:${userId}:slots_wins`);
         if (multiplier === 5) await redis.incr(`games:${userId}:slots_jackpots`);
       }
 
-      const newBalance = await getBalance(userId);
-      const embed = new EmbedBuilder()
-        .setColor(selected.outcome === 'lose' ? "#ED4245" : (selected.outcome === 'tie' ? "#F1C40F" : "#57F287"))
+      // ---- Build the spinning embed function ----
+      const buildSpinEmbed = (display) => {
+        return new EmbedBuilder()
+          .setColor("#2B2D31")
+          .setTitle("🎰 Slot Machine")
+          .setDescription(`${display.join(" | ")}`)
+          .setFooter({ text: `Bet: ${bet} coins | Spinning...` })
+          .setTimestamp();
+      };
+
+      // ---- Start spinning ----
+      await interaction.deferReply();
+
+      // Initial random spin
+      const allSymbols = ['🫐', '🍇', '🥥', '🎰'];
+      const randomSymbol = () => allSymbols[Math.floor(Math.random() * allSymbols.length)];
+      let spinDisplay = [randomSymbol(), randomSymbol(), randomSymbol()];
+      await interaction.editReply({ embeds: [buildSpinEmbed(spinDisplay)] });
+
+      // Spin loop: 8 changes, 300ms each
+      for (let i = 0; i < 8; i++) {
+        spinDisplay = [randomSymbol(), randomSymbol(), randomSymbol()];
+        await interaction.editReply({ embeds: [buildSpinEmbed(spinDisplay)] });
+        await sleep(300);
+      }
+
+      // ---- Final result ----
+      const finalEmbed = new EmbedBuilder()
+        .setColor(color)
         .setTitle("🎰 Slot Machine")
-        .setDescription(`${resultDisplay.join(" | ")}\n\n${message}`)
+        .setDescription(`${finalDisplay.join(" | ")}\n\n${message}`)
         .addFields(
           { name: "💰 Result", value: winAmount > bet ? `You won **${winAmount}** coins!` : (winAmount === bet ? "Tie – bet returned." : `You lost **${bet}** coins!`), inline: false },
-          { name: "💳 New Balance", value: `${newBalance} coins`, inline: true }
+          { name: "💳 New Balance", value: `${await getBalance(userId)} coins`, inline: true }
         )
+        .setFooter({ text: `Bet: ${bet} coins` })
         .setTimestamp();
 
-      return interaction.reply({ embeds: [embed] });
+      await interaction.editReply({ embeds: [finalEmbed] });
     }
 
     // =========================
