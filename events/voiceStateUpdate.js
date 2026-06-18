@@ -1,4 +1,4 @@
-// events/voiceStateUpdate.js
+// events/voiceStateUpdate.js – instant delete + disconnect on limit
 const { Events, ChannelType, PermissionFlagsBits } = require("discord.js");
 
 module.exports = {
@@ -29,17 +29,19 @@ module.exports = {
 
       // Limit check (standard = 3, premium = unlimited)
       if (!isPremium && userChannelCount >= 3) {
+        // Disconnect the user from voice
         try {
+          await newState.member.voice.disconnect();
           await newState.member.send("❌ You've reached the **3-channel limit** for standard servers. Upgrade to Premium for unlimited VIP channels.");
         } catch {}
-        return; // Do not create a channel
+        return;
       }
 
       // ---- Create a new 2-person voice channel ----
       try {
         const bot = guild.members.me;
         if (!bot.permissions.has(PermissionFlagsBits.ManageChannels)) {
-          console.error("Bot lacks Manage Channels permission.");
+          console.error("[VIP] Bot lacks Manage Channels permission.");
           return;
         }
 
@@ -61,7 +63,6 @@ module.exports = {
           ]
         });
 
-        // Save to Redis
         await redis.sadd(`vip:${guildId}:createdChannels`, channel.id);
         await redis.hset(`vip:${guildId}:${channel.id}`, {
           owner: userId,
@@ -75,37 +76,29 @@ module.exports = {
           .catch(() => {});
 
       } catch (error) {
-        console.error("Error creating VIP channel:", error);
+        console.error("[VIP] Error creating VIP channel:", error);
       }
     }
 
-    // ---- USER LEFT A VIP CHANNEL (check if empty) ----
+    // ---- USER LEFT A VIP CHANNEL – delete instantly if empty ----
     if (oldState.channelId && oldState.channelId !== hubId) {
       const channelId = oldState.channelId;
       const isVip = await redis.sismember(`vip:${guildId}:createdChannels`, channelId);
       if (!isVip) return;
 
-      const channel = oldState.guild.channels.cache.get(channelId);
-      if (!channel) {
-        // Channel already deleted – clean up Redis
-        await redis.srem(`vip:${guildId}:createdChannels`, channelId);
-        await redis.del(`vip:${guildId}:${channelId}`);
-        return;
-      }
-
-      // Check if empty (after delay to allow reconnects)
+      // Wait 1 second to let Discord update the member list
       setTimeout(async () => {
-        const freshChannel = oldState.guild.channels.cache.get(channelId);
-        if (freshChannel && freshChannel.members.size === 0) {
+        const channel = oldState.guild.channels.cache.get(channelId);
+        if (channel && channel.members.size === 0) {
           try {
-            await freshChannel.delete("Auto-deleted – empty VIP channel");
+            await channel.delete("Auto-deleted – empty VIP channel");
             await redis.srem(`vip:${guildId}:createdChannels`, channelId);
             await redis.del(`vip:${guildId}:${channelId}`);
           } catch (err) {
-            console.error("Failed to auto-delete VIP channel:", err);
+            console.error("[VIP] Failed to auto-delete VIP channel:", err);
           }
         }
-      }, 10000); // 10-second delay
+      }, 1000); // 1-second delay
     }
   }
 };
