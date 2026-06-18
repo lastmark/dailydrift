@@ -1,48 +1,44 @@
-// commands/rename-vip.js
-const { SlashCommandBuilder, ChannelType, MessageFlags } = require("discord.js");
+// commands/rename-vip.js – rename the VIP Hub (admin only)
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
-  category: "Server",
+  category: "Server Management",
 
   data: new SlashCommandBuilder()
     .setName("rename-vip")
-    .setDescription("Rename your VIP voice channel")
+    .setDescription("✏️ Rename the VIP Hub channel (admin only)")
     .addStringOption(opt =>
       opt.setName("name")
-        .setDescription("New name (max 32 characters)")
+        .setDescription("New name for the VIP Hub (max 32 characters)")
         .setRequired(true)
         .setMaxLength(32)
     ),
 
   async execute(interaction, client, redis) {
-    const userId = interaction.user.id;
-    const member = interaction.member;
-    const voiceChannel = member.voice.channel;
-
-    if (!voiceChannel) {
+    // Admin only
+    if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
       return interaction.reply({
-        content: "❌ You need to be in a voice channel to rename it.",
+        content: "❌ You need Administrator permission.",
         flags: MessageFlags.Ephemeral
       });
     }
 
     const guildId = interaction.guild.id;
-    const channelId = voiceChannel.id;
+    const hubId = await redis.get(`vip:${guildId}:hub`);
 
-    // Check if this is a VIP channel
-    const isVip = await redis.sismember(`vip:${guildId}:createdChannels`, channelId);
-    if (!isVip) {
+    if (!hubId) {
       return interaction.reply({
-        content: "❌ That is not a VIP channel.",
+        content: "❌ No VIP hub has been set up. Use `/setup-vip` first.",
         flags: MessageFlags.Ephemeral
       });
     }
 
-    // Check ownership
-    const owner = await redis.hget(`vip:${guildId}:${channelId}`, "owner");
-    if (owner !== userId) {
+    const hub = interaction.guild.channels.cache.get(hubId);
+    if (!hub) {
+      // Hub deleted – clean up Redis
+      await redis.del(`vip:${guildId}:hub`);
       return interaction.reply({
-        content: "❌ You don't own this channel.",
+        content: "❌ The VIP hub no longer exists. Please re‑run `/setup-vip`.",
         flags: MessageFlags.Ephemeral
       });
     }
@@ -50,15 +46,15 @@ module.exports = {
     const newName = interaction.options.getString("name");
 
     try {
-      await voiceChannel.setName(newName, `Renamed by ${interaction.user.tag}`);
+      await hub.setName(newName, `Renamed by ${interaction.user.tag}`);
       return interaction.reply({
-        content: `✅ Channel renamed to **${newName}**.`,
+        content: `✅ VIP hub renamed to **${newName}**.`,
         flags: MessageFlags.Ephemeral
       });
     } catch (error) {
-      console.error("Rename error:", error);
+      console.error("Hub rename error:", error);
       return interaction.reply({
-        content: `❌ Failed to rename: ${error.message}`,
+        content: `❌ Failed to rename hub: ${error.message}`,
         flags: MessageFlags.Ephemeral
       });
     }
