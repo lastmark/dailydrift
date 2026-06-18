@@ -1,3 +1,4 @@
+// events/messageCreate.js – NO COIN REWARDS
 const { Events, EmbedBuilder } = require("discord.js");
 
 const DEV_ID = "1303357369622990889";
@@ -371,21 +372,16 @@ module.exports = {
 
     // ==========================================
     // 💎 XP / LEVEL SYSTEM (only for non-command messages)
-    // - Cooldown applied here
     // ==========================================
     const cooldownKey = `xp:cd:${userId}`;
     if (await redis.get(cooldownKey)) return;
     await redis.setex(cooldownKey, 60, "1");
 
+    // Premium check for XP boost only (no coins)
     const isPremium = await redis.get(`premium:user:${userId}`);
 
-    let xpGain = Math.floor(Math.random() * 11) + 15;
-    let coinGain = Math.floor(Math.random() * 10) + 10;
-
-    if (isPremium) {
-      xpGain = Math.floor(xpGain * 1.8);
-      coinGain = Math.floor(coinGain * 1.8);
-    }
+    let xpGain = Math.floor(Math.random() * 11) + 15; // 15–25 XP
+    if (isPremium) xpGain = Math.floor(xpGain * 1.8);
 
     const profileKey = `profile:${userId}`;
     let xp = Number(await redis.hget(profileKey, "xp") || 0);
@@ -408,11 +404,6 @@ module.exports = {
       }).catch(() => {});
     }
     await redis.hset(profileKey, "xp", xp);
-
-    // ==========================================
-    // 💰 GLOBAL ECONOMY (coins)
-    // ==========================================
-    await redis.incrby(`eco:${userId}:money`, coinGain);
 
     // ==========================================
     // 🤖 AUTO RESPONDER
