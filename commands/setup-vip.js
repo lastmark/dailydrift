@@ -1,19 +1,18 @@
 // commands/setup-vip.js
-const { SlashCommandBuilder, ChannelType, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require("discord.js");
+const { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
-  category: "Server Management",
+  category: "Server",
 
   data: new SlashCommandBuilder()
     .setName("setup-vip")
-    .setDescription("Set up the VIP hub channel (auto-creates it)")
+    .setDescription("🎙️ Set up the VIP hub channel (auto-creates it)")
     .addBooleanOption(opt =>
       opt.setName("clear")
         .setDescription("Clear the VIP hub setup")
     ),
 
   async execute(interaction, client, redis) {
-    // Admin only
     if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
       return interaction.reply({
         content: "❌ You need Administrator permission.",
@@ -31,7 +30,6 @@ module.exports = {
         const hub = interaction.guild.channels.cache.get(hubId);
         if (hub) await hub.delete("VIP hub cleared by admin").catch(() => {});
         await redis.del(hubKey);
-        await redis.del(`vip:${guildId}:spawnChannel`); // old key, just in case
       }
       return interaction.reply({
         content: "✅ VIP hub has been cleared.",
@@ -39,7 +37,6 @@ module.exports = {
       });
     }
 
-    // Check if hub already exists
     let hubId = await redis.get(hubKey);
     let hub = hubId ? interaction.guild.channels.cache.get(hubId) : null;
 
@@ -50,7 +47,6 @@ module.exports = {
       });
     }
 
-    // Create hub channel
     try {
       const bot = interaction.guild.members.me;
       if (!bot.permissions.has(PermissionFlagsBits.ManageChannels)) {
@@ -84,7 +80,7 @@ module.exports = {
           { name: "Standard Server Limit", value: "3 channels per user", inline: true },
           { name: "Premium Server Limit", value: "Unlimited", inline: true }
         )
-        .setFooter({ text: "Use /rename-vip to change your VIP channel's name." })
+        .setFooter({ text: "Use /rename-vip to change your VIP Hub channel's name." })
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed] });
