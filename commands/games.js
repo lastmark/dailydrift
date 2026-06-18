@@ -1,8 +1,8 @@
-// commands/games.js – REMOVED VIP SHOP OPTION
+// commands/games.js – Blackjack with Hit/Stand only (no post‑game buttons)
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require("discord.js");
 
 // =========================
-// 🃏 BLACKJACK GAME CLASS (unchanged)
+// 🃏 BLACKJACK GAME CLASS
 // =========================
 class BlackjackGame {
   constructor(userId, bet, economy, redis) {
@@ -51,9 +51,7 @@ class BlackjackGame {
     }
   }
 
-  drawCard() {
-    return this.deck.pop();
-  }
+  drawCard() { return this.deck.pop(); }
 
   getCardValue(card) {
     if (card.value === 'A') return 11;
@@ -177,16 +175,25 @@ class BlackjackGame {
     return `Bet: ${this.bet} coins\nDealer beats you!`;
   }
 
-  
-    
+  // ✅ Only Hit/Stand when game is active; NO buttons when game is over
+  getButtons() {
+    if (this.gameOver) {
+      return new ActionRowBuilder(); // empty – no buttons
+    }
+    return new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder().setCustomId('blackjack_hit').setLabel('Hit').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('blackjack_stand').setLabel('Stand').setStyle(ButtonStyle.Danger)
+      );
   }
-
+}
 
 // =========================
 // 📦 COMMAND EXPORT
 // =========================
 module.exports = {
   category: "Games",
+
   data: new SlashCommandBuilder()
     .setName("games")
     .setDescription("Play games and earn coins!")
@@ -295,10 +302,8 @@ module.exports = {
   async execute(interaction, client, redis) {
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
-    
-    // =========================
-    // ECONOMY HELPERS (global keys)
-    // =========================
+
+    // ---- Economy helpers ----
     const getBalance = async (id) => Number(await redis.get(`eco:${id}:money`) || 0);
     const addBalance = async (id, amount) => await redis.incrby(`eco:${id}:money`, amount);
     const takeBalance = async (id, amount) => {
@@ -529,7 +534,7 @@ module.exports = {
     }
 
     // =========================
-    // 🃏 BLACKJACK (unchanged)
+    // 🃏 BLACKJACK – Hit/Stand only, no post‑game buttons
     // =========================
     if (sub === "blackjack") {
       const bet = interaction.options.getInteger("bet");
@@ -573,7 +578,7 @@ module.exports = {
           }
           
           const newEmbed = game.getEmbed();
-          const newButtons = game.getButtons();
+          const newButtons = game.getButtons(); // empty if gameOver
           await i.editReply({ embeds: [newEmbed], components: [newButtons] });
           
         } else if (i.customId === 'blackjack_stand') {
@@ -585,30 +590,14 @@ module.exports = {
           collector.stop();
           
           const newEmbed = game.getEmbed();
-          const newButtons = game.getButtons();
+          const newButtons = game.getButtons(); // empty
           await i.editReply({ embeds: [newEmbed], components: [newButtons] });
-          
-        } else if (i.customId === 'blackjack_play_again') {
-          await i.deferUpdate();
-          collector.stop();
-          
-          const newGame = new BlackjackGame(userId, game.bet, economy, redis);
-          const newBalance = await getBalance(userId);
-          newGame.setBalance(newBalance);
-          const newEmbed = newGame.getEmbed();
-          const newButtons = newGame.getButtons();
-          
-          await i.editReply({ embeds: [newEmbed], components: [newButtons] });
-          
-        } else if (i.customId === 'blackjack_end') {
-          await i.deferUpdate();
-          collector.stop();
-          await i.editReply({ components: [] });
         }
       });
 
       collector.on('end', async (collected, reason) => {
         if (reason === 'time' && !game.gameOver) {
+          // Auto-stand on timeout
           game.stand();
           await game.processResult();
           const newBalance = await getBalance(userId);
@@ -617,7 +606,7 @@ module.exports = {
           const newEmbed = game.getEmbed();
           await msg.edit({ 
             embeds: [newEmbed], 
-            components: [] 
+            components: [] // no buttons
           });
         }
       });
@@ -656,7 +645,7 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 SHOP (removed VIP)
+    // 🛒 SHOP (unchanged)
     // =========================
     if (sub === "shop") {
       const embed = new EmbedBuilder()
@@ -673,7 +662,7 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 BUY (removed VIP)
+    // 🛒 BUY (unchanged)
     // =========================
     if (sub === "buy") {
       const item = interaction.options.getString("item");
