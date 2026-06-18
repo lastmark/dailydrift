@@ -1,6 +1,6 @@
 // commands/profile.js – FULL WITH BETA TESTER
-const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, CanvasRenderingContext2D, MessageFlags } = require("discord.js");
-const { createCanvas, loadImage, registerFont } = require("canvas");
+const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
+const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
 const fs = require("fs");
 
