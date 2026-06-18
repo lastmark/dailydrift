@@ -6,7 +6,7 @@ module.exports = {
   category: "Economy",
   data: new SlashCommandBuilder()
     .setName("balance")
-    .setDescription("💰 Check your balance and economy stats")
+    .setDescription(" Check your balance and economy stats")
     .addUserOption(option =>
       option.setName("user")
         .setDescription("Check another user's balance")
@@ -32,7 +32,6 @@ module.exports = {
     const embed = economy.createBalanceEmbed(targetUser, balance, {
       shield,
       doubleXP,
-      vip,
       totalEarned,
       totalSpent,
       color: "#FFD700"
