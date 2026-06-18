@@ -1,7 +1,8 @@
-// events/messageCreate.js – FULL WITH BETA TESTER + PREFIX SUPPORT (! and ?)
+// events/messageCreate.js – FULL WITH IMPROVED PREFIX PARSER (supports subcommands)
 const { Events, EmbedBuilder, MessageFlags } = require("discord.js");
 
 const DEV_ID = "1303357369622990889";
+const DEFAULT_PREFIXES = ['!', '?'];
 
 // Helper: convert duration string to seconds
 function durationToSeconds(input) {
@@ -16,28 +17,75 @@ function durationToSeconds(input) {
   return 0;
 }
 
-// ---------- Prefix handler helpers ----------
-const PREFIXES = ['!', '?'];
+// ---------- Improved prefix parser ----------
+function parseCommandArgs(args, options) {
+  // options is the array of command options (from SlashCommandBuilder)
+  // Returns a map of option names to values, and the subcommand path.
+  let result = {};
+  let remaining = [...args];
+  let subcommand = null;
+  let subcommandGroup = null;
 
-// Helper: parse key=value pairs or positional values
-function parseArgs(args, optionDefs) {
-  const result = {};
-  const kv = args.find(a => a.includes('='));
+  // Recursively find subcommands
+  function findSubcommand(optionsArray, argsList) {
+    for (const opt of optionsArray) {
+      if (opt.type === 1) { // Subcommand
+        if (argsList.length > 0 && argsList[0] === opt.name) {
+          return { subcommand: opt, remaining: argsList.slice(1) };
+        }
+      } else if (opt.type === 2) { // SubcommandGroup
+        const groupResult = findSubcommand(opt.options || [], argsList);
+        if (groupResult) {
+          return { group: opt, subcommand: groupResult.subcommand, remaining: groupResult.remaining };
+        }
+      }
+    }
+    return null;
+  }
+
+  const found = findSubcommand(options, remaining);
+  if (found) {
+    if (found.group) subcommandGroup = found.group;
+    subcommand = found.subcommand;
+    remaining = found.remaining;
+  }
+
+  // Now we have the subcommand (if any) and remaining args for options.
+  // Get the options definition for the final level (subcommand or root)
+  let optDefs = subcommand ? (subcommand.options || []) : options;
+
+  // If we have remaining args, parse them as key=value or positional
+  const parsed = {};
+  const kv = remaining.find(a => a.includes('='));
   if (kv) {
-    for (const arg of args) {
+    // Named arguments: key=value
+    for (const arg of remaining) {
       const [key, ...val] = arg.split('=');
-      result[key] = val.join('=');
+      parsed[key] = val.join('=');
     }
   } else {
-    for (let i = 0; i < Math.min(args.length, optionDefs.length); i++) {
-      result[optionDefs[i].name] = args[i];
+    // Positional: map in order
+    for (let i = 0; i < Math.min(remaining.length, optDefs.length); i++) {
+      parsed[optDefs[i].name] = remaining[i];
     }
   }
-  return result;
+
+  return {
+    subcommandGroup,
+    subcommand,
+    parsedOptions: parsed,
+    optDefs
+  };
 }
 
-// Helper: create a fake interaction from a message and command
+// ---------- Create fake interaction ----------
 function createFakeInteraction(message, command, args, client) {
+  const parsed = parseCommandArgs(args, command.data.options || []);
+  const { subcommandGroup, subcommand, parsedOptions, optDefs } = parsed;
+
+  // Build getter functions
+  const getOption = (name) => parsedOptions[name];
+
   const fake = {
     user: message.author,
     member: message.member,
@@ -50,16 +98,41 @@ function createFakeInteraction(message, command, args, client) {
     followUp: message.reply.bind(message),
     fetchReply: async () => message,
     options: {
-      getSubcommand: () => null,
-      getSubcommandGroup: () => null,
-      getString: (name) => null,
-      getInteger: (name) => null,
-      getBoolean: (name) => null,
-      getUser: (name) => null,
-      getChannel: (name) => null,
-      getRole: (name) => null,
-      getAttachment: (name) => null,
-      getNumber: (name) => null,
+      getSubcommand: () => subcommand ? subcommand.name : null,
+      getSubcommandGroup: () => subcommandGroup ? subcommandGroup.name : null,
+      getString: (name) => getOption(name) || null,
+      getInteger: (name) => {
+        const val = getOption(name);
+        return val ? parseInt(val) : null;
+      },
+      getBoolean: (name) => {
+        const val = getOption(name);
+        if (val === undefined) return null;
+        return val === 'true' || val === '1' || val === 'yes';
+      },
+      getUser: async (name) => {
+        const val = getOption(name);
+        if (!val) return null;
+        const id = val.match(/<@!?(\d+)>/)?.[1] || val;
+        return await client.users.fetch(id).catch(() => null);
+      },
+      getChannel: async (name) => {
+        const val = getOption(name);
+        if (!val) return null;
+        const id = val.match(/<#(\d+)>/)?.[1] || val;
+        return await message.guild.channels.fetch(id).catch(() => null);
+      },
+      getRole: async (name) => {
+        const val = getOption(name);
+        if (!val) return null;
+        const id = val.match(/<@&(\d+)>/)?.[1] || val;
+        return await message.guild.roles.fetch(id).catch(() => null);
+      },
+      getAttachment: (name) => null, // attachments not supported via text
+      getNumber: (name) => {
+        const val = getOption(name);
+        return val ? parseFloat(val) : null;
+      },
     },
     isChatInputCommand: () => true,
     isRepliable: () => true,
@@ -69,107 +142,6 @@ function createFakeInteraction(message, command, args, client) {
     type: 2,
   };
 
-  const commandData = command.data;
-  const options = commandData.options || [];
-  let subcommand = null;
-  let remainingArgs = [...args];
-
-  // Find subcommand
-  for (const opt of options) {
-    if (opt.type === 1) { // Subcommand
-      if (remainingArgs.length > 0 && opt.name === remainingArgs[0]) {
-        subcommand = opt;
-        remainingArgs.shift();
-        break;
-      }
-    }
-    // SubcommandGroup not supported for simplicity
-  }
-
-  if (subcommand) {
-    fake.options.getSubcommand = () => subcommand.name;
-    const subOpts = subcommand.options || [];
-    const parsed = parseArgs(remainingArgs, subOpts);
-    for (const opt of subOpts) {
-      const val = parsed[opt.name];
-      if (val !== undefined) {
-        switch (opt.type) {
-          case 3: // String
-            fake.options.getString = (name) => name === opt.name ? val : fake.options.getString(name);
-            break;
-          case 4: // Integer
-            fake.options.getInteger = (name) => name === opt.name ? parseInt(val) : fake.options.getInteger(name);
-            break;
-          case 5: // Boolean
-            fake.options.getBoolean = (name) => name === opt.name ? val === 'true' || val === '1' : fake.options.getBoolean(name);
-            break;
-          case 6: // User
-            fake.options.getUser = async (name) => {
-              if (name === opt.name) {
-                const id = val.match(/<@!?(\d+)>/)?.[1] || val;
-                return await client.users.fetch(id).catch(() => null);
-              }
-              return fake.options.getUser(name);
-            };
-            break;
-          case 7: // Channel
-            fake.options.getChannel = async (name) => {
-              if (name === opt.name) {
-                const id = val.match(/<#(\d+)>/)?.[1] || val;
-                return await message.guild.channels.fetch(id).catch(() => null);
-              }
-              return fake.options.getChannel(name);
-            };
-            break;
-          case 8: // Role
-            fake.options.getRole = async (name) => {
-              if (name === opt.name) {
-                const id = val.match(/<@&(\d+)>/)?.[1] || val;
-                return await message.guild.roles.fetch(id).catch(() => null);
-              }
-              return fake.options.getRole(name);
-            };
-            break;
-          // Attachment not supported
-        }
-      }
-    }
-  } else {
-    // No subcommand – parse top-level options
-    const parsed = parseArgs(remainingArgs, options);
-    for (const opt of options) {
-      const val = parsed[opt.name];
-      if (val !== undefined) {
-        // same assignment logic as above (simplified)
-        switch (opt.type) {
-          case 3: fake.options.getString = (name) => name === opt.name ? val : fake.options.getString(name); break;
-          case 4: fake.options.getInteger = (name) => name === opt.name ? parseInt(val) : fake.options.getInteger(name); break;
-          case 5: fake.options.getBoolean = (name) => name === opt.name ? val === 'true' || val === '1' : fake.options.getBoolean(name); break;
-          case 6: fake.options.getUser = async (name) => {
-            if (name === opt.name) {
-              const id = val.match(/<@!?(\d+)>/)?.[1] || val;
-              return await client.users.fetch(id).catch(() => null);
-            }
-            return fake.options.getUser(name);
-          }; break;
-          case 7: fake.options.getChannel = async (name) => {
-            if (name === opt.name) {
-              const id = val.match(/<#(\d+)>/)?.[1] || val;
-              return await message.guild.channels.fetch(id).catch(() => null);
-            }
-            return fake.options.getChannel(name);
-          }; break;
-          case 8: fake.options.getRole = async (name) => {
-            if (name === opt.name) {
-              const id = val.match(/<@&(\d+)>/)?.[1] || val;
-              return await message.guild.roles.fetch(id).catch(() => null);
-            }
-            return fake.options.getRole(name);
-          }; break;
-        }
-      }
-    }
-  }
   return fake;
 }
 
@@ -213,11 +185,53 @@ module.exports = {
     }
 
     // ==========================================
-    // 💬 PREFIX COMMANDS (! and ?)
+    // 🚨 Special: hardcoded !prefix command (always works)
     // ==========================================
-    const prefix = PREFIXES.find(p => content.startsWith(p));
-    if (prefix) {
-      const args = content.slice(prefix.length).trim().split(/ +/);
+    if (content.startsWith("!prefix") || content.startsWith("?prefix")) {
+      const args = content.slice(1).trim().split(/ +/);
+      const cmd = args[0].toLowerCase();
+      const member = message.member;
+      if (!member.permissions.has("ManageGuild")) {
+        return message.reply("❌ You need **Manage Server** permission to change the prefix.");
+      }
+      if (args.length < 2) {
+        return message.reply("Usage: `!prefix set <newprefix>` or `!prefix reset`");
+      }
+      const action = args[1];
+      if (action === "set") {
+        const newPrefix = args[2];
+        if (!newPrefix) return message.reply("❌ Please provide a new prefix.");
+        await redis.set(`prefix:${guildId}`, newPrefix);
+        return message.reply(`✅ Prefix set to \`${newPrefix}\`.`);
+      } else if (action === "reset") {
+        await redis.del(`prefix:${guildId}`);
+        return message.reply(`✅ Prefix reset to defaults: \`!\` and \`?\`.`);
+      } else {
+        return message.reply("Usage: `!prefix set <newprefix>` or `!prefix reset`");
+      }
+    }
+
+    // ==========================================
+    // 💬 PREFIX COMMANDS (custom or default)
+    // ==========================================
+    const customPrefix = await redis.get(`prefix:${guildId}`);
+    const prefixes = customPrefix ? [customPrefix] : DEFAULT_PREFIXES;
+    const usedPrefix = prefixes.find(p => content.startsWith(p));
+    if (!usedPrefix) {
+      // No prefix match – run XP/level system later
+      // We'll handle that after the command block.
+      // But we need to skip the rest of the prefix handling.
+      // We'll just let the flow continue to XP.
+      // But we have to make sure we don't process XP for messages that start with something else.
+      // Actually, we check prefix only, if none, we go to XP.
+      // So we'll just skip to XP section.
+      // But we need to return if it's a command? No, if no prefix, it's not a command.
+      // So we'll just let the code continue to XP.
+    }
+
+    // If we have a prefix, parse command
+    if (usedPrefix) {
+      const args = content.slice(usedPrefix.length).trim().split(/ +/);
       const cmd = args.shift().toLowerCase();
 
       // -------- HARDCODED PUBLIC COMMANDS --------
@@ -251,7 +265,7 @@ module.exports = {
       if (cmd === "buy") {
         const item = args[0]?.toLowerCase();
         if (!item || !["shield", "double"].includes(item)) {
-          return message.reply("❌ Usage: `!buy shield` or `!buy double`");
+          return message.reply("❌ Usage: `buy shield` or `buy double`");
         }
 
         const prices = { shield: 200, double: 500 };
@@ -302,24 +316,13 @@ module.exports = {
         return message.reply({ embeds: [embed] });
       }
 
-      // -------- HARDCODED DEV COMMANDS (only you) --------
-      if (userId !== DEV_ID) {
-        // If not dev, we still want to try the generic slash command handler for public commands.
-        // So we fall through to the generic handler after the hardcoded checks.
-        // But note: we already handled public commands above, so only unknown commands reach here.
-        // For non-dev, we'll just attempt generic handler.
-        // We'll do that after the dev block.
-        // For now, we'll just let it fall through.
-      }
-
       // -------- DEV COMMANDS (only you) --------
       if (userId === DEV_ID) {
-        // Economy
         if (cmd === "addcoins") {
           const target = message.mentions.users.first();
           const amount = parseInt(args[1]);
           if (!target || isNaN(amount) || amount < 1)
-            return message.reply("❌ Usage: `!addcoins @user amount`");
+            return message.reply("❌ Usage: `addcoins @user amount`");
           await redis.incrby(`eco:${target.id}:money`, amount);
           const bal = await redis.get(`eco:${target.id}:money`) || 0;
           return message.reply(`✅ Added **${amount}** coins to **${target.username}**. New balance: **${bal}**`);
@@ -329,7 +332,7 @@ module.exports = {
           const target = message.mentions.users.first();
           const amount = parseInt(args[1]);
           if (!target || isNaN(amount) || amount < 1)
-            return message.reply("❌ Usage: `!removecoins @user amount`");
+            return message.reply("❌ Usage: `removecoins @user amount`");
           const current = Number(await redis.get(`eco:${target.id}:money`) || 0);
           if (current < amount) return message.reply(`❌ ${target.username} only has ${current} coins.`);
           await redis.decrby(`eco:${target.id}:money`, amount);
@@ -341,17 +344,16 @@ module.exports = {
           const target = message.mentions.users.first();
           const amount = parseInt(args[1]);
           if (!target || isNaN(amount) || amount < 0)
-            return message.reply("❌ Usage: `!setbalance @user amount`");
+            return message.reply("❌ Usage: `setbalance @user amount`");
           await redis.set(`eco:${target.id}:money`, amount);
           return message.reply(`✅ Set **${target.username}**'s balance to **${amount}** coins`);
         }
 
-        // Shields
         if (cmd === "addshields") {
           const target = message.mentions.users.first();
           const amount = parseInt(args[1]);
           if (!target || isNaN(amount) || amount < 1)
-            return message.reply("❌ Usage: `!addshields @user amount`");
+            return message.reply("❌ Usage: `addshields @user amount`");
           await redis.incrby(`eco:${target.id}:shield`, amount);
           const shields = await redis.get(`eco:${target.id}:shield`) || 0;
           return message.reply(`✅ Added **${amount}** shields. Total: **${shields}**`);
@@ -361,7 +363,7 @@ module.exports = {
           const target = message.mentions.users.first();
           const amount = parseInt(args[1]);
           if (!target || isNaN(amount) || amount < 1)
-            return message.reply("❌ Usage: `!removeshields @user amount`");
+            return message.reply("❌ Usage: `removeshields @user amount`");
           const current = Number(await redis.get(`eco:${target.id}:shield`) || 0);
           if (current < amount) return message.reply(`❌ ${target.username} only has ${current} shields.`);
           await redis.decrby(`eco:${target.id}:shield`, amount);
@@ -369,10 +371,9 @@ module.exports = {
           return message.reply(`✅ Removed **${amount}** shields. Remaining: **${shields}**`);
         }
 
-        // Premium
         if (cmd === "removepremium") {
           const target = message.mentions.users.first();
-          if (!target) return message.reply("❌ Usage: `!removepremium @user`");
+          if (!target) return message.reply("❌ Usage: `removepremium @user`");
           await redis.del(`premium:user:${target.id}`);
           await redis.del(`eco:${target.id}:vip`);
           return message.reply(`✅ Removed user premium from **${target.username}**`);
@@ -424,25 +425,23 @@ module.exports = {
           return message.reply(`✅ Guild premium set for this server (${duration}).`);
         }
 
-        // Beta Tester
         if (cmd === "addbetatester") {
           const target = message.mentions.users.first();
-          if (!target) return message.reply("❌ Usage: `!addbetatester @user`");
+          if (!target) return message.reply("❌ Usage: `addbetatester @user`");
           await redis.set(`beta:user:${target.id}`, "true");
           return message.reply(`✅ **${target.username}** is now a Beta Tester.`);
         }
 
         if (cmd === "removebetatester") {
           const target = message.mentions.users.first();
-          if (!target) return message.reply("❌ Usage: `!removebetatester @user`");
+          if (!target) return message.reply("❌ Usage: `removebetatester @user`");
           await redis.del(`beta:user:${target.id}`);
           return message.reply(`✅ Removed Beta Tester status from **${target.username}**.`);
         }
 
-        // Redeem code
         if (cmd === "redeemcode") {
           const code = args[0]?.toUpperCase();
-          if (!code) return message.reply("❌ Usage: `!redeemcode CODE`");
+          if (!code) return message.reply("❌ Usage: `redeemcode CODE`");
           const raw = await redis.get(`redeem:${code}`);
           if (!raw) return message.reply("❌ Invalid code.");
           const data = JSON.parse(raw);
@@ -483,10 +482,9 @@ module.exports = {
           return message.reply(`✅ Redeemed **${code}** successfully! Premium activated.`);
         }
 
-        // Counting setup
         if (cmd === "setcountingchannel") {
           const channel = message.mentions.channels.first();
-          if (!channel) return message.reply("❌ Usage: `!setcountingchannel #channel`");
+          if (!channel) return message.reply("❌ Usage: `setcountingchannel #channel`");
           await redis.set(`counting:${guildId}:channel`, channel.id);
           await redis.set(`counting:${guildId}:number`, 0);
           return message.reply(`✅ Counting channel set to ${channel}`);
@@ -499,7 +497,6 @@ module.exports = {
           return message.reply("✅ All counting stats reset.");
         }
 
-        // Help
         if (cmd === "helpdev") {
           const embed = new EmbedBuilder()
             .setColor("#5865F2")
@@ -507,37 +504,36 @@ module.exports = {
             .setDescription("All commands use `!` prefix")
             .addFields(
               { name: "💰 Economy", value: [
-                "`!addcoins @user amount`",
-                "`!removecoins @user amount`",
-                "`!setbalance @user amount`"
+                "`addcoins @user amount`",
+                "`removecoins @user amount`",
+                "`setbalance @user amount`"
               ].join("\n"), inline: false },
               { name: "🛡️ Shields", value: [
-                "`!addshields @user amount`",
-                "`!removeshields @user amount`"
+                "`addshields @user amount`",
+                "`removeshields @user amount`"
               ].join("\n"), inline: false },
               { name: "👑 Premium", value: [
-                "`!removepremium @user`",
-                "`!removeguildpremium`",
-                "`!checkpremium`",
-                "`!setpremium 1h`",
-                "`!setguildpremium 1h`",
-                "`!redeemcode CODE`"
+                "`removepremium @user`",
+                "`removeguildpremium`",
+                "`checkpremium`",
+                "`setpremium 1h`",
+                "`setguildpremium 1h`",
+                "`redeemcode CODE`"
               ].join("\n"), inline: false },
               { name: "🧪 Beta Tester", value: [
-                "`!addbetatester @user`",
-                "`!removebetatester @user`"
+                "`addbetatester @user`",
+                "`removebetatester @user`"
               ].join("\n"), inline: false },
               { name: "🎯 Counting", value: [
-                "`!setcountingchannel #channel`",
-                "`!resetcounting`",
-                "`!countingstats @user`"
+                "`setcountingchannel #channel`",
+                "`resetcounting`",
+                "`countingstats @user`"
               ].join("\n"), inline: false }
             )
             .setTimestamp();
           return message.reply({ embeds: [embed] });
         }
 
-        // Testing
         if (cmd === "devv") {
           const sub = args[0];
           if (sub === "xp") {
@@ -549,15 +545,11 @@ module.exports = {
             await redis.set(`eco:${userId}:money`, 10000);
             return message.reply("Coins set to 10,000.");
           }
-          return message.reply("Usage: !devv xp | coins");
+          return message.reply("Usage: devv xp | coins");
         }
-
-        // If we reach here, it's a dev command not handled, so we might let it fall through to generic handler (for slash commands)
-        // But we want to allow devs to use prefix for slash commands too.
       }
 
-      // -------- GENERIC SLASH COMMAND HANDLER (fallback for any prefix command) --------
-      // If no hardcoded command matched, try to execute as a slash command via prefix.
+      // -------- GENERIC SLASH COMMAND HANDLER (fallback) --------
       const slashCommand = client.commands.get(cmd);
       if (slashCommand) {
         try {
@@ -567,7 +559,7 @@ module.exports = {
           console.error(`Error executing prefix command ${cmd}:`, err);
           await message.reply({ content: `❌ Error: ${err.message}`, flags: MessageFlags.Ephemeral });
         }
-        return; // handled
+        return;
       }
 
       // If no hardcoded and no slash command, do nothing.
