@@ -2,7 +2,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ChannelType, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
-  category: "Server",
+  category: "Server Management",
 
   data: new SlashCommandBuilder()
     .setName("setup-vip")
