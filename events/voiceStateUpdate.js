@@ -1,4 +1,4 @@
-// events/voiceStateUpdate.js – instant delete + disconnect on limit
+// events/voiceStateUpdate.js – no DM on creation, only on limit
 const { Events, ChannelType, PermissionFlagsBits } = require("discord.js");
 
 module.exports = {
@@ -72,8 +72,7 @@ module.exports = {
         // Move the user into the new channel
         await newState.member.voice.setChannel(channel);
 
-        await newState.member.send(`✅ Your VIP channel **${channelName}** has been created! Use /rename-vip to change its name.`)
-          .catch(() => {});
+        // ✅ No DM sent here – only alert on limit
 
       } catch (error) {
         console.error("[VIP] Error creating VIP channel:", error);
