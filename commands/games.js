@@ -177,21 +177,10 @@ class BlackjackGame {
     return `Bet: ${this.bet} coins\nDealer beats you!`;
   }
 
-  getButtons() {
-    if (this.gameOver) {
-      return new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder().setCustomId('blackjack_play_again').setLabel('Play Again').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId('blackjack_end').setLabel('End Game').setStyle(ButtonStyle.Secondary)
-        );
-    }
-    return new ActionRowBuilder()
-      .addComponents(
-        new ButtonBuilder().setCustomId('blackjack_hit').setLabel('Hit').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('blackjack_stand').setLabel('Stand').setStyle(ButtonStyle.Danger)
-      );
+  
+    
   }
-}
+
 
 // =========================
 // 📦 COMMAND EXPORT
