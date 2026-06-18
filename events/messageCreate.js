@@ -1,4 +1,4 @@
-// events/messageCreate.js – SIMPLIFIED WORKING VERSION (hardcoded aliases)
+// events/messageCreate.js – FINAL WITH PROPER EDIT REPLY
 const { Events, EmbedBuilder, MessageFlags } = require("discord.js");
 
 const DEV_ID = "1303357369622990889";
@@ -17,25 +17,63 @@ function durationToSeconds(input) {
   return 0;
 }
 
-// ---------- SIMPLE fake interaction builder (for commands with subcommands) ----------
-function buildFakeInteraction(message, commandName, subcommandName, options = {}) {
+// ---------- Fake Interaction Builder (with proper editReply) ----------
+function createFakeInteraction(message, commandName, subcommand, options = {}) {
+  let sentMessage = null;
+
   const fake = {
     user: message.author,
     member: message.member,
     guild: message.guild,
     channel: message.channel,
     client: message.client,
-    reply: message.reply.bind(message),
-    editReply: message.editReply ? message.editReply.bind(message) : message.reply.bind(message),
+    commandName: commandName,
+
+    reply: async (data) => {
+      let msg;
+      if (data.embeds) {
+        msg = await message.reply({ embeds: data.embeds, flags: data.flags || 0 });
+      } else {
+        msg = await message.reply(data);
+      }
+      sentMessage = msg;
+      return msg;
+    },
+
+    editReply: async (data) => {
+      if (!sentMessage) {
+        return fake.reply(data);
+      }
+      if (data.embeds) {
+        return sentMessage.edit({ embeds: data.embeds, flags: data.flags || 0 });
+      } else {
+        return sentMessage.edit(data);
+      }
+    },
+
     deferReply: async () => {},
-    followUp: message.reply.bind(message),
-    fetchReply: async () => message,
+    followUp: async (data) => {
+      if (data.embeds) {
+        return message.reply({ embeds: data.embeds, flags: data.flags || 0 });
+      }
+      return message.reply(data);
+    },
+
+    fetchReply: async () => sentMessage || message,
+
     options: {
-      getSubcommand: () => subcommandName || null,
+      getSubcommand: () => subcommand || null,
       getSubcommandGroup: () => null,
       getString: (name) => options[name] || null,
-      getInteger: (name) => options[name] ? parseInt(options[name]) : null,
-      getBoolean: (name) => options[name] ? options[name] === 'true' || options[name] === '1' : null,
+      getInteger: (name) => {
+        const val = options[name];
+        return val !== undefined ? parseInt(val) : null;
+      },
+      getBoolean: (name) => {
+        const val = options[name];
+        if (val === undefined) return null;
+        return val === 'true' || val === '1' || val === 'yes';
+      },
       getUser: async (name) => {
         const val = options[name];
         if (!val) return null;
@@ -54,9 +92,13 @@ function buildFakeInteraction(message, commandName, subcommandName, options = {}
         const id = val.match(/<@&(\d+)>/)?.[1] || val;
         return await message.guild.roles.fetch(id).catch(() => null);
       },
-      getAttachment: (name) => null,
-      getNumber: (name) => options[name] ? parseFloat(options[name]) : null,
+      getAttachment: () => null,
+      getNumber: (name) => {
+        const val = options[name];
+        return val !== undefined ? parseFloat(val) : null;
+      },
     },
+
     isChatInputCommand: () => true,
     isRepliable: () => true,
     customId: null,
@@ -64,6 +106,7 @@ function buildFakeInteraction(message, commandName, subcommandName, options = {}
     id: message.id,
     type: 2,
   };
+
   return fake;
 }
 
@@ -470,87 +513,66 @@ module.exports = {
       }
 
       // ==========================================
-      // 🎯 ALIAS HANDLER (hardcoded for common commands)
+      // 🎯 ALIAS HANDLER – with proper editReply support
       // ==========================================
-      let slashCommand = null;
-      let subcommand = null;
-      let options = {};
-
-      // Parse options from remaining args
-      const optionArgs = [...args];
-      
-      // --- ALIAS MAP ---
       const aliasMap = {
         // Games
-        'blackjack': { cmd: 'games', sub: 'blackjack' },
-        'bj': { cmd: 'games', sub: 'blackjack' },
-        'rps': { cmd: 'games', sub: 'rps' },
-        'coinflip': { cmd: 'games', sub: 'coinflip' },
-        'dice': { cmd: 'games', sub: 'dice' },
-        'slots': { cmd: 'games', sub: 'slots' },
-        'daily': { cmd: 'games', sub: 'daily' },
-        'game_stats': { cmd: 'games', sub: 'stats' },
+        'blackjack': { cmd: 'games', sub: 'blackjack', parse: (args) => ({ bet: args[0] }) },
+        'bj': { cmd: 'games', sub: 'blackjack', parse: (args) => ({ bet: args[0] }) },
+        'rps': { cmd: 'games', sub: 'rps', parse: (args) => ({ choice: args[0], bet: args[1] }) },
+        'coinflip': { cmd: 'games', sub: 'coinflip', parse: (args) => ({ side: args[0], bet: args[1] }) },
+        'dice': { cmd: 'games', sub: 'dice', parse: (args) => ({ number: args[0], bet: args[1] }) },
+        'slots': { cmd: 'games', sub: 'slots', parse: (args) => ({ bet: args[0] }) },
+        'daily': { cmd: 'games', sub: 'daily', parse: () => ({}) },
+        'game_stats': { cmd: 'games', sub: 'stats', parse: () => ({}) },
         // Profile
-        'profile': { cmd: 'profile', sub: 'view' },
-        'setbio': { cmd: 'profile', sub: 'setbio' },
-        'setcolor': { cmd: 'profile', sub: 'setcolor' },
-        'upload': { cmd: 'profile', sub: 'upload' },
-        'profile_reset': { cmd: 'profile', sub: 'reset' },
+        'profile': { cmd: 'profile', sub: 'view', parse: (args, message) => {
+          const user = message.mentions.users.first();
+          return { user: user ? user.id : null };
+        }},
+        'setbio': { cmd: 'profile', sub: 'setbio', parse: (args) => ({ text: args.join(' ') }) },
+        'setcolor': { cmd: 'profile', sub: 'setcolor', parse: (args) => ({ color: args[0] }) },
+        'upload': { cmd: 'profile', sub: 'upload', parse: () => ({}) },
+        'profile_reset': { cmd: 'profile', sub: 'reset', parse: () => ({}) },
         // Counting
-        'counting': { cmd: 'counting', sub: 'stats' },
-        'countingsetup': { cmd: 'counting', sub: 'setup' },
-        'countingleaderboard': { cmd: 'counting', sub: 'leaderboard' },
-        'countingshop': { cmd: 'counting', sub: 'shop' },
-        'countingreset': { cmd: 'counting', sub: 'reset' },
+        'counting': { cmd: 'counting', sub: 'stats', parse: (args, message) => {
+          const user = message.mentions.users.first();
+          return { target: user ? user.id : null };
+        }},
+        'countingsetup': { cmd: 'counting', sub: 'setup', parse: (args, message) => {
+          const channel = message.mentions.channels.first();
+          return { channel: channel ? channel.id : null };
+        }},
+        'countingleaderboard': { cmd: 'counting', sub: 'leaderboard', parse: () => ({}) },
+        'countingshop': { cmd: 'counting', sub: 'shop', parse: () => ({}) },
+        'countingreset': { cmd: 'counting', sub: 'reset', parse: (args, message) => {
+          const user = message.mentions.users.first();
+          return { target: user ? user.id : null };
+        }},
         // Premium
-        'premium': { cmd: 'premium', sub: null },
+        'premium': { cmd: 'premium', sub: null, parse: () => ({}) },
       };
 
       const alias = aliasMap[cmd];
       if (alias) {
-        slashCommand = client.commands.get(alias.cmd);
-        subcommand = alias.sub;
-        // Parse remaining args into options based on the slash command's options
-        // For simplicity, we'll just pass them as positionals.
-        // But for commands like !blackjack 100, we need to map 'bet' to 100.
-        // We'll do a simple mapping for each command.
-        if (subcommand === 'blackjack' || subcommand === 'rps' || subcommand === 'coinflip' || subcommand === 'dice' || subcommand === 'slots') {
-          if (optionArgs.length > 0) {
-            // For games, the first arg is usually 'bet' (except rps has choice then bet)
-            if (subcommand === 'rps') {
-              if (optionArgs.length >= 2) {
-                options.choice = optionArgs[0];
-                options.bet = optionArgs[1];
-              }
-            } else {
-              options.bet = optionArgs[0];
-            }
-          }
-        } else if (subcommand === 'stats' || subcommand === 'view') {
-          // For profile view, if there's a mention, use it as 'user'
-          const mention = message.mentions.users.first();
-          if (mention) options.user = mention.id;
-        } else if (subcommand === 'setbio') {
-          options.text = optionArgs.join(' ');
-        } else if (subcommand === 'setcolor') {
-          options.color = optionArgs[0];
-        } else if (subcommand === 'upload') {
-          // Not supported via prefix (needs attachment)
-        } else if (subcommand === 'reset') {
-          // no options
-        } else if (subcommand === 'setup') {
-          // For counting setup, need channel
-          const channel = message.mentions.channels.first();
-          if (channel) options.channel = channel.id;
-        } else if (subcommand === 'shop' || subcommand === 'leaderboard') {
-          // no options
-        }
-      }
+        const command = client.commands.get(alias.cmd);
+        if (!command) return;
 
-      if (slashCommand) {
+        let options = {};
         try {
-          const fake = buildFakeInteraction(message, alias.cmd, subcommand, options);
-          await slashCommand.execute(fake, client, redis);
+          options = alias.parse(args, message) || {};
+        } catch (e) {}
+
+        if (alias.cmd === 'profile' && alias.sub === 'view' && !options.user) {
+          options.user = message.author.id;
+        }
+        if (alias.cmd === 'counting' && alias.sub === 'stats' && !options.target) {
+          options.target = message.author.id;
+        }
+
+        try {
+          const fake = createFakeInteraction(message, alias.cmd, alias.sub, options);
+          await command.execute(fake, client, redis);
         } catch (err) {
           console.error(`Error executing alias ${cmd}:`, err);
           await message.reply({ content: `❌ Error: ${err.message}`, flags: MessageFlags.Ephemeral });
@@ -558,16 +580,11 @@ module.exports = {
         return;
       }
 
-      // ==========================================
-      // 🚀 FALLBACK: Try generic slash command lookup
-      // ==========================================
+      // -------- FALLBACK: Try generic slash command lookup (top-level only) --------
       const fallbackCommand = client.commands.get(cmd);
       if (fallbackCommand) {
         try {
-          // For top-level commands (like /premium), just pass options as-is
-          const fake = buildFakeInteraction(message, cmd, null, {});
-          // We need to handle options for the fallback too – but we'll just let it work without options.
-          // This is a best-effort.
+          const fake = createFakeInteraction(message, cmd, null, {});
           await fallbackCommand.execute(fake, client, redis);
         } catch (err) {
           console.error(`Error executing fallback command ${cmd}:`, err);
@@ -576,7 +593,6 @@ module.exports = {
         return;
       }
 
-      // If nothing matches, do nothing.
       return;
     }
 
