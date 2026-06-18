@@ -254,7 +254,7 @@ client.once("ready", async () => {
   console.log(`${client.user.tag} online`);
 
   const { ActivityType } = require("discord.js");
-  client.user.setActivity("counting game 🪙", { type: ActivityType.Playing });
+  client.user.setActivity("/help", { type: ActivityType.Playing });
   client.user.setStatus("online");
 
   // ===================================================
