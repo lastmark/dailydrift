@@ -1,4 +1,4 @@
-// commands/games.js – FULL WITH BET LIMIT (MAX 300,000)
+// commands/games.js – FULL WITH UPDATED SLOTS (three-of-a-kind only)
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 
 // =========================
@@ -106,7 +106,6 @@ class BlackjackGame {
 
   async processResult() {
     let winAmount = 0;
-    // Flat 2x payout for both blackjack and normal win
     if (this.result === 'blackjack' || this.result === 'win') {
       winAmount = this.bet * 2;
       await this.economy.addBalance(this.userId, winAmount);
@@ -319,7 +318,6 @@ module.exports = {
     if (sub === "rps") {
       const choice = interaction.options.getString("choice");
       const bet = interaction.options.getInteger("bet");
-      // Max bet is already enforced by the option maxValue, but we double-check
       if (bet > 300000) {
         return interaction.reply({
           embeds: [new EmbedBuilder().setColor("#ED4245").setDescription("❌ Maximum bet is **300,000** coins.")],
@@ -480,7 +478,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎰 SLOTS
+    // 🎰 SLOTS – three-of-a-kind only, weighted symbols
     // =========================
     if (sub === "slots") {
       const bet = interaction.options.getInteger("bet");
@@ -499,45 +497,48 @@ module.exports = {
         });
       }
 
-      const slots = ["7", "7", "7", "7", "7", "7"];
-      const result = [
-        slots[Math.floor(Math.random() * slots.length)],
-        slots[Math.floor(Math.random() * slots.length)],
-        slots[Math.floor(Math.random() * slots.length)]
+      // Weighted pool: 5x 🍉, 4x 🍇, 3x 🎰
+      const pool = [
+        '🍉','🍉','🍉','🍉','🍉',
+        '🍇','🍇','🍇','🍇',
+        '🎰','🎰','🎰'
       ];
+      const getRandom = () => pool[Math.floor(Math.random() * pool.length)];
+      const result = [getRandom(), getRandom(), getRandom()];
 
       let winAmount = 0;
       let message = "";
-      
+      let multiplier = 0;
+
       if (result[0] === result[1] && result[1] === result[2]) {
-        winAmount = bet * 10;
-        message = `JACKPOT! Three ${result[0]}s!`;
-        await redis.incr(`games:${userId}:slots_jackpots`);
-      } else if (result[0] === result[1] || result[1] === result[2] || result[0] === result[2]) {
-        winAmount = Math.floor(bet * 1.5);
-        message = "Two of a kind!";
+        const symbol = result[0];
+        const multipliers = { '🍉': 4, '🍇': 8, '🎰': 18 };
+        multiplier = multipliers[symbol] || 0;
+        winAmount = bet * multiplier;
+        message = `🎉 **${symbol} ${symbol} ${symbol}** – ${multiplier}x win!`;
+        await redis.incr(`games:${userId}:slots_wins`);
+        if (symbol === '🎰') await redis.incr(`games:${userId}:slots_jackpots`);
       } else {
-        message = "No match...";
         winAmount = 0;
+        message = "😢 No match – you lose!";
+        await redis.incr(`games:${userId}:slots_losses`);
       }
 
       if (winAmount > 0) {
         await addBalance(userId, winAmount);
         await addTotalEarned(userId, winAmount);
-        await redis.incr(`games:${userId}:slots_wins`);
       } else {
         await takeBalance(userId, bet);
         await addTotalSpent(userId, bet);
-        await redis.incr(`games:${userId}:slots_losses`);
       }
 
       const embed = new EmbedBuilder()
         .setColor(winAmount > 0 ? "#57F287" : "#ED4245")
-        .setTitle("Slot Machine")
+        .setTitle("🎰 Slot Machine")
         .setDescription(`${result.join(" | ")}\n\n${message}`)
         .addFields(
-          { name: "Result", value: winAmount > 0 ? `You won ${winAmount} coins!` : `You lost ${bet} coins!`, inline: false },
-          { name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true }
+          { name: "💰 Result", value: winAmount > 0 ? `You won **${winAmount}** coins!` : `You lost **${bet}** coins!`, inline: false },
+          { name: "💳 New Balance", value: `${await getBalance(userId)} coins`, inline: true }
         )
         .setTimestamp();
 
@@ -545,7 +546,7 @@ module.exports = {
     }
 
     // =========================
-    // 🃏 BLACKJACK – REACTION-BASED (2x payout, persistent loop)
+    // 🃏 BLACKJACK – reaction-based, persistent
     // =========================
     if (sub === "blackjack") {
       const bet = interaction.options.getInteger("bet");
@@ -567,7 +568,6 @@ module.exports = {
       const game = new BlackjackGame(userId, bet, economy, redis);
       game.setBalance(balance);
 
-      // If instant game over (e.g., both blackjack)
       if (game.gameOver) {
         await game.processResult();
         const newBalance = await getBalance(userId);
@@ -576,7 +576,6 @@ module.exports = {
         return interaction.reply({ embeds: [embed] });
       }
 
-      // Send initial embed
       const embed = game.getEmbed();
       const reply = await interaction.reply({
         embeds: [embed],
@@ -586,7 +585,6 @@ module.exports = {
       await reply.react('👊');
       await reply.react('🔴');
 
-      // Game loop – keep listening until game ends
       while (!game.gameOver) {
         const filter = (reaction, user) => {
           return ['👊', '🔴'].includes(reaction.emoji.name) && user.id === userId;
@@ -601,7 +599,6 @@ module.exports = {
           });
 
           const reaction = collected.first();
-          // Remove the user's reaction so they can react again
           await reaction.users.remove(userId).catch(() => {});
 
           if (reaction.emoji.name === '👊') {
@@ -610,19 +607,16 @@ module.exports = {
             game.stand();
           }
 
-          // If game ended, process result
           if (game.gameOver) {
             await game.processResult();
             const newBalance = await getBalance(userId);
             game.setBalance(newBalance);
           }
 
-          // Update embed
           const newEmbed = game.getEmbed();
           await reply.edit({ embeds: [newEmbed] });
 
         } catch (error) {
-          // Timeout – auto-stand
           if (!game.gameOver) {
             game.stand();
             await game.processResult();
@@ -633,7 +627,6 @@ module.exports = {
         }
       }
 
-      // Clean up reactions and final update
       await reply.reactions.removeAll().catch(() => {});
       const finalEmbed = game.getEmbed();
       await reply.edit({ embeds: [finalEmbed] });
