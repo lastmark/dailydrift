@@ -1,4 +1,4 @@
-// events/messageCreate.js – NO COIN REWARDS
+// events/messageCreate.js – FULL WITH BETA TESTER COMMANDS
 const { Events, EmbedBuilder } = require("discord.js");
 
 const DEV_ID = "1303357369622990889";
@@ -259,6 +259,22 @@ module.exports = {
         return message.reply(`✅ Guild premium set for this server (${duration}).`);
       }
 
+      // -------- Beta Tester management --------
+      if (cmd === "addbetatester") {
+        const target = message.mentions.users.first();
+        if (!target) return message.reply("❌ Usage: `!addbetatester @user`");
+        await redis.set(`beta:user:${target.id}`, "true");
+        return message.reply(`✅ **${target.username}** is now a Beta Tester.`);
+      }
+
+      if (cmd === "removebetatester") {
+        const target = message.mentions.users.first();
+        if (!target) return message.reply("❌ Usage: `!removebetatester @user`");
+        await redis.del(`beta:user:${target.id}`);
+        return message.reply(`✅ Removed Beta Tester status from **${target.username}**.`);
+      }
+
+      // -------- Redeem code (dev only) --------
       if (cmd === "redeemcode") {
         const code = args[0]?.toUpperCase();
         if (!code) return message.reply("❌ Usage: `!redeemcode CODE`");
@@ -319,6 +335,7 @@ module.exports = {
         return message.reply("✅ All counting stats reset.");
       }
 
+      // -------- Help (updated with Beta Tester) --------
       if (cmd === "helpdev") {
         const embed = new EmbedBuilder()
           .setColor("#5865F2")
@@ -342,6 +359,10 @@ module.exports = {
               "`!setguildpremium 1h`",
               "`!redeemcode CODE`"
             ].join("\n"), inline: false },
+            { name: "🧪 Beta Tester", value: [
+              "`!addbetatester @user`",
+              "`!removebetatester @user`"
+            ].join("\n"), inline: false },
             { name: "🎯 Counting", value: [
               "`!setcountingchannel #channel`",
               "`!resetcounting`",
@@ -352,6 +373,7 @@ module.exports = {
         return message.reply({ embeds: [embed] });
       }
 
+      // -------- Testing / misc --------
       if (cmd === "devv") {
         const sub = args[0];
         if (sub === "xp") {
