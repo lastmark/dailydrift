@@ -1,6 +1,6 @@
 // commands/profile.js – FULL WITH ALL SUBCOMMANDS
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
-const { createCanvas, loadImage, registerFont } = require("canvas");
+const { createCanvas, loadImage, CanvasRenderingContext2D, registerFont } = require("canvas");
 const path = require("path");
 const fs = require("fs");
 
