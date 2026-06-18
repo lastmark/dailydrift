@@ -1,6 +1,6 @@
-// commands/profile.js – FULL WITH ALL SUBCOMMANDS
+// commands/profile.js – FULL WITH BETA TESTER
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
-const { createCanvas, loadImage, CanvasRenderingContext2D, registerFont } = require("canvas");
+const { createCanvas, loadImage, registerFont } = require("canvas");
 const path = require("path");
 const fs = require("fs");
 
@@ -96,6 +96,7 @@ module.exports = {
       const val = await redis.get(`premium:user:${id}`);
       return val !== null && val !== undefined;
     };
+    const isBeta = async (id) => await redis.get(`beta:user:${id}`) === "true";
 
     // =========================
     // 📝 SETBIO
@@ -214,6 +215,7 @@ module.exports = {
       const balance = await getBalance(targetId);
       const shield = await getShield(targetId);
       const premium = await isPremium(targetId);
+      const beta = await isBeta(targetId);
 
       const level = Number(profile.level || 1);
       const xp = Number(profile.xp || 0);
@@ -282,9 +284,16 @@ module.exports = {
       ctx.font = getFont("bold", 32);
       ctx.fillText(targetUser.username, 270, 100);
 
+      // --- BADGES: Premium + Beta Tester ---
       let title = "Member";
-      if (premium) title = "Premium";
-      if (targetId === "1303357369622990889") title = "Developer";
+      if (targetId === "1303357369622990889") {
+        title = "Developer";
+      } else {
+        const badges = [];
+        if (premium) badges.push("Premium");
+        if (beta) badges.push("Beta Tester");
+        title = badges.length ? badges.join(" • ") : "Member";
+      }
 
       ctx.fillStyle = color;
       ctx.font = getFont("bold", 18);
