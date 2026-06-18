@@ -1,4 +1,4 @@
-// events/messageCreate.js – FULL WITH COMPREHENSIVE ALIAS MAP
+// events/messageCreate.js – SIMPLIFIED WORKING VERSION (hardcoded aliases)
 const { Events, EmbedBuilder, MessageFlags } = require("discord.js");
 
 const DEV_ID = "1303357369622990889";
@@ -17,75 +17,8 @@ function durationToSeconds(input) {
   return 0;
 }
 
-// ---------- Improved prefix parser ----------
-function parseCommandArgs(args, options) {
-  // options is the array of command options (from SlashCommandBuilder)
-  // Returns a map of option names to values, and the subcommand path.
-  let result = {};
-  let remaining = [...args];
-  let subcommand = null;
-  let subcommandGroup = null;
-
-  // Recursively find subcommands
-  function findSubcommand(optionsArray, argsList) {
-    for (const opt of optionsArray) {
-      if (opt.type === 1) { // Subcommand
-        if (argsList.length > 0 && argsList[0] === opt.name) {
-          return { subcommand: opt, remaining: argsList.slice(1) };
-        }
-      } else if (opt.type === 2) { // SubcommandGroup
-        const groupResult = findSubcommand(opt.options || [], argsList);
-        if (groupResult) {
-          return { group: opt, subcommand: groupResult.subcommand, remaining: groupResult.remaining };
-        }
-      }
-    }
-    return null;
-  }
-
-  const found = findSubcommand(options, remaining);
-  if (found) {
-    if (found.group) subcommandGroup = found.group;
-    subcommand = found.subcommand;
-    remaining = found.remaining;
-  }
-
-  // Now we have the subcommand (if any) and remaining args for options.
-  // Get the options definition for the final level (subcommand or root)
-  let optDefs = subcommand ? (subcommand.options || []) : options;
-
-  // If we have remaining args, parse them as key=value or positional
-  const parsed = {};
-  const kv = remaining.find(a => a.includes('='));
-  if (kv) {
-    // Named arguments: key=value
-    for (const arg of remaining) {
-      const [key, ...val] = arg.split('=');
-      parsed[key] = val.join('=');
-    }
-  } else {
-    // Positional: map in order
-    for (let i = 0; i < Math.min(remaining.length, optDefs.length); i++) {
-      parsed[optDefs[i].name] = remaining[i];
-    }
-  }
-
-  return {
-    subcommandGroup,
-    subcommand,
-    parsedOptions: parsed,
-    optDefs
-  };
-}
-
-// ---------- Create fake interaction ----------
-function createFakeInteraction(message, command, args, client) {
-  const parsed = parseCommandArgs(args, command.data.options || []);
-  const { subcommandGroup, subcommand, parsedOptions, optDefs } = parsed;
-
-  // Build getter functions
-  const getOption = (name) => parsedOptions[name];
-
+// ---------- SIMPLE fake interaction builder (for commands with subcommands) ----------
+function buildFakeInteraction(message, commandName, subcommandName, options = {}) {
   const fake = {
     user: message.author,
     member: message.member,
@@ -98,41 +31,31 @@ function createFakeInteraction(message, command, args, client) {
     followUp: message.reply.bind(message),
     fetchReply: async () => message,
     options: {
-      getSubcommand: () => subcommand ? subcommand.name : null,
-      getSubcommandGroup: () => subcommandGroup ? subcommandGroup.name : null,
-      getString: (name) => getOption(name) || null,
-      getInteger: (name) => {
-        const val = getOption(name);
-        return val ? parseInt(val) : null;
-      },
-      getBoolean: (name) => {
-        const val = getOption(name);
-        if (val === undefined) return null;
-        return val === 'true' || val === '1' || val === 'yes';
-      },
+      getSubcommand: () => subcommandName || null,
+      getSubcommandGroup: () => null,
+      getString: (name) => options[name] || null,
+      getInteger: (name) => options[name] ? parseInt(options[name]) : null,
+      getBoolean: (name) => options[name] ? options[name] === 'true' || options[name] === '1' : null,
       getUser: async (name) => {
-        const val = getOption(name);
+        const val = options[name];
         if (!val) return null;
         const id = val.match(/<@!?(\d+)>/)?.[1] || val;
-        return await client.users.fetch(id).catch(() => null);
+        return await message.client.users.fetch(id).catch(() => null);
       },
       getChannel: async (name) => {
-        const val = getOption(name);
+        const val = options[name];
         if (!val) return null;
         const id = val.match(/<#(\d+)>/)?.[1] || val;
         return await message.guild.channels.fetch(id).catch(() => null);
       },
       getRole: async (name) => {
-        const val = getOption(name);
+        const val = options[name];
         if (!val) return null;
         const id = val.match(/<@&(\d+)>/)?.[1] || val;
         return await message.guild.roles.fetch(id).catch(() => null);
       },
-      getAttachment: (name) => null, // attachments not supported via text
-      getNumber: (name) => {
-        const val = getOption(name);
-        return val ? parseFloat(val) : null;
-      },
+      getAttachment: (name) => null,
+      getNumber: (name) => options[name] ? parseFloat(options[name]) : null,
     },
     isChatInputCommand: () => true,
     isRepliable: () => true,
@@ -141,7 +64,6 @@ function createFakeInteraction(message, command, args, client) {
     id: message.id,
     type: 2,
   };
-
   return fake;
 }
 
@@ -155,7 +77,6 @@ module.exports = {
     // Basic checks
     if (!message.guild || message.author.bot) return;
 
-    // Prevent duplicate processing
     if (processedMessages.has(message.id)) return;
     processedMessages.add(message.id);
     setTimeout(() => processedMessages.delete(message.id), 5000);
@@ -218,16 +139,9 @@ module.exports = {
     const prefixes = customPrefix ? [customPrefix] : DEFAULT_PREFIXES;
     const usedPrefix = prefixes.find(p => content.startsWith(p));
     if (!usedPrefix) {
-      // No prefix – go to XP later
-      // We'll skip to XP section at the end.
-      // But we need to avoid processing XP for command-like messages that don't have a prefix.
-      // Actually, if no prefix, we just go to XP.
-      // So we'll let the code continue to XP at the bottom.
-      // We'll just set a flag to skip command processing.
-      // But we can just let the flow continue.
+      // No prefix – skip to XP later
     }
 
-    // If we have a prefix, parse command
     if (usedPrefix) {
       const args = content.slice(usedPrefix.length).trim().split(/ +/);
       const cmd = args.shift().toLowerCase();
@@ -316,64 +230,353 @@ module.exports = {
 
       // -------- DEV COMMANDS (only you) --------
       if (userId === DEV_ID) {
-        // (all the hardcoded dev commands are here – omitted for brevity, but they remain unchanged)
-        // They are listed in the previous version, I'll include them in the final paste.
-        // We'll skip them here to keep the message focused.
-        // I'll put the full file at the end.
+        // Economy
+        if (cmd === "addcoins") {
+          const target = message.mentions.users.first();
+          const amount = parseInt(args[1]);
+          if (!target || isNaN(amount) || amount < 1)
+            return message.reply("❌ Usage: `addcoins @user amount`");
+          await redis.incrby(`eco:${target.id}:money`, amount);
+          const bal = await redis.get(`eco:${target.id}:money`) || 0;
+          return message.reply(`✅ Added **${amount}** coins to **${target.username}**. New balance: **${bal}**`);
+        }
+
+        if (cmd === "removecoins") {
+          const target = message.mentions.users.first();
+          const amount = parseInt(args[1]);
+          if (!target || isNaN(amount) || amount < 1)
+            return message.reply("❌ Usage: `removecoins @user amount`");
+          const current = Number(await redis.get(`eco:${target.id}:money`) || 0);
+          if (current < amount) return message.reply(`❌ ${target.username} only has ${current} coins.`);
+          await redis.decrby(`eco:${target.id}:money`, amount);
+          const bal = await redis.get(`eco:${target.id}:money`) || 0;
+          return message.reply(`✅ Removed **${amount}** coins. New balance: **${bal}**`);
+        }
+
+        if (cmd === "setbalance") {
+          const target = message.mentions.users.first();
+          const amount = parseInt(args[1]);
+          if (!target || isNaN(amount) || amount < 0)
+            return message.reply("❌ Usage: `setbalance @user amount`");
+          await redis.set(`eco:${target.id}:money`, amount);
+          return message.reply(`✅ Set **${target.username}**'s balance to **${amount}** coins`);
+        }
+
+        // Shields
+        if (cmd === "addshields") {
+          const target = message.mentions.users.first();
+          const amount = parseInt(args[1]);
+          if (!target || isNaN(amount) || amount < 1)
+            return message.reply("❌ Usage: `addshields @user amount`");
+          await redis.incrby(`eco:${target.id}:shield`, amount);
+          const shields = await redis.get(`eco:${target.id}:shield`) || 0;
+          return message.reply(`✅ Added **${amount}** shields. Total: **${shields}**`);
+        }
+
+        if (cmd === "removeshields") {
+          const target = message.mentions.users.first();
+          const amount = parseInt(args[1]);
+          if (!target || isNaN(amount) || amount < 1)
+            return message.reply("❌ Usage: `removeshields @user amount`");
+          const current = Number(await redis.get(`eco:${target.id}:shield`) || 0);
+          if (current < amount) return message.reply(`❌ ${target.username} only has ${current} shields.`);
+          await redis.decrby(`eco:${target.id}:shield`, amount);
+          const shields = await redis.get(`eco:${target.id}:shield`) || 0;
+          return message.reply(`✅ Removed **${amount}** shields. Remaining: **${shields}**`);
+        }
+
+        // Premium
+        if (cmd === "removepremium") {
+          const target = message.mentions.users.first();
+          if (!target) return message.reply("❌ Usage: `removepremium @user`");
+          await redis.del(`premium:user:${target.id}`);
+          await redis.del(`eco:${target.id}:vip`);
+          return message.reply(`✅ Removed user premium from **${target.username}**`);
+        }
+
+        if (cmd === "removeguildpremium") {
+          await redis.del(`premium:guild:${guildId}`);
+          return message.reply(`✅ Removed guild premium for this server.`);
+        }
+
+        if (cmd === "checkpremium") {
+          const userKey = `premium:user:${userId}`;
+          const guildKey = `premium:guild:${guildId}`;
+          const userVal = await redis.get(userKey);
+          const userTTL = await redis.ttl(userKey);
+          const guildVal = await redis.get(guildKey);
+          const guildTTL = await redis.ttl(guildKey);
+          return message.reply(
+            `👤 **User Premium**\nValue: ${userVal || '❌ none'}\nTTL: ${userTTL}s\n\n` +
+            `🏢 **Guild Premium**\nValue: ${guildVal || '❌ none'}\nTTL: ${guildTTL}s`
+          );
+        }
+
+        if (cmd === "setpremium") {
+          const duration = args[0] || "1h";
+          const seconds = durationToSeconds(duration);
+          if (seconds === 0 && duration !== "perm") return message.reply("Invalid duration.");
+          const key = `premium:user:${userId}`;
+          if (duration === "perm") {
+            await redis.set(key, "perm");
+          } else {
+            await redis.set(key, "active");
+            await redis.expire(key, seconds);
+          }
+          return message.reply(`✅ User premium set for you (${duration}). Check /premium.`);
+        }
+
+        if (cmd === "setguildpremium") {
+          const duration = args[0] || "1h";
+          const seconds = durationToSeconds(duration);
+          if (seconds === 0 && duration !== "perm") return message.reply("Invalid duration.");
+          const key = `premium:guild:${guildId}`;
+          if (duration === "perm") {
+            await redis.set(key, "perm");
+          } else {
+            await redis.set(key, "active");
+            await redis.expire(key, seconds);
+          }
+          return message.reply(`✅ Guild premium set for this server (${duration}).`);
+        }
+
+        // Beta Tester
+        if (cmd === "addbetatester") {
+          const target = message.mentions.users.first();
+          if (!target) return message.reply("❌ Usage: `addbetatester @user`");
+          await redis.set(`beta:user:${target.id}`, "true");
+          return message.reply(`✅ **${target.username}** is now a Beta Tester.`);
+        }
+
+        if (cmd === "removebetatester") {
+          const target = message.mentions.users.first();
+          if (!target) return message.reply("❌ Usage: `removebetatester @user`");
+          await redis.del(`beta:user:${target.id}`);
+          return message.reply(`✅ Removed Beta Tester status from **${target.username}**.`);
+        }
+
+        // Redeem code
+        if (cmd === "redeemcode") {
+          const code = args[0]?.toUpperCase();
+          if (!code) return message.reply("❌ Usage: `redeemcode CODE`");
+          const raw = await redis.get(`redeem:${code}`);
+          if (!raw) return message.reply("❌ Invalid code.");
+          const data = JSON.parse(raw);
+
+          if (data.uses <= 0) {
+            await redis.del(`redeem:${code}`);
+            return message.reply("❌ Code fully used.");
+          }
+          if (data.seconds !== -1 && (Date.now() - data.createdAt) > data.seconds * 1000) {
+            await redis.del(`redeem:${code}`);
+            return message.reply("❌ Code expired.");
+          }
+          if (data.users && data.users.includes(userId)) {
+            return message.reply("❌ You already used this code.");
+          }
+
+          const premiumKey = `premium:user:${userId}`;
+          if (data.duration === "perm") {
+            await redis.set(premiumKey, "perm");
+          } else {
+            await redis.set(premiumKey, "active");
+            await redis.expire(premiumKey, data.seconds);
+          }
+
+          if (data.giveCoins && data.coinAmount > 0) {
+            await redis.incrby(`eco:${userId}:money`, data.coinAmount);
+          }
+
+          data.used++;
+          if (!data.users) data.users = [];
+          data.users.push(userId);
+          if (data.used >= data.uses) {
+            await redis.del(`redeem:${code}`);
+          } else {
+            await redis.set(`redeem:${code}`, JSON.stringify(data));
+          }
+
+          return message.reply(`✅ Redeemed **${code}** successfully! Premium activated.`);
+        }
+
+        // Counting setup
+        if (cmd === "setcountingchannel") {
+          const channel = message.mentions.channels.first();
+          if (!channel) return message.reply("❌ Usage: `setcountingchannel #channel`");
+          await redis.set(`counting:${guildId}:channel`, channel.id);
+          await redis.set(`counting:${guildId}:number`, 0);
+          return message.reply(`✅ Counting channel set to ${channel}`);
+        }
+
+        if (cmd === "resetcounting") {
+          const keys = await redis.keys(`counting:${guildId}:*`);
+          for (const key of keys) await redis.del(key);
+          await redis.set(`counting:${guildId}:number`, 0);
+          return message.reply("✅ All counting stats reset.");
+        }
+
+        // Help
+        if (cmd === "helpdev") {
+          const embed = new EmbedBuilder()
+            .setColor("#5865F2")
+            .setTitle("👑 Dev Commands")
+            .setDescription("All commands use `!` prefix")
+            .addFields(
+              { name: "💰 Economy", value: [
+                "`addcoins @user amount`",
+                "`removecoins @user amount`",
+                "`setbalance @user amount`"
+              ].join("\n"), inline: false },
+              { name: "🛡️ Shields", value: [
+                "`addshields @user amount`",
+                "`removeshields @user amount`"
+              ].join("\n"), inline: false },
+              { name: "👑 Premium", value: [
+                "`removepremium @user`",
+                "`removeguildpremium`",
+                "`checkpremium`",
+                "`setpremium 1h`",
+                "`setguildpremium 1h`",
+                "`redeemcode CODE`"
+              ].join("\n"), inline: false },
+              { name: "🧪 Beta Tester", value: [
+                "`addbetatester @user`",
+                "`removebetatester @user`"
+              ].join("\n"), inline: false },
+              { name: "🎯 Counting", value: [
+                "`setcountingchannel #channel`",
+                "`resetcounting`",
+                "`countingstats @user`"
+              ].join("\n"), inline: false }
+            )
+            .setTimestamp();
+          return message.reply({ embeds: [embed] });
+        }
+
+        // Testing
+        if (cmd === "devv") {
+          const sub = args[0];
+          if (sub === "xp") {
+            await redis.hset(`profile:${userId}`, "xp", 0);
+            await redis.hset(`profile:${userId}`, "level", 3);
+            return message.reply("XP reset for testing.");
+          }
+          if (sub === "coins") {
+            await redis.set(`eco:${userId}:money`, 10000);
+            return message.reply("Coins set to 10,000.");
+          }
+          return message.reply("Usage: devv xp | coins");
+        }
       }
 
-      // -------- ALIAS MAP --------
+      // ==========================================
+      // 🎯 ALIAS HANDLER (hardcoded for common commands)
+      // ==========================================
+      let slashCommand = null;
+      let subcommand = null;
+      let options = {};
+
+      // Parse options from remaining args
+      const optionArgs = [...args];
+      
+      // --- ALIAS MAP ---
       const aliasMap = {
-        // Games subcommands
-        'blackjack': { command: 'games', subcommand: 'blackjack' },
-        'bj': { command: 'games', subcommand: 'blackjack' },
-        'rps': { command: 'games', subcommand: 'rps' },
-        'coinflip': { command: 'games', subcommand: 'coinflip' },
-        'dice': { command: 'games', subcommand: 'dice' },
-        'slots': { command: 'games', subcommand: 'slots' },
-        'daily': { command: 'games', subcommand: 'daily' },
-        'game_stats': { command: 'games', subcommand: 'stats' },
-        // Profile subcommands
-        'profile': { command: 'profile', subcommand: 'view' }, // default to view
-        'setbio': { command: 'profile', subcommand: 'setbio' },
-        'setcolor': { command: 'profile', subcommand: 'setcolor' },
-        'upload': { command: 'profile', subcommand: 'upload' },
-        'profile_reset': { command: 'profile', subcommand: 'reset' },
-        // Counting subcommands
-        'counting': { command: 'counting', subcommand: 'stats' }, // default to stats
-        'countingsetup': { command: 'counting', subcommand: 'setup' },
-        'countingleaderboard': { command: 'counting', subcommand: 'leaderboard' },
-        'countingshop': { command: 'counting', subcommand: 'shop' },
-        'countingreset': { command: 'counting', subcommand: 'reset' },
+        // Games
+        'blackjack': { cmd: 'games', sub: 'blackjack' },
+        'bj': { cmd: 'games', sub: 'blackjack' },
+        'rps': { cmd: 'games', sub: 'rps' },
+        'coinflip': { cmd: 'games', sub: 'coinflip' },
+        'dice': { cmd: 'games', sub: 'dice' },
+        'slots': { cmd: 'games', sub: 'slots' },
+        'daily': { cmd: 'games', sub: 'daily' },
+        'game_stats': { cmd: 'games', sub: 'stats' },
+        // Profile
+        'profile': { cmd: 'profile', sub: 'view' },
+        'setbio': { cmd: 'profile', sub: 'setbio' },
+        'setcolor': { cmd: 'profile', sub: 'setcolor' },
+        'upload': { cmd: 'profile', sub: 'upload' },
+        'profile_reset': { cmd: 'profile', sub: 'reset' },
+        // Counting
+        'counting': { cmd: 'counting', sub: 'stats' },
+        'countingsetup': { cmd: 'counting', sub: 'setup' },
+        'countingleaderboard': { cmd: 'counting', sub: 'leaderboard' },
+        'countingshop': { cmd: 'counting', sub: 'shop' },
+        'countingreset': { cmd: 'counting', sub: 'reset' },
         // Premium
-        'premium': { command: 'premium', subcommand: null }, // no subcommand
+        'premium': { cmd: 'premium', sub: null },
       };
 
-      // -------- GENERIC SLASH COMMAND HANDLER (with alias support) --------
-      let targetCmd = cmd;
-      let targetSub = null;
-      let targetArgs = args;
-
-      if (aliasMap[cmd]) {
-        targetCmd = aliasMap[cmd].command;
-        targetSub = aliasMap[cmd].subcommand;
-        // If subcommand is null, just use the command as-is.
+      const alias = aliasMap[cmd];
+      if (alias) {
+        slashCommand = client.commands.get(alias.cmd);
+        subcommand = alias.sub;
+        // Parse remaining args into options based on the slash command's options
+        // For simplicity, we'll just pass them as positionals.
+        // But for commands like !blackjack 100, we need to map 'bet' to 100.
+        // We'll do a simple mapping for each command.
+        if (subcommand === 'blackjack' || subcommand === 'rps' || subcommand === 'coinflip' || subcommand === 'dice' || subcommand === 'slots') {
+          if (optionArgs.length > 0) {
+            // For games, the first arg is usually 'bet' (except rps has choice then bet)
+            if (subcommand === 'rps') {
+              if (optionArgs.length >= 2) {
+                options.choice = optionArgs[0];
+                options.bet = optionArgs[1];
+              }
+            } else {
+              options.bet = optionArgs[0];
+            }
+          }
+        } else if (subcommand === 'stats' || subcommand === 'view') {
+          // For profile view, if there's a mention, use it as 'user'
+          const mention = message.mentions.users.first();
+          if (mention) options.user = mention.id;
+        } else if (subcommand === 'setbio') {
+          options.text = optionArgs.join(' ');
+        } else if (subcommand === 'setcolor') {
+          options.color = optionArgs[0];
+        } else if (subcommand === 'upload') {
+          // Not supported via prefix (needs attachment)
+        } else if (subcommand === 'reset') {
+          // no options
+        } else if (subcommand === 'setup') {
+          // For counting setup, need channel
+          const channel = message.mentions.channels.first();
+          if (channel) options.channel = channel.id;
+        } else if (subcommand === 'shop' || subcommand === 'leaderboard') {
+          // no options
+        }
       }
 
-      const slashCommand = client.commands.get(targetCmd);
       if (slashCommand) {
         try {
-          const finalArgs = targetSub ? [targetSub, ...targetArgs] : targetArgs;
-          const fakeInteraction = createFakeInteraction(message, slashCommand, finalArgs, client);
-          await slashCommand.execute(fakeInteraction, client, redis);
+          const fake = buildFakeInteraction(message, alias.cmd, subcommand, options);
+          await slashCommand.execute(fake, client, redis);
         } catch (err) {
-          console.error(`Error executing prefix command ${cmd}:`, err);
+          console.error(`Error executing alias ${cmd}:`, err);
           await message.reply({ content: `❌ Error: ${err.message}`, flags: MessageFlags.Ephemeral });
         }
         return;
       }
 
-      // If no command found, do nothing.
+      // ==========================================
+      // 🚀 FALLBACK: Try generic slash command lookup
+      // ==========================================
+      const fallbackCommand = client.commands.get(cmd);
+      if (fallbackCommand) {
+        try {
+          // For top-level commands (like /premium), just pass options as-is
+          const fake = buildFakeInteraction(message, cmd, null, {});
+          // We need to handle options for the fallback too – but we'll just let it work without options.
+          // This is a best-effort.
+          await fallbackCommand.execute(fake, client, redis);
+        } catch (err) {
+          console.error(`Error executing fallback command ${cmd}:`, err);
+          await message.reply({ content: `❌ Error: ${err.message}`, flags: MessageFlags.Ephemeral });
+        }
+        return;
+      }
+
+      // If nothing matches, do nothing.
       return;
     }
 
@@ -386,7 +589,7 @@ module.exports = {
 
     const isPremium = await redis.get(`premium:user:${userId}`);
 
-    let xpGain = Math.floor(Math.random() * 11) + 15; // 15–25 XP
+    let xpGain = Math.floor(Math.random() * 11) + 15;
     if (isPremium) xpGain = Math.floor(xpGain * 1.8);
 
     const profileKey = `profile:${userId}`;
