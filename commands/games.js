@@ -1,4 +1,4 @@
-// commands/games.js – FULL WITH UPDATED SLOTS (three-of-a-kind only)
+// commands/games.js – Blackjack fixed (deduct bet upfront)
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 
 // =========================
@@ -104,19 +104,22 @@ class BlackjackGame {
     return true;
   }
 
+  // ─── FIXED: bet is already deducted, so we add winnings only ───
   async processResult() {
     let winAmount = 0;
+    // Blackjack and normal win: profit = bet (since bet already deducted)
     if (this.result === 'blackjack' || this.result === 'win') {
-      winAmount = this.bet * 2;
+      winAmount = this.bet * 2; // returned bet + profit
       await this.economy.addBalance(this.userId, winAmount);
-      await this.economy.addTotalEarned(this.userId, winAmount);
+      await this.economy.addTotalEarned(this.userId, this.bet); // profit = bet
       await this.redis.incr(`games:${this.userId}:blackjack_wins`);
     } else if (this.result === 'push') {
-      winAmount = this.bet;
+      winAmount = this.bet; // return the deducted bet
       await this.economy.addBalance(this.userId, winAmount);
       await this.redis.incr(`games:${this.userId}:blackjack_ties`);
     } else {
-      await this.economy.takeBalance(this.userId, this.bet);
+      // lose or bust – bet already deducted, no addition
+      winAmount = 0;
       await this.economy.addTotalSpent(this.userId, this.bet);
       await this.redis.incr(`games:${this.userId}:blackjack_losses`);
     }
@@ -313,7 +316,7 @@ module.exports = {
     };
 
     // =========================
-    // 🎮 RPS
+    // 🎮 RPS (unchanged)
     // =========================
     if (sub === "rps") {
       const choice = interaction.options.getString("choice");
@@ -380,7 +383,7 @@ module.exports = {
     }
 
     // =========================
-    // 🪙 COINFLIP
+    // 🪙 COINFLIP (unchanged)
     // =========================
     if (sub === "coinflip") {
       const side = interaction.options.getString("side");
@@ -428,7 +431,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎲 DICE
+    // 🎲 DICE (unchanged)
     // =========================
     if (sub === "dice") {
       const number = interaction.options.getInteger("number");
@@ -478,7 +481,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎰 SLOTS – three-of-a-kind only, weighted symbols
+    // 🎰 SLOTS (unchanged)
     // =========================
     if (sub === "slots") {
       const bet = interaction.options.getInteger("bet");
@@ -497,7 +500,6 @@ module.exports = {
         });
       }
 
-      // Weighted pool: 5x 🍉, 4x 🍇, 3x 🎰
       const pool = [
         '🍉','🍉','🍉','🍉','🍉',
         '🍇','🍇','🍇','🍇',
@@ -546,7 +548,7 @@ module.exports = {
     }
 
     // =========================
-    // 🃏 BLACKJACK – reaction-based, persistent
+    // 🃏 BLACKJACK – FIXED (deduct bet upfront)
     // =========================
     if (sub === "blackjack") {
       const bet = interaction.options.getInteger("bet");
@@ -557,6 +559,7 @@ module.exports = {
         });
       }
       
+      // ─── DEDUCT BET UPFRONT ───
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
@@ -564,9 +567,10 @@ module.exports = {
           flags: MessageFlags.Ephemeral
         });
       }
+      await takeBalance(userId, bet);
 
       const game = new BlackjackGame(userId, bet, economy, redis);
-      game.setBalance(balance);
+      game.setBalance(balance - bet); // update balance after deduction
 
       if (game.gameOver) {
         await game.processResult();
@@ -633,7 +637,7 @@ module.exports = {
     }
 
     // =========================
-    // 💰 DAILY
+    // 💰 DAILY (unchanged)
     // =========================
     if (sub === "daily") {
       const lastDaily = await redis.get(`games:${userId}:daily`);
@@ -665,7 +669,7 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 SHOP
+    // 🛒 SHOP (unchanged)
     // =========================
     if (sub === "shop") {
       const embed = new EmbedBuilder()
@@ -682,7 +686,7 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 BUY
+    // 🛒 BUY (unchanged)
     // =========================
     if (sub === "buy") {
       const item = interaction.options.getString("item");
@@ -725,7 +729,7 @@ module.exports = {
     }
 
     // =========================
-    // 📊 STATS
+    // 📊 STATS (unchanged)
     // =========================
     if (sub === "stats") {
       const stats = await redis.hgetall(`games:${userId}`) || {};
