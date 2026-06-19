@@ -1,4 +1,4 @@
-// events/giveawayEnd.js – fixed Redis zRange method
+// events/giveawayEnd.js – uses zRangeByScore (v4)
 const { Events } = require("discord.js");
 
 module.exports = {
@@ -8,8 +8,8 @@ module.exports = {
     setInterval(async () => {
       try {
         const now = Date.now();
-        // Use zRange with BYSCORE (v4 syntax)
-        const ending = await redis.zRange('giveaway:ending', 0, now, { BYSCORE: true });
+        // Correct v4 method: zRangeByScore
+        const ending = await redis.zRangeByScore('giveaway:ending', 0, now);
         for (const key of ending) {
           const data = await redis.hGetAll(key);
           if (!data || data.ended === 'true') {
