@@ -1,18 +1,7 @@
-// blacklist.js – Blacklist check and embed builder
+// blacklist.js
 const { EmbedBuilder } = require("discord.js");
 
 async function checkBlacklist(redis, userId, guildId) {
-  // Check user blacklist
-  const userData = await redis.get(`blacklist:user:${userId}`);
-  if (userData) {
-    const data = JSON.parse(userData);
-    if (data.expiresAt && Date.now() > data.expiresAt) {
-      await redis.del(`blacklist:user:${userId}`);
-      return null;
-    }
-    return { type: 'user', data };
-  }
-
   // Check guild blacklist
   const guildData = await redis.get(`blacklist:guild:${guildId}`);
   if (guildData) {
@@ -22,6 +11,17 @@ async function checkBlacklist(redis, userId, guildId) {
       return null;
     }
     return { type: 'guild', data };
+  }
+
+  // Check user blacklist
+  const userData = await redis.get(`blacklist:user:${userId}`);
+  if (userData) {
+    const data = JSON.parse(userData);
+    if (data.expiresAt && Date.now() > data.expiresAt) {
+      await redis.del(`blacklist:user:${userId}`);
+      return null;
+    }
+    return { type: 'user', data };
   }
 
   return null;
