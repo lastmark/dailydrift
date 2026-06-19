@@ -6,6 +6,9 @@ const fs = require("fs");
 const path = require("path");
 const setupLogger = require("./logger");
 
+// ---- BLACKLIST HELPER ----
+const { checkBlacklist, buildBlacklistEmbed } = require("./blacklist.js");
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -80,6 +83,22 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.isChatInputCommand()) {
     const cmd = client.commands.get(interaction.commandName);
     if (!cmd) return;
+
+    // ---- MAINTENANCE CHECK ----
+    const maintenanceKey = `maintenance:${interaction.guild.id}`;
+    if (await redis.get(maintenanceKey) === "true") {
+      return interaction.reply({
+        content: "🔧 The bot is currently under maintenance. Please try again later.",
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    // ---- BLACKLIST CHECK ----
+    const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
+    if (blacklist) {
+      const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
+      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    }
 
     try {
       await cmd.execute(interaction, client, redis);
@@ -256,6 +275,12 @@ client.once("ready", async () => {
   const { ActivityType } = require("discord.js");
   client.user.setActivity("/help", { type: ActivityType.Playing });
   client.user.setStatus("online");
+
+  // ---- HEARTBEAT – tells helper we're alive ----
+  await redis.set('bot:heartbeat', Date.now());
+  setInterval(async () => {
+    await redis.set('bot:heartbeat', Date.now());
+  }, 60000);
 
   // ===================================================
   // 🎂 AUTOMATED MIDNIGHT BIRTHDAY CRON CHECK ENGINE
