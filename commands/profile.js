@@ -1,8 +1,9 @@
-// commands/profile.js – FULL WITH BETA TESTER
+// commands/profile.js – FULL WITH NUMBER FORMATTING
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
 const fs = require("fs");
+const { formatNumber } = require("../utils.js");
 
 // ---------- FONT SETUP ----------
 const fontPath = path.join(__dirname, "../font.ttf");
@@ -87,7 +88,6 @@ module.exports = {
   async execute(interaction, client, redis) {
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
-    const user = interaction.user;
 
     // ---------- HELPERS ----------
     const getBalance = async (id) => Number(await redis.get(`eco:${id}:money`) || 0);
@@ -284,7 +284,6 @@ module.exports = {
       ctx.font = getFont("bold", 32);
       ctx.fillText(targetUser.username, 270, 100);
 
-      // --- BADGES: Premium + Beta Tester ---
       let title = "Member";
       if (targetId === "1303357369622990889") {
         title = "Developer";
@@ -310,9 +309,9 @@ module.exports = {
       ctx.font = getFont("bold", 16);
       let xPos = 270;
       const stats = [
-        { label: "Coins:", value: balance },
-        { label: "Shields:", value: shield },
-        { label: "Level:", value: level }
+        { label: "Coins:", value: formatNumber(balance) },
+        { label: "Shields:", value: formatNumber(shield) },
+        { label: "Level:", value: formatNumber(level) }
       ];
       stats.forEach((stat, index) => {
         if (index > 0) {
@@ -354,7 +353,7 @@ module.exports = {
       ctx.fillStyle = "#FFFFFF";
       ctx.font = getFont("bold", 14);
       ctx.textAlign = "center";
-      ctx.fillText(`${xp}/${needed} XP`, barX + barWidth / 2, barY + 17);
+      ctx.fillText(`${formatNumber(xp)}/${formatNumber(needed)} XP`, barX + barWidth / 2, barY + 17);
 
       // Level badge
       ctx.textAlign = "center";
@@ -376,7 +375,7 @@ module.exports = {
       ctx.fillText("LEVEL", levelX, levelY - 12);
       ctx.fillStyle = color;
       ctx.font = getFont("bold", 28);
-      ctx.fillText(level, levelX, levelY + 22);
+      ctx.fillText(formatNumber(level), levelX, levelY + 22);
 
       // Footer
       ctx.textAlign = "left";
@@ -391,10 +390,10 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor(color)
         .setTitle(`${targetUser.username}'s Profile`)
-        .setDescription(`Level ${level} • ${title}`)
+        .setDescription(`Level ${formatNumber(level)} • ${title}`)
         .addFields(
-          { name: "Coins", value: `${balance}`, inline: true },
-          { name: "Shields", value: `${shield}`, inline: true },
+          { name: "Coins", value: `${formatNumber(balance)}`, inline: true },
+          { name: "Shields", value: `${formatNumber(shield)}`, inline: true },
           { name: "Progress", value: `${Math.round(progress * 100)}% to next level`, inline: true }
         )
         .setImage("attachment://profile.png")
