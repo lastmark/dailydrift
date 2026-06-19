@@ -1,7 +1,9 @@
-// events/messageCreate.js – STABLE ORIGINAL VERSION (no alias mapping)
+// events/messageCreate.js – FULL WITH BLACKLIST, !devblacklist, and all existing commands
 const { Events, EmbedBuilder } = require("discord.js");
+const { checkBlacklist, buildBlacklistEmbed } = require("../blacklist.js");
 
 const DEV_ID = "1303357369622990889";
+const DEFAULT_PREFIXES = ['!', '?'];
 
 // Helper: convert duration string to seconds
 function durationToSeconds(input) {
@@ -26,7 +28,19 @@ module.exports = {
     // Basic checks
     if (!message.guild || message.author.bot) return;
 
-    // Prevent duplicate processing of the same message
+    // ---- BLACKLIST CHECK ----
+    const blacklist = await checkBlacklist(redis, message.author.id, message.guild.id);
+    if (blacklist) {
+      // If it's a command, send embed and delete
+      if (message.content.startsWith("!")) {
+        const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
+        await message.reply({ embeds: [embed] });
+        await message.delete().catch(() => {});
+      }
+      return; // block all messages
+    }
+
+    // Prevent duplicate processing
     if (processedMessages.has(message.id)) return;
     processedMessages.add(message.id);
     setTimeout(() => processedMessages.delete(message.id), 5000);
@@ -49,7 +63,7 @@ module.exports = {
         }
         const runCounting = require("../games/counting.js");
         await runCounting(message, redis);
-        return; // ⛔ Stop – don't process XP / commands
+        return;
       }
     } catch (err) {
       console.error("Counting game error:", err);
@@ -57,7 +71,6 @@ module.exports = {
 
     // ==========================================
     // 💬 MESSAGE COMMANDS (all start with !)
-    // - Process commands BEFORE XP cooldown
     // ==========================================
     if (content.startsWith("!")) {
       const args = content.slice(1).trim().split(/ +/);
@@ -146,245 +159,304 @@ module.exports = {
         return message.reply({ embeds: [embed] });
       }
 
-      // -------- DEV COMMANDS (only you) --------
-      if (userId !== DEV_ID) return;
+      // ==========================================
+      // 🛡️ BLACKLIST MANAGEMENT (dev only)
+      // ==========================================
+      if (userId === DEV_ID) {
+        if (cmd === "devblacklist") {
+          const action = args[0]?.toLowerCase();
+          const targetType = args[1]?.toLowerCase(); // 'user' or 'guild'
+          const targetId = args[2];
+          const reason = args.slice(3).find(a => !a.match(/^(\d+)(d|h|m)$/)) || "No reason provided.";
+          const duration = args.slice(3).find(a => a.match(/^(\d+)(d|h|m)$/)) || "perm";
 
-      // Economy
-      if (cmd === "addcoins") {
-        const target = message.mentions.users.first();
-        const amount = parseInt(args[1]);
-        if (!target || isNaN(amount) || amount < 1)
-          return message.reply("❌ Usage: `!addcoins @user amount`");
-        await redis.incrby(`eco:${target.id}:money`, amount);
-        const bal = await redis.get(`eco:${target.id}:money`) || 0;
-        return message.reply(`✅ Added **${amount}** coins to **${target.username}**. New balance: **${bal}**`);
-      }
+          if (!action || !targetType || !targetId) {
+            return message.reply("❌ Usage: `!devblacklist add user <userId> [reason] [duration]`\n`!devblacklist remove user <userId>`\n`!devblacklist list`");
+          }
 
-      if (cmd === "removecoins") {
-        const target = message.mentions.users.first();
-        const amount = parseInt(args[1]);
-        if (!target || isNaN(amount) || amount < 1)
-          return message.reply("❌ Usage: `!removecoins @user amount`");
-        const current = Number(await redis.get(`eco:${target.id}:money`) || 0);
-        if (current < amount) return message.reply(`❌ ${target.username} only has ${current} coins.`);
-        await redis.decrby(`eco:${target.id}:money`, amount);
-        const bal = await redis.get(`eco:${target.id}:money`) || 0;
-        return message.reply(`✅ Removed **${amount}** coins. New balance: **${bal}**`);
-      }
-
-      if (cmd === "setbalance") {
-        const target = message.mentions.users.first();
-        const amount = parseInt(args[1]);
-        if (!target || isNaN(amount) || amount < 0)
-          return message.reply("❌ Usage: `!setbalance @user amount`");
-        await redis.set(`eco:${target.id}:money`, amount);
-        return message.reply(`✅ Set **${target.username}**'s balance to **${amount}** coins`);
-      }
-
-      // Shields
-      if (cmd === "addshields") {
-        const target = message.mentions.users.first();
-        const amount = parseInt(args[1]);
-        if (!target || isNaN(amount) || amount < 1)
-          return message.reply("❌ Usage: `!addshields @user amount`");
-        await redis.incrby(`eco:${target.id}:shield`, amount);
-        const shields = await redis.get(`eco:${target.id}:shield`) || 0;
-        return message.reply(`✅ Added **${amount}** shields. Total: **${shields}**`);
-      }
-
-      if (cmd === "removeshields") {
-        const target = message.mentions.users.first();
-        const amount = parseInt(args[1]);
-        if (!target || isNaN(amount) || amount < 1)
-          return message.reply("❌ Usage: `!removeshields @user amount`");
-        const current = Number(await redis.get(`eco:${target.id}:shield`) || 0);
-        if (current < amount) return message.reply(`❌ ${target.username} only has ${current} shields.`);
-        await redis.decrby(`eco:${target.id}:shield`, amount);
-        const shields = await redis.get(`eco:${target.id}:shield`) || 0;
-        return message.reply(`✅ Removed **${amount}** shields. Remaining: **${shields}**`);
-      }
-
-      // Premium
-      if (cmd === "removepremium") {
-        const target = message.mentions.users.first();
-        if (!target) return message.reply("❌ Usage: `!removepremium @user`");
-        await redis.del(`premium:user:${target.id}`);
-        await redis.del(`eco:${target.id}:vip`);
-        return message.reply(`✅ Removed user premium from **${target.username}**`);
-      }
-
-      if (cmd === "removeguildpremium") {
-        await redis.del(`premium:guild:${guildId}`);
-        return message.reply(`✅ Removed guild premium for this server.`);
-      }
-
-      if (cmd === "checkpremium") {
-        const userKey = `premium:user:${userId}`;
-        const guildKey = `premium:guild:${guildId}`;
-        const userVal = await redis.get(userKey);
-        const userTTL = await redis.ttl(userKey);
-        const guildVal = await redis.get(guildKey);
-        const guildTTL = await redis.ttl(guildKey);
-        return message.reply(
-          `👤 **User Premium**\nValue: ${userVal || '❌ none'}\nTTL: ${userTTL}s\n\n` +
-          `🏢 **Guild Premium**\nValue: ${guildVal || '❌ none'}\nTTL: ${guildTTL}s`
-        );
-      }
-
-      if (cmd === "setpremium") {
-        const duration = args[0] || "1h";
-        const seconds = durationToSeconds(duration);
-        if (seconds === 0 && duration !== "perm") return message.reply("Invalid duration.");
-        const key = `premium:user:${userId}`;
-        if (duration === "perm") {
-          await redis.set(key, "perm");
-        } else {
-          await redis.set(key, "active");
-          await redis.expire(key, seconds);
+          if (action === "add") {
+            const seconds = durationToSeconds(duration);
+            if (seconds === 0 && duration !== "perm") return message.reply("❌ Invalid duration. Use `7d`, `12h`, `30m`, or `perm`.");
+            const key = `blacklist:${targetType}:${targetId}`;
+            const data = {
+              reason: reason,
+              createdAt: Date.now()
+            };
+            if (seconds !== -1) {
+              data.expiresAt = Date.now() + seconds * 1000;
+            }
+            await redis.set(key, JSON.stringify(data));
+            if (seconds !== -1) {
+              await redis.expire(key, seconds);
+            }
+            return message.reply(`✅ Blacklisted **${targetType}** \`${targetId}\` until ${duration}. Reason: ${reason}`);
+          } else if (action === "remove") {
+            const key = `blacklist:${targetType}:${targetId}`;
+            await redis.del(key);
+            return message.reply(`✅ Removed **${targetType}** \`${targetId}\` from blacklist.`);
+          } else if (action === "list") {
+            const keys = await redis.keys(`blacklist:*`);
+            if (keys.length === 0) return message.reply("📭 No blacklisted entries.");
+            const list = [];
+            for (const key of keys) {
+              const data = JSON.parse(await redis.get(key));
+              const [prefix, type, id] = key.split(':');
+              const expires = data.expiresAt ? `<t:${Math.floor(data.expiresAt / 1000)}:R>` : 'Permanent';
+              list.push(`**${type}** \`${id}\` — Expires: ${expires} — Reason: ${data.reason || 'None'}`);
+            }
+            return message.reply(list.join("\n"));
+          } else {
+            return message.reply("❌ Invalid action. Use `add`, `remove`, or `list`.");
+          }
         }
-        return message.reply(`✅ User premium set for you (${duration}). Check /premium.`);
       }
 
-      if (cmd === "setguildpremium") {
-        const duration = args[0] || "1h";
-        const seconds = durationToSeconds(duration);
-        if (seconds === 0 && duration !== "perm") return message.reply("Invalid duration.");
-        const key = `premium:guild:${guildId}`;
-        if (duration === "perm") {
-          await redis.set(key, "perm");
-        } else {
-          await redis.set(key, "active");
-          await redis.expire(key, seconds);
-        }
-        return message.reply(`✅ Guild premium set for this server (${duration}).`);
-      }
-
-      // -------- Beta Tester management --------
-      if (cmd === "addbetatester") {
-        const target = message.mentions.users.first();
-        if (!target) return message.reply("❌ Usage: `!addbetatester @user`");
-        await redis.set(`beta:user:${target.id}`, "true");
-        return message.reply(`✅ **${target.username}** is now a Beta Tester.`);
-      }
-
-      if (cmd === "removebetatester") {
-        const target = message.mentions.users.first();
-        if (!target) return message.reply("❌ Usage: `!removebetatester @user`");
-        await redis.del(`beta:user:${target.id}`);
-        return message.reply(`✅ Removed Beta Tester status from **${target.username}**.`);
-      }
-
-      // -------- Redeem code (dev only) --------
-      if (cmd === "redeemcode") {
-        const code = args[0]?.toUpperCase();
-        if (!code) return message.reply("❌ Usage: `!redeemcode CODE`");
-        const raw = await redis.get(`redeem:${code}`);
-        if (!raw) return message.reply("❌ Invalid code.");
-        const data = JSON.parse(raw);
-
-        if (data.uses <= 0) {
-          await redis.del(`redeem:${code}`);
-          return message.reply("❌ Code fully used.");
-        }
-        if (data.seconds !== -1 && (Date.now() - data.createdAt) > data.seconds * 1000) {
-          await redis.del(`redeem:${code}`);
-          return message.reply("❌ Code expired.");
-        }
-        if (data.users && data.users.includes(userId)) {
-          return message.reply("❌ You already used this code.");
+      // ==========================================
+      // 👑 DEV COMMANDS (only you)
+      // ==========================================
+      if (userId === DEV_ID) {
+        // Economy
+        if (cmd === "addcoins") {
+          const target = message.mentions.users.first();
+          const amount = parseInt(args[1]);
+          if (!target || isNaN(amount) || amount < 1)
+            return message.reply("❌ Usage: `!addcoins @user amount`");
+          await redis.incrby(`eco:${target.id}:money`, amount);
+          const bal = await redis.get(`eco:${target.id}:money`) || 0;
+          return message.reply(`✅ Added **${amount}** coins to **${target.username}**. New balance: **${bal}**`);
         }
 
-        const premiumKey = `premium:user:${userId}`;
-        if (data.duration === "perm") {
-          await redis.set(premiumKey, "perm");
-        } else {
-          await redis.set(premiumKey, "active");
-          await redis.expire(premiumKey, data.seconds);
+        if (cmd === "removecoins") {
+          const target = message.mentions.users.first();
+          const amount = parseInt(args[1]);
+          if (!target || isNaN(amount) || amount < 1)
+            return message.reply("❌ Usage: `!removecoins @user amount`");
+          const current = Number(await redis.get(`eco:${target.id}:money`) || 0);
+          if (current < amount) return message.reply(`❌ ${target.username} only has ${current} coins.`);
+          await redis.decrby(`eco:${target.id}:money`, amount);
+          const bal = await redis.get(`eco:${target.id}:money`) || 0;
+          return message.reply(`✅ Removed **${amount}** coins. New balance: **${bal}**`);
         }
 
-        if (data.giveCoins && data.coinAmount > 0) {
-          await redis.incrby(`eco:${userId}:money`, data.coinAmount);
+        if (cmd === "setbalance") {
+          const target = message.mentions.users.first();
+          const amount = parseInt(args[1]);
+          if (!target || isNaN(amount) || amount < 0)
+            return message.reply("❌ Usage: `!setbalance @user amount`");
+          await redis.set(`eco:${target.id}:money`, amount);
+          return message.reply(`✅ Set **${target.username}**'s balance to **${amount}** coins`);
         }
 
-        data.used++;
-        if (!data.users) data.users = [];
-        data.users.push(userId);
-        if (data.used >= data.uses) {
-          await redis.del(`redeem:${code}`);
-        } else {
-          await redis.set(`redeem:${code}`, JSON.stringify(data));
+        // Shields
+        if (cmd === "addshields") {
+          const target = message.mentions.users.first();
+          const amount = parseInt(args[1]);
+          if (!target || isNaN(amount) || amount < 1)
+            return message.reply("❌ Usage: `!addshields @user amount`");
+          await redis.incrby(`eco:${target.id}:shield`, amount);
+          const shields = await redis.get(`eco:${target.id}:shield`) || 0;
+          return message.reply(`✅ Added **${amount}** shields. Total: **${shields}**`);
         }
 
-        return message.reply(`✅ Redeemed **${code}** successfully! Premium activated.`);
-      }
-
-      // Counting setup
-      if (cmd === "setcountingchannel") {
-        const channel = message.mentions.channels.first();
-        if (!channel) return message.reply("❌ Usage: `!setcountingchannel #channel`");
-        await redis.set(`counting:${guildId}:channel`, channel.id);
-        await redis.set(`counting:${guildId}:number`, 0);
-        return message.reply(`✅ Counting channel set to ${channel}`);
-      }
-
-      if (cmd === "resetcounting") {
-        const keys = await redis.keys(`counting:${guildId}:*`);
-        for (const key of keys) await redis.del(key);
-        await redis.set(`counting:${guildId}:number`, 0);
-        return message.reply("✅ All counting stats reset.");
-      }
-
-      // -------- Help (updated with Beta Tester) --------
-      if (cmd === "helpdev") {
-        const embed = new EmbedBuilder()
-          .setColor("#5865F2")
-          .setTitle("👑 Dev Commands")
-          .setDescription("All commands use `!` prefix")
-          .addFields(
-            { name: "💰 Economy", value: [
-              "`!addcoins @user amount`",
-              "`!removecoins @user amount`",
-              "`!setbalance @user amount`"
-            ].join("\n"), inline: false },
-            { name: "🛡️ Shields", value: [
-              "`!addshields @user amount`",
-              "`!removeshields @user amount`"
-            ].join("\n"), inline: false },
-            { name: "👑 Premium", value: [
-              "`!removepremium @user`",
-              "`!removeguildpremium`",
-              "`!checkpremium`",
-              "`!setpremium 1h`",
-              "`!setguildpremium 1h`",
-              "`!redeemcode CODE`"
-            ].join("\n"), inline: false },
-            { name: "🧪 Beta Tester", value: [
-              "`!addbetatester @user`",
-              "`!removebetatester @user`"
-            ].join("\n"), inline: false },
-            { name: "🎯 Counting", value: [
-              "`!setcountingchannel #channel`",
-              "`!resetcounting`",
-              "`!countingstats @user`"
-            ].join("\n"), inline: false }
-          )
-          .setTimestamp();
-        return message.reply({ embeds: [embed] });
-      }
-
-      // -------- Testing / misc --------
-      if (cmd === "devv") {
-        const sub = args[0];
-        if (sub === "xp") {
-          await redis.hset(`profile:${userId}`, "xp", 0);
-          await redis.hset(`profile:${userId}`, "level", 3);
-          return message.reply("XP reset for testing.");
+        if (cmd === "removeshields") {
+          const target = message.mentions.users.first();
+          const amount = parseInt(args[1]);
+          if (!target || isNaN(amount) || amount < 1)
+            return message.reply("❌ Usage: `!removeshields @user amount`");
+          const current = Number(await redis.get(`eco:${target.id}:shield`) || 0);
+          if (current < amount) return message.reply(`❌ ${target.username} only has ${current} shields.`);
+          await redis.decrby(`eco:${target.id}:shield`, amount);
+          const shields = await redis.get(`eco:${target.id}:shield`) || 0;
+          return message.reply(`✅ Removed **${amount}** shields. Remaining: **${shields}**`);
         }
-        if (sub === "coins") {
-          await redis.set(`eco:${userId}:money`, 10000);
-          return message.reply("Coins set to 10,000.");
+
+        // Premium
+        if (cmd === "removepremium") {
+          const target = message.mentions.users.first();
+          if (!target) return message.reply("❌ Usage: `!removepremium @user`");
+          await redis.del(`premium:user:${target.id}`);
+          await redis.del(`eco:${target.id}:vip`);
+          return message.reply(`✅ Removed user premium from **${target.username}**`);
         }
-        return message.reply("Usage: !devv xp | coins");
+
+        if (cmd === "removeguildpremium") {
+          await redis.del(`premium:guild:${guildId}`);
+          return message.reply(`✅ Removed guild premium for this server.`);
+        }
+
+        if (cmd === "checkpremium") {
+          const userKey = `premium:user:${userId}`;
+          const guildKey = `premium:guild:${guildId}`;
+          const userVal = await redis.get(userKey);
+          const userTTL = await redis.ttl(userKey);
+          const guildVal = await redis.get(guildKey);
+          const guildTTL = await redis.ttl(guildKey);
+          return message.reply(
+            `👤 **User Premium**\nValue: ${userVal || '❌ none'}\nTTL: ${userTTL}s\n\n` +
+            `🏢 **Guild Premium**\nValue: ${guildVal || '❌ none'}\nTTL: ${guildTTL}s`
+          );
+        }
+
+        if (cmd === "setpremium") {
+          const duration = args[0] || "1h";
+          const seconds = durationToSeconds(duration);
+          if (seconds === 0 && duration !== "perm") return message.reply("Invalid duration.");
+          const key = `premium:user:${userId}`;
+          if (duration === "perm") {
+            await redis.set(key, "perm");
+          } else {
+            await redis.set(key, "active");
+            await redis.expire(key, seconds);
+          }
+          return message.reply(`✅ User premium set for you (${duration}). Check /premium.`);
+        }
+
+        if (cmd === "setguildpremium") {
+          const duration = args[0] || "1h";
+          const seconds = durationToSeconds(duration);
+          if (seconds === 0 && duration !== "perm") return message.reply("Invalid duration.");
+          const key = `premium:guild:${guildId}`;
+          if (duration === "perm") {
+            await redis.set(key, "perm");
+          } else {
+            await redis.set(key, "active");
+            await redis.expire(key, seconds);
+          }
+          return message.reply(`✅ Guild premium set for this server (${duration}).`);
+        }
+
+        // Beta Tester
+        if (cmd === "addbetatester") {
+          const target = message.mentions.users.first();
+          if (!target) return message.reply("❌ Usage: `!addbetatester @user`");
+          await redis.set(`beta:user:${target.id}`, "true");
+          return message.reply(`✅ **${target.username}** is now a Beta Tester.`);
+        }
+
+        if (cmd === "removebetatester") {
+          const target = message.mentions.users.first();
+          if (!target) return message.reply("❌ Usage: `!removebetatester @user`");
+          await redis.del(`beta:user:${target.id}`);
+          return message.reply(`✅ Removed Beta Tester status from **${target.username}**.`);
+        }
+
+        // Redeem code
+        if (cmd === "redeemcode") {
+          const code = args[0]?.toUpperCase();
+          if (!code) return message.reply("❌ Usage: `!redeemcode CODE`");
+          const raw = await redis.get(`redeem:${code}`);
+          if (!raw) return message.reply("❌ Invalid code.");
+          const data = JSON.parse(raw);
+
+          if (data.uses <= 0) {
+            await redis.del(`redeem:${code}`);
+            return message.reply("❌ Code fully used.");
+          }
+          if (data.seconds !== -1 && (Date.now() - data.createdAt) > data.seconds * 1000) {
+            await redis.del(`redeem:${code}`);
+            return message.reply("❌ Code expired.");
+          }
+          if (data.users && data.users.includes(userId)) {
+            return message.reply("❌ You already used this code.");
+          }
+
+          const premiumKey = `premium:user:${userId}`;
+          if (data.duration === "perm") {
+            await redis.set(premiumKey, "perm");
+          } else {
+            await redis.set(premiumKey, "active");
+            await redis.expire(premiumKey, data.seconds);
+          }
+
+          if (data.giveCoins && data.coinAmount > 0) {
+            await redis.incrby(`eco:${userId}:money`, data.coinAmount);
+          }
+
+          data.used++;
+          if (!data.users) data.users = [];
+          data.users.push(userId);
+          if (data.used >= data.uses) {
+            await redis.del(`redeem:${code}`);
+          } else {
+            await redis.set(`redeem:${code}`, JSON.stringify(data));
+          }
+
+          return message.reply(`✅ Redeemed **${code}** successfully! Premium activated.`);
+        }
+
+        // Counting setup
+        if (cmd === "setcountingchannel") {
+          const channel = message.mentions.channels.first();
+          if (!channel) return message.reply("❌ Usage: `!setcountingchannel #channel`");
+          await redis.set(`counting:${guildId}:channel`, channel.id);
+          await redis.set(`counting:${guildId}:number`, 0);
+          return message.reply(`✅ Counting channel set to ${channel}`);
+        }
+
+        if (cmd === "resetcounting") {
+          const keys = await redis.keys(`counting:${guildId}:*`);
+          for (const key of keys) await redis.del(key);
+          await redis.set(`counting:${guildId}:number`, 0);
+          return message.reply("✅ All counting stats reset.");
+        }
+
+        // Help
+        if (cmd === "helpdev") {
+          const embed = new EmbedBuilder()
+            .setColor("#5865F2")
+            .setTitle("👑 Dev Commands")
+            .setDescription("All commands use `!` prefix")
+            .addFields(
+              { name: "💰 Economy", value: [
+                "`!addcoins @user amount`",
+                "`!removecoins @user amount`",
+                "`!setbalance @user amount`"
+              ].join("\n"), inline: false },
+              { name: "🛡️ Shields", value: [
+                "`!addshields @user amount`",
+                "`!removeshields @user amount`"
+              ].join("\n"), inline: false },
+              { name: "👑 Premium", value: [
+                "`!removepremium @user`",
+                "`!removeguildpremium`",
+                "`!checkpremium`",
+                "`!setpremium 1h`",
+                "`!setguildpremium 1h`",
+                "`!redeemcode CODE`"
+              ].join("\n"), inline: false },
+              { name: "🧪 Beta Tester", value: [
+                "`!addbetatester @user`",
+                "`!removebetatester @user`"
+              ].join("\n"), inline: false },
+              { name: "🛡️ Blacklist", value: [
+                "`!devblacklist add user <id> [reason] [duration]`",
+                "`!devblacklist remove user <id>`",
+                "`!devblacklist list`"
+              ].join("\n"), inline: false },
+              { name: "🎯 Counting", value: [
+                "`!setcountingchannel #channel`",
+                "`!resetcounting`",
+                "`!countingstats @user`"
+              ].join("\n"), inline: false }
+            )
+            .setTimestamp();
+          return message.reply({ embeds: [embed] });
+        }
+
+        // Testing
+        if (cmd === "devv") {
+          const sub = args[0];
+          if (sub === "xp") {
+            await redis.hset(`profile:${userId}`, "xp", 0);
+            await redis.hset(`profile:${userId}`, "level", 3);
+            return message.reply("XP reset for testing.");
+          }
+          if (sub === "coins") {
+            await redis.set(`eco:${userId}:money`, 10000);
+            return message.reply("Coins set to 10,000.");
+          }
+          return message.reply("Usage: !devv xp | coins");
+        }
       }
 
       // If command was not handled, return
