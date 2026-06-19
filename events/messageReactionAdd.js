@@ -1,4 +1,4 @@
-// events/messageReactionAdd.js – Handles giveaway entries with max limit
+// events/messageReactionAdd.js – DM confirmation on entry
 const { Events } = require("discord.js");
 
 module.exports = {
@@ -40,5 +40,12 @@ module.exports = {
     // Add user to participants
     await redis.sadd(participantKey, user.id);
     await redis.hincrby(key, 'participantCount', 1);
+
+    // Send DM confirmation
+    try {
+      await user.send(`✅ You have been entered into the giveaway for **${data.prize}**! Good luck! 🎉`);
+    } catch {
+      // Ignore if DMs are closed
+    }
   }
 };
