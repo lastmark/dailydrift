@@ -1,4 +1,4 @@
-// events/giveawayEnd.js – Auto-ends giveaways when time expires
+// events/giveawayEnd.js – Auto-ends giveaways (fixed Redis methods)
 const { Events } = require("discord.js");
 
 module.exports = {
@@ -7,11 +7,12 @@ module.exports = {
   async execute(client, redis) {
     setInterval(async () => {
       const now = Date.now();
-      const ending = await redis.zrangebyscore('giveaway:ending', 0, now);
+      // Use zRangeByScore (v4 syntax)
+      const ending = await redis.zRangeByScore('giveaway:ending', 0, now);
       for (const key of ending) {
-        const data = await redis.hgetall(key);
+        const data = await redis.hGetAll(key);
         if (!data || data.ended === 'true') {
-          await redis.zrem('giveaway:ending', key);
+          await redis.zRem('giveaway:ending', key);
           continue;
         }
         const [guildId, channelId, msgId] = key.split(':').slice(1);
@@ -23,14 +24,14 @@ module.exports = {
         try {
           message = await channel.messages.fetch(msgId);
         } catch {
-          await redis.hset(key, 'ended', 'true');
-          await redis.zrem('giveaway:ending', key);
+          await redis.hSet(key, 'ended', 'true');
+          await redis.zRem('giveaway:ending', key);
           continue;
         }
         const { endGiveaway } = require('../commands/giveaway.js');
         await endGiveaway(key, data, message, client, redis);
-        await redis.zrem('giveaway:ending', key);
+        await redis.zRem('giveaway:ending', key);
       }
-    }, 60000); // every minute
+    }, 60000);
   }
 };
