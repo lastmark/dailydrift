@@ -17,7 +17,8 @@ module.exports = {
 
     // Check if this is a giveaway
     const key = `giveaway:${guildId}:${message.channel.id}:${message.id}`;
-    const data = await redis.hgetall(key);
+    // Use hGetAll (v4 Redis)
+    const data = await redis.hGetAll(key);
     if (!data || data.ended === 'true') return;
 
     const participantKey = `giveaway:${key}:participants`;
