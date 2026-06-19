@@ -9,19 +9,26 @@ module.exports = {
   name: Events.MessageCreate,
 
   async execute(message, client, redis) {
-    // Basic checks
     if (!message.guild || message.author.bot) return;
 
     // ---- BLACKLIST CHECK ----
     const blacklist = await checkBlacklist(redis, message.author.id, message.guild.id);
     if (blacklist) {
-      // If it's a command, send embed and delete
       if (message.content.startsWith("!")) {
         const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
         await message.reply({ embeds: [embed] });
         await message.delete().catch(() => {});
       }
       return; // block all messages
+    }
+
+    // ---- MAINTENANCE CHECK ----
+    const maintenanceKey = `maintenance:${message.guild.id}`;
+    if (await redis.get(maintenanceKey) === "true") {
+      if (message.content.startsWith("!")) {
+        return message.reply("🔧 The bot is currently under maintenance. Please try again later.");
+      }
+      return; // block all messages during maintenance
     }
 
     // Prevent duplicate processing
