@@ -1,4 +1,4 @@
-// commands/giveaway.js – Full with embed updates and DM on entry – FIXED
+// commands/giveaway.js – Full with corrected Redis methods
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
@@ -111,7 +111,7 @@ module.exports = {
 
       const guildPremium = await isGuildPremium();
 
-      // --- Premium checks ---
+      // --- Premium checks (same as before) ---
       if (winners > 1 && !guildPremium) {
         return interaction.reply({ content: "❌ Multiple winners is a **Guild Premium** feature. Only 1 winner allowed without premium.", flags: MessageFlags.Ephemeral });
       }
@@ -132,9 +132,7 @@ module.exports = {
       }
 
       const match = durationStr.match(/^(\d+)([dhm])$/);
-      if (!match) {
-        return interaction.reply({ content: "❌ Invalid duration format. Use `1h`, `2d`, `30m`.", flags: MessageFlags.Ephemeral });
-      }
+      if (!match) return interaction.reply({ content: "❌ Invalid duration format. Use `1h`, `2d`, `30m`.", flags: MessageFlags.Ephemeral });
       const amount = parseInt(match[1]);
       const unit = match[2];
       let seconds = 0;
@@ -142,8 +140,8 @@ module.exports = {
       else if (unit === 'd') seconds = amount * 86400;
       else if (unit === 'm') seconds = amount * 60;
 
-      const maxStandard = 86400; // 1 day
-      const maxPremium = 604800; // 7 days
+      const maxStandard = 86400;
+      const maxPremium = 604800;
       if (seconds > maxStandard && !guildPremium) {
         return interaction.reply({ content: `❌ Maximum duration without premium is 1 day (24h). You entered ${durationStr}.`, flags: MessageFlags.Ephemeral });
       }
@@ -151,26 +149,21 @@ module.exports = {
         return interaction.reply({ content: "❌ Maximum duration is 7 days.", flags: MessageFlags.Ephemeral });
       }
 
-      // Active giveaway limit
       const activeGiveaways = await getActiveGiveaways();
       if (!guildPremium && activeGiveaways.length >= 1) {
         return interaction.reply({ content: "❌ Without premium, you can only have 1 active giveaway. Upgrade to Guild Premium for unlimited.", flags: MessageFlags.Ephemeral });
       }
 
-      // Build embed
       const endTime = Date.now() + seconds * 1000;
       const embed = buildGiveawayEmbed(prize, interaction.user, endTime, winners, requiredRole, maxParticipants, color);
 
-      // Send giveaway message
       const giveawayMsg = await interaction.channel.send({ embeds: [embed] });
       await giveawayMsg.react('🎉');
 
-      // Ping role if set
       if (pingRole) {
         await interaction.channel.send({ content: `${pingRole}`, allowedMentions: { roles: [pingRole.id] } });
       }
 
-      // Store in Redis
       const key = `giveaway:${guildId}:${interaction.channel.id}:${giveawayMsg.id}`;
       await redis.hSet(key, {
         prize,
@@ -187,9 +180,9 @@ module.exports = {
         updatedAt: Date.now(),
       });
       await redis.del(`giveaway:${key}:participants`);
-      await redis.zadd('giveaway:ending', endTime, key);
+      // Use zAdd (v4)
+      await redis.zAdd('giveaway:ending', { score: endTime, value: key });
 
-      // Schedule periodic updates
       scheduleGiveawayUpdate(giveawayMsg, key, client, redis);
 
       return interaction.reply({
@@ -328,10 +321,6 @@ async function getParticipants(key, redis) {
   return await redis.smembers(`giveaway:${key}:participants`);
 }
 
-async function addParticipant(key, userId, redis) {
-  await redis.sadd(`giveaway:${key}:participants`, userId);
-}
-
 async function getUsersWhoReacted(message, emoji) {
   const reaction = message.reactions.cache.get(emoji);
   if (!reaction) return [];
@@ -367,7 +356,7 @@ async function endGiveaway(key, data, message, client, redis) {
     .setFooter({ text: "Giveaway ended" });
 
   await message.edit({ embeds: [embed] });
-  await redis.zrem('giveaway:ending', key);
+  await redis.zRem('giveaway:ending', key);
 
   if (client.giveawayIntervals && client.giveawayIntervals.has(key)) {
     clearInterval(client.giveawayIntervals.get(key));
@@ -383,7 +372,6 @@ async function endGiveaway(key, data, message, client, redis) {
 }
 
 module.exports.endGiveaway = endGiveaway;
-module.exports.addParticipant = addParticipant;
 module.exports.getParticipants = getParticipants;
 module.exports.updateGiveawayEmbed = updateGiveawayEmbed;
 module.exports.scheduleGiveawayUpdate = scheduleGiveawayUpdate;
