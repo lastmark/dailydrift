@@ -1,5 +1,5 @@
-// commands/balance.js – Full with send subcommand and daily limit
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
+// commands/balance.js – Full with send subcommand, daily limit, public visibility
+const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const { formatNumber } = require("../utils.js");
 
 module.exports = {
@@ -28,7 +28,7 @@ module.exports = {
             .setDescription("Amount to send")
             .setRequired(true)
             .setMinValue(1)
-            .setMaxValue(1000000) // safety cap
+            .setMaxValue(1000000)
         )
     ),
 
@@ -39,7 +39,7 @@ module.exports = {
     // =========================
     // 📊 VIEW
     // =========================
-    if (sub === "view" || !sub) {
+    if (sub === "view") {
       const target = interaction.options.getUser("user") || interaction.user;
       const targetId = target.id;
 
@@ -60,7 +60,8 @@ module.exports = {
         )
         .setTimestamp();
 
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      // 👇 PUBLIC – no ephemeral flag
+      return interaction.reply({ embeds: [embed] });
     }
 
     // =========================
@@ -71,47 +72,42 @@ module.exports = {
       const targetId = targetUser.id;
       const amount = interaction.options.getInteger("amount");
 
-      // Prevent sending to yourself
       if (targetId === userId) {
         return interaction.reply({
           content: "❌ You cannot send coins to yourself.",
-          flags: MessageFlags.Ephemeral
+          ephemeral: true // this stays ephemeral (only user sees this error)
         });
       }
 
-      // Check sender's balance
       const senderBalance = Number(await redis.get(`eco:${userId}:money`) || 0);
       if (senderBalance < amount) {
         return interaction.reply({
           content: `❌ You don't have enough coins. You have ${formatNumber(senderBalance)}.`,
-          flags: MessageFlags.Ephemeral
+          ephemeral: true
         });
       }
 
-      // Check daily limit
-      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      // Daily limit
+      const today = new Date().toISOString().slice(0, 10);
       const dailyKey = `eco:send:${userId}:${today}`;
       let sentToday = Number(await redis.get(dailyKey) || 0);
-
-      // Reset if new day (optional, we can use TTL)
-      // But we set TTL to 24h and key is date-based, so it resets automatically.
-      // We'll just check.
       const DAILY_LIMIT = 200000;
+
       if (sentToday + amount > DAILY_LIMIT) {
         const remaining = DAILY_LIMIT - sentToday;
         return interaction.reply({
           content: `❌ You've reached your daily sending limit (${formatNumber(DAILY_LIMIT)} coins/day). You can only send ${formatNumber(remaining)} more today.`,
-          flags: MessageFlags.Ephemeral
+          ephemeral: true
         });
       }
 
-      // ---- Confirmation embed ----
+      // ---- Public confirmation embed ----
       const confirmEmbed = new EmbedBuilder()
         .setColor("#F1C40F")
         .setTitle("📤 Confirm Transaction")
-        .setDescription(`You are about to send **${formatNumber(amount)}** coins to **${targetUser.username}**.`)
+        .setDescription(`<@${userId}> is about to send **${formatNumber(amount)}** coins to **${targetUser.username}**.`)
         .addFields(
-          { name: "Your Balance", value: `${formatNumber(senderBalance)}`, inline: true },
+          { name: "Sender Balance", value: `${formatNumber(senderBalance)}`, inline: true },
           { name: "Recipient", value: `${targetUser}`, inline: true },
           { name: "New Balance (after send)", value: `${formatNumber(senderBalance - amount)}`, inline: true }
         )
@@ -120,6 +116,7 @@ module.exports = {
 
       const msg = await interaction.reply({
         embeds: [confirmEmbed],
+        // 👇 PUBLIC – no ephemeral
         withResponse: true
       });
       const replyMsg = msg.resource.message;
@@ -127,7 +124,6 @@ module.exports = {
       await replyMsg.react('✅');
       await replyMsg.react('❌');
 
-      // Collector for reactions
       const filter = (reaction, user) => {
         return ['✅', '❌'].includes(reaction.emoji.name) && user.id === userId;
       };
@@ -143,17 +139,12 @@ module.exports = {
         const reaction = collected.first();
 
         if (reaction.emoji.name === '✅') {
-          // ---- Execute transfer ----
-          // Deduct from sender
+          // Transfer
           await redis.decrby(`eco:${userId}:money`, amount);
-          // Add to recipient
           await redis.incrby(`eco:${targetId}:money`, amount);
-          // Update total spent/earned
           await redis.incrby(`eco:${userId}:total_spent`, amount);
           await redis.incrby(`eco:${targetId}:total_earned`, amount);
-          // Update daily sent
           await redis.incrby(dailyKey, amount);
-          // Set TTL for 24h (to auto-reset)
           await redis.expire(dailyKey, 86400);
 
           const newBalance = await redis.get(`eco:${userId}:money`) || 0;
@@ -161,7 +152,7 @@ module.exports = {
           const successEmbed = new EmbedBuilder()
             .setColor("#57F287")
             .setTitle("✅ Transfer Complete!")
-            .setDescription(`You sent **${formatNumber(amount)}** coins to **${targetUser.username}**.`)
+            .setDescription(`<@${userId}> sent **${formatNumber(amount)}** coins to **${targetUser.username}**.`)
             .addFields(
               { name: "New Balance", value: `${formatNumber(newBalance)}`, inline: true },
               { name: "Today's Remaining Limit", value: `${formatNumber(DAILY_LIMIT - (sentToday + amount))}`, inline: true }
@@ -176,7 +167,7 @@ module.exports = {
           const cancelEmbed = new EmbedBuilder()
             .setColor("#ED4245")
             .setTitle("❌ Transfer Cancelled")
-            .setDescription("You cancelled the transaction.")
+            .setDescription(`<@${userId}> cancelled the transaction.`)
             .setTimestamp();
 
           await replyMsg.edit({ embeds: [cancelEmbed] });
@@ -185,11 +176,10 @@ module.exports = {
         }
 
       } catch (error) {
-        // Timeout
         const timeoutEmbed = new EmbedBuilder()
           .setColor("#ED4245")
           .setTitle("⌛ Timed Out")
-          .setDescription("You didn't confirm in time. Transfer cancelled.")
+          .setDescription(`<@${userId}> didn't confirm in time. Transfer cancelled.`)
           .setTimestamp();
 
         await replyMsg.edit({ embeds: [timeoutEmbed] });
