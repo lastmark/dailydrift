@@ -5,8 +5,6 @@ const e = require("./emojis.js");
 const fs = require("fs");
 const path = require("path");
 const setupLogger = require("./logger");
-
-// ---- BLACKLIST HELPER ----
 const { checkBlacklist, buildBlacklistEmbed } = require("./blacklist.js");
 
 const client = new Client({
@@ -116,12 +114,10 @@ client.on("interactionCreate", async (interaction) => {
   // 🖲️ BUTTON HANDLER (inline – no external file)
   // ==========================================
   if (interaction.isButton()) {
-    // Ignore blackjack buttons – they are handled inside the games command
     if (interaction.customId.startsWith('blackjack_')) return;
 
     const { customId, user, guildId } = interaction;
 
-    // Handle counting shop buttons
     if (customId.startsWith('counting_buy_')) {
       try {
         const item = customId.split('_')[2];
@@ -165,7 +161,6 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
-    // If button is not recognized, ignore
     if (!interaction.replied) {
       await interaction.reply({ content: "❌ This button is not supported.", flags: MessageFlags.Ephemeral });
     }
