@@ -1,11 +1,11 @@
-// commands/giveaway.js – Full with embed updates and DM on entry
+// commands/giveaway.js – Full with embed updates and DM on entry – FIXED
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
   category: "Giveaways",
   data: new SlashCommandBuilder()
     .setName("giveaway")
-    .setDescription("Manage giveaways")
+    .setDescription("🎉 Manage giveaways")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("create")
@@ -89,7 +89,7 @@ module.exports = {
       const keys = await redis.keys(`giveaway:${guildId}:*`);
       const giveaways = [];
       for (const key of keys) {
-        const data = await redis.hgetall(key);
+        const data = await redis.hGetAll(key);
         if (data && data.endTime > Date.now()) {
           giveaways.push({ key, ...data });
         }
@@ -172,7 +172,7 @@ module.exports = {
 
       // Store in Redis
       const key = `giveaway:${guildId}:${interaction.channel.id}:${giveawayMsg.id}`;
-      await redis.hset(key, {
+      await redis.hSet(key, {
         prize,
         host: userId,
         channelId: interaction.channel.id,
@@ -227,7 +227,7 @@ module.exports = {
         return interaction.reply({ content: "❌ Could not find that message.", flags: MessageFlags.Ephemeral });
       }
       const key = `giveaway:${guildId}:${channel.id}:${msgId}`;
-      const data = await redis.hgetall(key);
+      const data = await redis.hGetAll(key);
       if (!data || data.ended === 'true') {
         return interaction.reply({ content: "❌ Giveaway not found or already ended.", flags: MessageFlags.Ephemeral });
       }
@@ -248,7 +248,7 @@ module.exports = {
         return interaction.reply({ content: "❌ Could not find that message.", flags: MessageFlags.Ephemeral });
       }
       const key = `giveaway:${guildId}:${channel.id}:${msgId}`;
-      const data = await redis.hgetall(key);
+      const data = await redis.hGetAll(key);
       if (!data || data.ended !== 'true') {
         return interaction.reply({ content: "❌ Giveaway not found or not ended yet.", flags: MessageFlags.Ephemeral });
       }
@@ -290,12 +290,11 @@ function buildGiveawayEmbed(prize, host, endTime, winners, requiredRole, maxPart
   if (requiredRole) embed.addFields({ name: "Required Role", value: `${requiredRole}`, inline: true });
   if (maxParticipants > 0) embed.addFields({ name: "Max Entries", value: `${maxParticipants}`, inline: true });
 
-  // Update entry count later via periodic update.
   return embed;
 }
 
 async function updateGiveawayEmbed(message, key, redis) {
-  const data = await redis.hgetall(key);
+  const data = await redis.hGetAll(key);
   if (!data || data.ended === 'true') return;
 
   const participants = await getParticipants(key, redis);
@@ -308,21 +307,19 @@ async function updateGiveawayEmbed(message, key, redis) {
     .setFooter({ text: `React with 🎉 to enter! (${participantCount} entries)` });
 
   await message.edit({ embeds: [embed] });
-  await redis.hset(key, 'updatedAt', Date.now());
+  await redis.hSet(key, 'updatedAt', Date.now());
 }
 
 function scheduleGiveawayUpdate(message, key, client, redis) {
-  // Update every minute while active
   const interval = setInterval(async () => {
-    const data = await redis.hgetall(key);
+    const data = await redis.hGetAll(key);
     if (!data || data.ended === 'true') {
       clearInterval(interval);
       return;
     }
     await updateGiveawayEmbed(message, key, redis);
-  }, 60000); // 60 seconds
+  }, 60000);
 
-  // Store interval reference in a global map to clear later if needed
   if (!client.giveawayIntervals) client.giveawayIntervals = new Map();
   client.giveawayIntervals.set(key, interval);
 }
@@ -343,11 +340,11 @@ async function getUsersWhoReacted(message, emoji) {
 }
 
 async function endGiveaway(key, data, message, client, redis) {
-  await redis.hset(key, 'ended', 'true');
+  await redis.hSet(key, 'ended', 'true');
   const users = await getParticipants(key, redis);
   const reactedUsers = await getUsersWhoReacted(message, '🎉');
   const allUsers = [...new Set([...users, ...reactedUsers])];
-  await redis.hset(key, 'participantCount', allUsers.length);
+  await redis.hSet(key, 'participantCount', allUsers.length);
 
   const requiredRole = data.requiredRole ? await message.guild.roles.fetch(data.requiredRole).catch(() => null) : null;
   let eligible = allUsers;
@@ -372,13 +369,11 @@ async function endGiveaway(key, data, message, client, redis) {
   await message.edit({ embeds: [embed] });
   await redis.zrem('giveaway:ending', key);
 
-  // Clear interval
   if (client.giveawayIntervals && client.giveawayIntervals.has(key)) {
     clearInterval(client.giveawayIntervals.get(key));
     client.giveawayIntervals.delete(key);
   }
 
-  // Notify winners
   for (const winnerId of winners) {
     try {
       const user = await client.users.fetch(winnerId);
