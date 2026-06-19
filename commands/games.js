@@ -1,10 +1,9 @@
-// commands/games.js – FULL WITH SPINNING SLOTS
+// commands/games.js – FULL WITH NUMBER FORMATTING
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
-
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const { formatNumber } = require("../utils.js");
 
 // =========================
-// 🃏 BLACKJACK GAME CLASS (unchanged)
+// 🃏 BLACKJACK GAME CLASS
 // =========================
 class BlackjackGame {
   constructor(userId, bet, economy, redis) {
@@ -133,12 +132,12 @@ class BlackjackGame {
         (this.result === 'win' || this.result === 'blackjack' ? '#57F287' : 
          this.result === 'push' ? '#F1C40F' : '#ED4245') : '#2B2D31')
       .setTitle(this.gameOver ? this.getResultTitle() : '🃏 BLACKJACK')
-      .setDescription(this.gameOver ? this.getResultDescription() : `💰 Bet: ${this.bet} coins`)
+      .setDescription(this.gameOver ? this.getResultDescription() : `💰 Bet: ${formatNumber(this.bet)} coins`)
       .addFields(
         { name: `🎯 Your Hand (${this.playerValue})`, value: this.formatHand(this.playerHand), inline: false },
         { name: `🤖 Dealer's Hand (${this.gameOver ? this.dealerValue : '?'})`, value: this.gameOver ? this.formatHand(this.dealerHand) : this.formatHand(this.dealerHand, true), inline: false }
       )
-      .setFooter({ text: `Balance: ${this.balance} coins` })
+      .setFooter({ text: `Balance: ${formatNumber(this.balance)} coins` })
       .setTimestamp();
 
     if (this.gameOver) {
@@ -146,9 +145,9 @@ class BlackjackGame {
                         this.result === 'push' ? this.bet : 0;
       embed.addFields({
         name: '💰 Result',
-        value: winAmount > this.bet ? `You won ${winAmount} coins!` :
+        value: winAmount > this.bet ? `You won ${formatNumber(winAmount)} coins!` :
                winAmount === this.bet ? "Push! Bet returned!" :
-               `You lost ${this.bet} coins!`,
+               `You lost ${formatNumber(this.bet)} coins!`,
         inline: false
       });
     }
@@ -163,10 +162,10 @@ class BlackjackGame {
   }
 
   getResultDescription() {
-    if (this.result === 'blackjack' || this.result === 'win') return `💰 Bet: ${this.bet} coins\nYou beat the dealer!`;
-    if (this.result === 'push') return `💰 Bet: ${this.bet} coins\nIt's a tie!`;
-    if (this.result === 'bust') return `💰 Bet: ${this.bet} coins\nYou went over 21!`;
-    return `💰 Bet: ${this.bet} coins\nDealer beats you!`;
+    if (this.result === 'blackjack' || this.result === 'win') return `💰 Bet: ${formatNumber(this.bet)} coins\nYou beat the dealer!`;
+    if (this.result === 'push') return `💰 Bet: ${formatNumber(this.bet)} coins\nIt's a tie!`;
+    if (this.result === 'bust') return `💰 Bet: ${formatNumber(this.bet)} coins\nYou went over 21!`;
+    return `💰 Bet: ${formatNumber(this.bet)} coins\nDealer beats you!`;
   }
 }
 
@@ -315,7 +314,7 @@ module.exports = {
     };
 
     // =========================
-    // 🎮 RPS (unchanged)
+    // 🎮 RPS
     // =========================
     if (sub === "rps") {
       const choice = interaction.options.getString("choice");
@@ -330,7 +329,7 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You don't have enough coins! You have ${balance}, need ${bet}.`)],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You don't have enough coins! You have ${formatNumber(balance)}, need ${formatNumber(bet)}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -372,17 +371,17 @@ module.exports = {
         .setTitle(`Rock Paper Scissors ${result === "win" ? "Win!" : result === "tie" ? "Tie!" : "Lose..."}`)
         .setDescription(`You chose ${choice}\nBot chose ${botChoice}`)
         .addFields(
-          { name: "Result", value: result === "win" ? `You won ${winAmount} coins!` : result === "tie" ? "Tie! Bet returned!" : `You lost ${bet} coins!`, inline: false },
-          { name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true }
+          { name: "Result", value: result === "win" ? `You won ${formatNumber(winAmount)} coins!` : result === "tie" ? "Tie! Bet returned!" : `You lost ${formatNumber(bet)} coins!`, inline: false },
+          { name: "New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true }
         )
-        .setFooter({ text: `Bet: ${bet} coins` })
+        .setFooter({ text: `Bet: ${formatNumber(bet)} coins` })
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed] });
     }
 
     // =========================
-    // 🪙 COINFLIP (unchanged)
+    // 🪙 COINFLIP
     // =========================
     if (sub === "coinflip") {
       const side = interaction.options.getString("side");
@@ -397,7 +396,7 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${bet} coins but only have ${balance}.`)],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${formatNumber(bet)} coins but only have ${formatNumber(balance)}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -421,8 +420,8 @@ module.exports = {
         .setTitle(`Coin Flip ${won ? "Win!" : "Lose..."}`)
         .setDescription(`The coin landed on ${result}!`)
         .addFields(
-          { name: "Result", value: won ? `You won ${winAmount} coins!` : `You lost ${bet} coins!`, inline: false },
-          { name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true }
+          { name: "Result", value: won ? `You won ${formatNumber(winAmount)} coins!` : `You lost ${formatNumber(bet)} coins!`, inline: false },
+          { name: "New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true }
         )
         .setTimestamp();
 
@@ -430,7 +429,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎲 DICE (unchanged)
+    // 🎲 DICE
     // =========================
     if (sub === "dice") {
       const number = interaction.options.getInteger("number");
@@ -445,7 +444,7 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${bet} coins but only have ${balance}.`)],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${formatNumber(bet)} coins but only have ${formatNumber(balance)}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -471,8 +470,8 @@ module.exports = {
         .setTitle(`Dice Roll ${won ? "Win!" : "Lose..."}`)
         .setDescription(`You rolled a ${roll}!`)
         .addFields(
-          { name: "Result", value: won ? `You won ${winAmount} coins! (${multipliers[number]}x multiplier)` : `You lost ${bet} coins!`, inline: false },
-          { name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true }
+          { name: "Result", value: won ? `You won ${formatNumber(winAmount)} coins! (${multipliers[number]}x multiplier)` : `You lost ${formatNumber(bet)} coins!`, inline: false },
+          { name: "New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true }
         )
         .setTimestamp();
 
@@ -480,7 +479,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎰 SLOTS – WITH SPINNING ANIMATION
+    // 🎰 SLOTS – FIXED
     // =========================
     if (sub === "slots") {
       const bet = interaction.options.getInteger("bet");
@@ -494,15 +493,13 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${bet} coins but only have ${balance}.`)],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${formatNumber(bet)} coins but only have ${formatNumber(balance)}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
 
-      // ─── DEDUCT BET UPFRONT ───
       await takeBalance(userId, bet);
 
-      // Weighted outcomes: lose 70%, tie 15%, 2x 10%, 3x 4%, 5x 1%
       const outcomes = [
         { outcome: 'lose', multiplier: 0, symbol: null, weight: 70 },
         { outcome: 'tie', multiplier: 1, symbol: '🫐', weight: 15 },
@@ -511,7 +508,6 @@ module.exports = {
         { outcome: '5x', multiplier: 5, symbol: '🎰', weight: 1 }
       ];
 
-      // Select outcome based on weights
       const totalWeight = outcomes.reduce((sum, o) => sum + o.weight, 0);
       let rand = Math.random() * totalWeight;
       let selected = outcomes[0];
@@ -529,12 +525,10 @@ module.exports = {
       let message = "";
       let color = "#2B2D31";
 
-      // Build final result display
       let finalDisplay = [];
       if (symbol) {
         finalDisplay = [symbol, symbol, symbol];
       } else {
-        // Loss – show three different symbols
         const allSymbols = ['🫐', '🍇', '🥥', '🎰'];
         let r1, r2, r3;
         do {
@@ -545,7 +539,6 @@ module.exports = {
         finalDisplay = [r1, r2, r3];
       }
 
-      // Process outcome (balance already deducted)
       if (selected.outcome === 'lose') {
         winAmount = 0;
         message = "😢 No match – you lose!";
@@ -568,49 +561,41 @@ module.exports = {
         if (multiplier === 5) await redis.incr(`games:${userId}:slots_jackpots`);
       }
 
-      // ---- Build the spinning embed function ----
-      const buildSpinEmbed = (display) => {
-        return new EmbedBuilder()
-          .setColor("#2B2D31")
-          .setTitle("🎰 Slot Machine")
-          .setDescription(`${display.join(" | ")}`)
-          .setFooter({ text: `Bet: ${bet} coins | Spinning...` })
-          .setTimestamp();
-      };
-
-      // ---- Start spinning ----
-      await interaction.deferReply();
-
-      // Initial random spin
       const allSymbols = ['🫐', '🍇', '🥥', '🎰'];
       const randomSymbol = () => allSymbols[Math.floor(Math.random() * allSymbols.length)];
-      let spinDisplay = [randomSymbol(), randomSymbol(), randomSymbol()];
-      await interaction.editReply({ embeds: [buildSpinEmbed(spinDisplay)] });
+      const spinEmbed = (display) => new EmbedBuilder()
+        .setColor("#2B2D31")
+        .setTitle("🎰 Slot Machine")
+        .setDescription(`${display.join(" | ")}`)
+        .setFooter({ text: `Bet: ${formatNumber(bet)} coins | Spinning...` })
+        .setTimestamp();
 
-      // Spin loop: 8 changes, 300ms each
+      await interaction.deferReply();
+      let spinDisplay = [randomSymbol(), randomSymbol(), randomSymbol()];
+      await interaction.editReply({ embeds: [spinEmbed(spinDisplay)] });
+
       for (let i = 0; i < 8; i++) {
         spinDisplay = [randomSymbol(), randomSymbol(), randomSymbol()];
-        await interaction.editReply({ embeds: [buildSpinEmbed(spinDisplay)] });
-        await sleep(300);
+        await interaction.editReply({ embeds: [spinEmbed(spinDisplay)] });
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
-      // ---- Final result ----
       const finalEmbed = new EmbedBuilder()
         .setColor(color)
         .setTitle("🎰 Slot Machine")
         .setDescription(`${finalDisplay.join(" | ")}\n\n${message}`)
         .addFields(
-          { name: "💰 Result", value: winAmount > bet ? `You won **${winAmount}** coins!` : (winAmount === bet ? "Tie – bet returned." : `You lost **${bet}** coins!`), inline: false },
-          { name: "💳 New Balance", value: `${await getBalance(userId)} coins`, inline: true }
+          { name: "💰 Result", value: winAmount > bet ? `You won **${formatNumber(winAmount)}** coins!` : (winAmount === bet ? "Tie – bet returned." : `You lost **${formatNumber(bet)}** coins!`), inline: false },
+          { name: "💳 New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true }
         )
-        .setFooter({ text: `Bet: ${bet} coins` })
+        .setFooter({ text: `Bet: ${formatNumber(bet)} coins` })
         .setTimestamp();
 
       await interaction.editReply({ embeds: [finalEmbed] });
     }
 
     // =========================
-    // 🃏 BLACKJACK – fixed (deduct bet upfront)
+    // 🃏 BLACKJACK
     // =========================
     if (sub === "blackjack") {
       const bet = interaction.options.getInteger("bet");
@@ -624,7 +609,7 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < bet) {
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${bet} coins but only have ${balance}.`)],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${formatNumber(bet)} coins but only have ${formatNumber(balance)}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -698,7 +683,7 @@ module.exports = {
     }
 
     // =========================
-    // 💰 DAILY (unchanged)
+    // 💰 DAILY
     // =========================
     if (sub === "daily") {
       const lastDaily = await redis.get(`games:${userId}:daily`);
@@ -721,8 +706,8 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor("#57F287")
         .setTitle("Daily Bonus Claimed!")
-        .setDescription(`You received ${bonus} coins!`)
-        .addFields({ name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true })
+        .setDescription(`You received ${formatNumber(bonus)} coins!`)
+        .addFields({ name: "New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true })
         .setFooter({ text: "Come back tomorrow for more!" })
         .setTimestamp();
 
@@ -730,15 +715,15 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 SHOP (unchanged)
+    // 🛒 SHOP
     // =========================
     if (sub === "shop") {
       const embed = new EmbedBuilder()
         .setColor("#FF69B4")
         .setTitle("Game Shop")
-        .setDescription(`Your balance: ${await getBalance(userId)} coins`)
+        .setDescription(`Your balance: ${formatNumber(await getBalance(userId))} coins`)
         .addFields(
-          { name: "Shield", value: `Protects your counting streak\nPrice: 200 coins\nOwned: ${await getShield(userId)}`, inline: true },
+          { name: "Shield", value: `Protects your counting streak\nPrice: 200 coins\nOwned: ${formatNumber(await getShield(userId))}`, inline: true },
           { name: "Double XP", value: `Double coins for 5 counts\nPrice: 500 coins\nActive: ${await getDoubleXP(userId) > 0 ? 'Active' : 'Inactive'}`, inline: true }
         )
         .setFooter({ text: "Use /games buy <item> to purchase" });
@@ -747,7 +732,7 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 BUY (unchanged)
+    // 🛒 BUY
     // =========================
     if (sub === "buy") {
       const item = interaction.options.getString("item");
@@ -764,7 +749,7 @@ module.exports = {
       const balance = await getBalance(userId);
       if (balance < price) {
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${price} coins but only have ${balance}.`)],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`You need ${formatNumber(price)} coins but only have ${formatNumber(balance)}.`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -782,15 +767,15 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor("#57F287")
         .setTitle("Purchase Successful!")
-        .setDescription(`You bought ${itemNames[item]} for ${price} coins!`)
-        .addFields({ name: "New Balance", value: `${await getBalance(userId)} coins`, inline: true })
+        .setDescription(`You bought ${itemNames[item]} for ${formatNumber(price)} coins!`)
+        .addFields({ name: "New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true })
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed] });
     }
 
     // =========================
-    // 📊 STATS (unchanged)
+    // 📊 STATS
     // =========================
     if (sub === "stats") {
       const stats = await redis.hgetall(`games:${userId}`) || {};
@@ -800,11 +785,11 @@ module.exports = {
         .setTitle(`${interaction.user.username}'s Game Stats`)
         .setThumbnail(interaction.user.displayAvatarURL())
         .addFields(
-          { name: "RPS", value: `Wins: ${stats.rps_wins || 0}\nLosses: ${stats.rps_losses || 0}\nTies: ${stats.rps_ties || 0}`, inline: true },
-          { name: "Coin Flip", value: `Wins: ${stats.coinflip_wins || 0}\nLosses: ${stats.coinflip_losses || 0}`, inline: true },
-          { name: "Dice", value: `Wins: ${stats.dice_wins || 0}\nLosses: ${stats.dice_losses || 0}`, inline: true },
-          { name: "Slots", value: `Wins: ${stats.slots_wins || 0}\nLosses: ${stats.slots_losses || 0}\nJackpots: ${stats.slots_jackpots || 0}`, inline: true },
-          { name: "Blackjack", value: `Wins: ${stats.blackjack_wins || 0}\nLosses: ${stats.blackjack_losses || 0}\nTies: ${stats.blackjack_ties || 0}`, inline: true }
+          { name: "RPS", value: `Wins: ${formatNumber(stats.rps_wins || 0)}\nLosses: ${formatNumber(stats.rps_losses || 0)}\nTies: ${formatNumber(stats.rps_ties || 0)}`, inline: true },
+          { name: "Coin Flip", value: `Wins: ${formatNumber(stats.coinflip_wins || 0)}\nLosses: ${formatNumber(stats.coinflip_losses || 0)}`, inline: true },
+          { name: "Dice", value: `Wins: ${formatNumber(stats.dice_wins || 0)}\nLosses: ${formatNumber(stats.dice_losses || 0)}`, inline: true },
+          { name: "Slots", value: `Wins: ${formatNumber(stats.slots_wins || 0)}\nLosses: ${formatNumber(stats.slots_losses || 0)}\nJackpots: ${formatNumber(stats.slots_jackpots || 0)}`, inline: true },
+          { name: "Blackjack", value: `Wins: ${formatNumber(stats.blackjack_wins || 0)}\nLosses: ${formatNumber(stats.blackjack_losses || 0)}\nTies: ${formatNumber(stats.blackjack_ties || 0)}`, inline: true }
         )
         .setTimestamp();
 
