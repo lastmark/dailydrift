@@ -1,11 +1,11 @@
-// commands/giveaway.js – Full giveaway system with all premium perks
+// commands/giveaway.js – Full with embed updates and DM on entry
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
   category: "Giveaways",
   data: new SlashCommandBuilder()
     .setName("giveaway")
-    .setDescription("🎉 Manage giveaways")
+    .setDescription("Manage giveaways")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("create")
@@ -85,11 +85,6 @@ module.exports = {
       return val !== null && val !== undefined;
     };
 
-    const isUserPremium = async (id) => {
-      const val = await redis.get(`premium:user:${id}`);
-      return val !== null && val !== undefined;
-    };
-
     const getActiveGiveaways = async () => {
       const keys = await redis.keys(`giveaway:${guildId}:*`);
       const giveaways = [];
@@ -164,15 +159,7 @@ module.exports = {
 
       // Build embed
       const endTime = Date.now() + seconds * 1000;
-      const embed = new EmbedBuilder()
-        .setColor(color)
-        .setTitle("🎉 Giveaway!")
-        .setDescription(`**Prize:** ${prize}\n**Hosted by:** ${interaction.user}\n**Ends:** <t:${Math.floor(endTime / 1000)}:R>\n**Winners:** ${winners}`)
-        .setFooter({ text: `React with 🎉 to enter!` })
-        .setTimestamp();
-
-      if (requiredRole) embed.addFields({ name: "Required Role", value: `${requiredRole}`, inline: true });
-      if (maxParticipants > 0) embed.addFields({ name: "Max Entries", value: `${maxParticipants}`, inline: true });
+      const embed = buildGiveawayEmbed(prize, interaction.user, endTime, winners, requiredRole, maxParticipants, color);
 
       // Send giveaway message
       const giveawayMsg = await interaction.channel.send({ embeds: [embed] });
@@ -197,9 +184,13 @@ module.exports = {
         ended: 'false',
         participantCount: 0,
         color: color,
+        updatedAt: Date.now(),
       });
       await redis.del(`giveaway:${key}:participants`);
       await redis.zadd('giveaway:ending', endTime, key);
+
+      // Schedule periodic updates
+      scheduleGiveawayUpdate(giveawayMsg, key, client, redis);
 
       return interaction.reply({
         content: `✅ Giveaway created! It ends in ${durationStr}. React with 🎉 to enter.`,
@@ -288,6 +279,54 @@ module.exports = {
 };
 
 // ---------- Helper Functions ----------
+function buildGiveawayEmbed(prize, host, endTime, winners, requiredRole, maxParticipants, color) {
+  const embed = new EmbedBuilder()
+    .setColor(color || "#FF69B4")
+    .setTitle("🎉 Giveaway!")
+    .setDescription(`**Prize:** ${prize}\n**Hosted by:** ${host}\n**Ends:** <t:${Math.floor(endTime / 1000)}:R>\n**Winners:** ${winners}`)
+    .setFooter({ text: `React with 🎉 to enter!` })
+    .setTimestamp();
+
+  if (requiredRole) embed.addFields({ name: "Required Role", value: `${requiredRole}`, inline: true });
+  if (maxParticipants > 0) embed.addFields({ name: "Max Entries", value: `${maxParticipants}`, inline: true });
+
+  // Update entry count later via periodic update.
+  return embed;
+}
+
+async function updateGiveawayEmbed(message, key, redis) {
+  const data = await redis.hgetall(key);
+  if (!data || data.ended === 'true') return;
+
+  const participants = await getParticipants(key, redis);
+  const participantCount = participants.length;
+
+  const embed = EmbedBuilder.from(message.embeds[0])
+    .setDescription(
+      `**Prize:** ${data.prize}\n**Hosted by:** <@${data.host}>\n**Ends:** <t:${Math.floor(data.endTime / 1000)}:R>\n**Winners:** ${data.winners}\n**Entries:** ${participantCount}`
+    )
+    .setFooter({ text: `React with 🎉 to enter! (${participantCount} entries)` });
+
+  await message.edit({ embeds: [embed] });
+  await redis.hset(key, 'updatedAt', Date.now());
+}
+
+function scheduleGiveawayUpdate(message, key, client, redis) {
+  // Update every minute while active
+  const interval = setInterval(async () => {
+    const data = await redis.hgetall(key);
+    if (!data || data.ended === 'true') {
+      clearInterval(interval);
+      return;
+    }
+    await updateGiveawayEmbed(message, key, redis);
+  }, 60000); // 60 seconds
+
+  // Store interval reference in a global map to clear later if needed
+  if (!client.giveawayIntervals) client.giveawayIntervals = new Map();
+  client.giveawayIntervals.set(key, interval);
+}
+
 async function getParticipants(key, redis) {
   return await redis.smembers(`giveaway:${key}:participants`);
 }
@@ -321,6 +360,7 @@ async function endGiveaway(key, data, message, client, redis) {
     const idx = Math.floor(Math.random() * eligible.length);
     winners.push(eligible.splice(idx, 1)[0]);
   }
+
   const embed = EmbedBuilder.from(message.embeds[0])
     .setColor("#ED4245")
     .setTitle("🎉 Giveaway Ended!")
@@ -328,10 +368,27 @@ async function endGiveaway(key, data, message, client, redis) {
       `**Prize:** ${data.prize}\n**Hosted by:** <@${data.host}>\n**Total Entries:** ${allUsers.length}\n**Winners:** ${winners.length ? winners.map(id => `<@${id}>`).join(', ') : 'No valid entries.'}`
     )
     .setFooter({ text: "Giveaway ended" });
+
   await message.edit({ embeds: [embed] });
   await redis.zrem('giveaway:ending', key);
+
+  // Clear interval
+  if (client.giveawayIntervals && client.giveawayIntervals.has(key)) {
+    clearInterval(client.giveawayIntervals.get(key));
+    client.giveawayIntervals.delete(key);
+  }
+
+  // Notify winners
+  for (const winnerId of winners) {
+    try {
+      const user = await client.users.fetch(winnerId);
+      await user.send(`🎉 Congratulations! You won the giveaway for **${data.prize}**!`);
+    } catch {}
+  }
 }
 
 module.exports.endGiveaway = endGiveaway;
 module.exports.addParticipant = addParticipant;
 module.exports.getParticipants = getParticipants;
+module.exports.updateGiveawayEmbed = updateGiveawayEmbed;
+module.exports.scheduleGiveawayUpdate = scheduleGiveawayUpdate;
