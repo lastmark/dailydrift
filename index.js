@@ -1,10 +1,11 @@
-// index.js – Main Bot (Full with blacklist & logging)
+// index.js – Full Main Bot
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token } = require("./config");
 const redis = require("./redis");
 const fs = require("fs");
 const path = require("path");
 const { checkBlacklist, buildBlacklistEmbed } = require("./blacklist.js");
+const setupLogger = require("./logger.js");
 
 const client = new Client({
   intents: [
@@ -24,10 +25,11 @@ const client = new Client({
   ]
 });
 
+setupLogger(client, redis); // sets up edit/delete logging
 client.commands = new Collection();
 
 // ==========================================
-// 📂 AUTOMATED EVENT LOADER
+// 📂 EVENT LOADER
 // ==========================================
 const eventsPath = path.join(__dirname, "events");
 if (fs.existsSync(eventsPath)) {
@@ -68,21 +70,21 @@ if (fs.existsSync(commandsPath)) {
 // 🏎️ INTERACTION HANDLER
 // ==========================================
 client.on("interactionCreate", async (interaction) => {
+  // ---- Slash Commands ----
   if (interaction.isChatInputCommand()) {
     const cmd = client.commands.get(interaction.commandName);
     if (!cmd) return;
 
-    console.log(`[SLASH] Command ${interaction.commandName} from ${interaction.user.tag}`);
+    console.log(`[SLASH] ${interaction.commandName} by ${interaction.user.tag}`);
 
-    // ---- BLACKLIST CHECK (FIRST) ----
+    // Blacklist check
     const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
     if (blacklist) {
-      console.log(`[SLASH] Blocked by blacklist: ${interaction.user.tag}`);
       const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
-    // ---- MAINTENANCE CHECK ----
+    // Maintenance check
     const maintenanceKey = `maintenance:${interaction.guild.id}`;
     if (await redis.get(maintenanceKey) === "true") {
       return interaction.reply({
@@ -106,17 +108,20 @@ client.on("interactionCreate", async (interaction) => {
 
   // ---- Buttons ----
   if (interaction.isButton()) {
+    // Ignore Blackjack buttons (handled in the games command)
     if (interaction.customId.startsWith('blackjack_')) return;
+
     const { customId, user } = interaction;
+
+    // Counting shop buttons
     if (customId.startsWith('counting_buy_')) {
       try {
         const item = customId.split('_')[2];
         const userId = user.id;
         const prices = { shield: 200, double: 500 };
         const price = prices[item];
-        if (!price) {
-          return interaction.reply({ content: "❌ Invalid item.", flags: MessageFlags.Ephemeral });
-        }
+        if (!price) return interaction.reply({ content: "❌ Invalid item.", flags: MessageFlags.Ephemeral });
+
         const balanceKey = `eco:${userId}:money`;
         let coins = Number(await redis.get(balanceKey) || 0);
         if (coins < price) {
@@ -125,12 +130,11 @@ client.on("interactionCreate", async (interaction) => {
             flags: MessageFlags.Ephemeral
           });
         }
+
         await redis.set(balanceKey, coins - price);
-        if (item === 'shield') {
-          await redis.incr(`eco:${userId}:shield`);
-        } else if (item === 'double') {
-          await redis.set(`eco:${userId}:double`, 5);
-        }
+        if (item === 'shield') await redis.incr(`eco:${userId}:shield`);
+        else if (item === 'double') await redis.set(`eco:${userId}:double`, 5);
+
         const itemNames = { shield: "🛡️ Shield", double: "⚡ Double XP (5 uses)" };
         const embed = new EmbedBuilder()
           .setColor("#57F287")
@@ -138,6 +142,7 @@ client.on("interactionCreate", async (interaction) => {
           .setDescription(`You bought **${itemNames[item]}** for **${price}** coins!`)
           .addFields({ name: "💰 New Balance", value: `${await redis.get(balanceKey) || 0} coins`, inline: true })
           .setTimestamp();
+
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       } catch (err) {
         console.error("Button handler error:", err);
@@ -146,13 +151,14 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
     }
+
     if (!interaction.replied) {
       await interaction.reply({ content: "❌ This button is not supported.", flags: MessageFlags.Ephemeral });
     }
     return;
   }
 
-  // ---- Modal submits ----
+  // ---- Modal Submits ----
   if (interaction.isModalSubmit()) {
     if (interaction.customId.startsWith("embed_modal:")) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -162,21 +168,23 @@ client.on("interactionCreate", async (interaction) => {
         if (!targetChannel) {
           return await interaction.editReply({ content: "❌ Could not find or access that destination channel." });
         }
+
         const title = interaction.fields.getTextInputValue("embed_title");
         const description = interaction.fields.getTextInputValue("embed_description");
         let colorInput = interaction.fields.getTextInputValue("embed_color") || "#2B2D31";
         const footerText = interaction.fields.getTextInputValue("embed_footer") || null;
+
         if (!colorInput.startsWith("#")) colorInput = `#${colorInput}`;
         if (!/^#[0-9A-F]{6}$/i.test(colorInput)) colorInput = "#2B2D31";
+
         const customEmbed = new EmbedBuilder()
           .setTitle(title)
           .setDescription(description)
           .setColor(colorInput);
         if (footerText) customEmbed.setFooter({ text: footerText });
+
         await targetChannel.send({ embeds: [customEmbed] });
-        await interaction.editReply({
-          content: `✅ Success! Your custom embed has been published to ${targetChannel}.`
-        });
+        await interaction.editReply({ content: `✅ Success! Your custom embed has been published to ${targetChannel}.` });
       } catch (error) {
         console.error("Failed to construct or broadcast modal embed:", error);
         await interaction.editReply({ content: "❌ Failed to send embed. Ensure I have permissions to view/send messages in that channel." });
@@ -187,7 +195,7 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 // ==========================================
-// 💬 MESSAGE HANDLER (Counting)
+// 💬 MESSAGE LISTENERS (Counting & ID)
 // ==========================================
 client.on("messageCreate", async (message) => {
   if (message.author.id === client.user.id) return;
@@ -196,16 +204,29 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-// This second listener handles counting – but the actual logic is in events/messageCreate.js
-// We keep it here to avoid double processing, but we'll use the event file instead.
-// Actually, we'll just use the event file for all message logic.
-// So we can remove this second listener – but we'll keep it for counting.
-// Wait, we already have the event file. We'll move the counting logic there.
-// To avoid duplication, we'll only use the event file.
-// I'll remove this second listener and rely solely on events/messageCreate.js.
+client.on("messageCreate", async (message) => {
+  if (!message.guild || message.author.bot) return;
+
+  // Counting game – only if in the counting channel
+  try {
+    const countingChannelId = await redis.get(`counting:${message.guild.id}:channel`);
+    if (countingChannelId && message.channel.id === countingChannelId) {
+      const pureContent = message.content.replace(/\s+/g, "");
+      const isValidMathOrNumber = /^[0-9+\-*/^()]+$/.test(pureContent);
+      if (!isValidMathOrNumber) {
+        if (message.deletable) await message.delete().catch((err) => console.error("Failed to delete chat text:", err));
+        return;
+      }
+      const runCountingGame = require("./games/counting.js");
+      await runCountingGame(message, redis);
+    }
+  } catch (error) {
+    console.error("Error inside counting game message listener pipeline:", error);
+  }
+});
 
 // ==========================================
-// 🖼️ GUILD MEMBER ADD
+// 🖼️ WELCOME / LEAVE CARDS
 // ==========================================
 const { welcomeCard } = require("./canvas/welcome");
 const { leaveCard } = require("./canvas/leave");
@@ -229,11 +250,92 @@ client.once("ready", async () => {
   client.user.setActivity("/help", { type: ActivityType.Playing });
   client.user.setStatus("online");
 
-  // ---- HEARTBEAT ----
+  // ---- HEARTBEAT (for helper bot) ----
   await redis.set('bot:heartbeat', Date.now());
   setInterval(async () => {
     await redis.set('bot:heartbeat', Date.now());
   }, 60000);
+
+  // ---- REAL‑TIME STATS UPDATER ----
+  async function updateStats(guild) {
+    const guildId = guild.id;
+    const isPremium = await redis.get(`premium:guild:${guildId}`) !== null;
+
+    // Total Members (free)
+    const totalChannelId = await redis.get(`stats:channel:total:${guildId}`);
+    if (totalChannelId) {
+      const channel = guild.channels.cache.get(totalChannelId);
+      if (channel) {
+        const count = guild.memberCount;
+        const baseName = await redis.get(`stats:baseName:total:${guildId}`) || "👥 ┃ Members";
+        const newName = `${baseName} • ${count}`;
+        if (channel.name !== newName) await channel.setName(newName).catch(() => {});
+      }
+    }
+
+    // Online Users (free)
+    const onlineChannelId = await redis.get(`stats:channel:online:${guildId}`);
+    if (onlineChannelId) {
+      const channel = guild.channels.cache.get(onlineChannelId);
+      if (channel) {
+        const onlineCount = guild.members.cache.filter(m => m.presence?.status !== "offline").size;
+        const baseName = await redis.get(`stats:baseName:online:${guildId}`) || "🟢 ┃ Online";
+        const newName = `${baseName} • ${onlineCount}`;
+        if (channel.name !== newName) await channel.setName(newName).catch(() => {});
+      }
+    }
+
+    // Voice Activity (premium only)
+    if (isPremium) {
+      const voiceChannelId = await redis.get(`stats:channel:voice:${guildId}`);
+      if (voiceChannelId) {
+        const channel = guild.channels.cache.get(voiceChannelId);
+        if (channel) {
+          const voiceCount = guild.members.cache.filter(m => m.voice.channel).size;
+          const baseName = await redis.get(`stats:baseName:voice:${guildId}`) || "🎙️ ┃ Voice";
+          const newName = `${baseName} • ${voiceCount}`;
+          if (channel.name !== newName) await channel.setName(newName).catch(() => {});
+        }
+      }
+
+      // Joined Today (premium only)
+      const joinedChannelId = await redis.get(`stats:channel:joined:${guildId}`);
+      if (joinedChannelId) {
+        const channel = guild.channels.cache.get(joinedChannelId);
+        if (channel) {
+          const now = new Date();
+          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          const joinedCount = guild.members.cache.filter(m => m.joinedAt && m.joinedAt >= today).size;
+          const baseName = await redis.get(`stats:baseName:joined:${guildId}`) || "📅 ┃ Joined Today";
+          const newName = `${baseName} • ${joinedCount}`;
+          if (channel.name !== newName) await channel.setName(newName).catch(() => {});
+        }
+      }
+    }
+  }
+
+  // ---- STATS UPDATER INTERVAL (every 30s) ----
+  setInterval(async () => {
+    for (const guild of client.guilds.cache.values()) {
+      await updateStats(guild);
+    }
+  }, 30000);
+
+  // ---- TRIGGER STATS ON EVENTS ----
+  client.on("guildMemberAdd", async (member) => {
+    await updateStats(member.guild);
+  });
+  client.on("guildMemberRemove", async (member) => {
+    await updateStats(member.guild);
+  });
+  client.on("presenceUpdate", async (oldPresence, newPresence) => {
+    if (newPresence.guild) await updateStats(newPresence.guild);
+  });
+  client.on("voiceStateUpdate", async (oldState, newState) => {
+    const guild = newState.guild;
+    const isPremium = await redis.get(`premium:guild:${guild.id}`) !== null;
+    if (isPremium) await updateStats(guild);
+  });
 
   // ---- BIRTHDAY CRON ----
   setInterval(async () => {
@@ -271,7 +373,7 @@ client.once("ready", async () => {
     }
   }, 60000);
 
-  // ---- DEPLOY COMMANDS ----
+  // ---- DEPLOY SLASH COMMANDS ----
   const commands = [];
   for (const [name, cmd] of client.commands) {
     try {
