@@ -1,26 +1,29 @@
+// commands/stats.js – Setup stats channels (voice & joined are premium)
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require("discord.js");
 
 module.exports = {
   category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("stats")
-    .setDescription(" Setup server performance statistics tracker channels.")
+    .setDescription("Setup live statistics channels")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("setup")
-        .setDescription("Deploy live community tracking channels.")
+        .setDescription("Deploy live tracking channels")
         .addStringOption(opt =>
           opt.setName("type")
-            .setDescription("Select tracking metric type.")
+            .setDescription("Select metric type")
             .setRequired(true)
             .addChoices(
               { name: "👥 Total Members", value: "total" },
-              { name: "🟢 Online Users", value: "online" }
+              { name: "🟢 Online Users", value: "online" },
+              { name: "🎙️ Voice Activity", value: "voice" },
+              { name: "📅 Joined Today", value: "joined" }
             )
         )
         .addChannelOption(opt =>
           opt.setName("target_channel")
-            .setDescription("Use existing voice channel (optional).")
+            .setDescription("Use existing voice channel (optional)")
             .addChannelTypes(ChannelType.GuildVoice)
             .setRequired(false)
         )
@@ -34,68 +37,65 @@ module.exports = {
     const type = interaction.options.getString("type");
     const targetChannel = interaction.options.getChannel("target_channel");
 
-    let currentMetricValue = "0";
-    let defaultDesignName = "";
+    // ---- Check if guild has premium for voice & joined stats ----
+    const isPremium = await redis.get(`premium:guild:${guildId}`) !== null;
+    const premiumOnlyTypes = ["voice", "joined"];
 
-    // MEMBER COUNT
-    if (type === "total") {
-      currentMetricValue = guild.memberCount.toLocaleString();
-      defaultDesignName = "👥 ┃ Members";
+    if (premiumOnlyTypes.includes(type) && !isPremium) {
+      return interaction.editReply({
+        content: "❌ **Voice Activity** and **Joined Today** stats are **Guild Premium** features. Upgrade to premium to unlock them."
+      });
     }
 
-    // ONLINE COUNT (safe version)
-    if (type === "online") {
-      const onlineCount = guild.members.cache.filter(
-        m => m.presence && m.presence.status && m.presence.status !== "offline"
-      ).size;
+    const defaultNames = {
+      total: "👥 ┃ Members",
+      online: "🟢 ┃ Online",
+      voice: "🎙️ ┃ Voice",
+      joined: "📅 ┃ Joined Today"
+    };
 
-      currentMetricValue = onlineCount.toLocaleString();
-      defaultDesignName = "🟢 ┃ Online";
-    }
+    const getCount = () => {
+      if (type === "total") return guild.memberCount;
+      if (type === "online") {
+        return guild.members.cache.filter(m => m.presence?.status !== "offline").size;
+      }
+      if (type === "voice") {
+        return guild.members.cache.filter(m => m.voice.channel).size;
+      }
+      if (type === "joined") {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        return guild.members.cache.filter(m => m.joinedAt && m.joinedAt >= today).size;
+      }
+      return 0;
+    };
 
-    let activeChannelId = null;
-    let responseText = "";
+    const currentCount = getCount();
+    const baseName = defaultNames[type];
 
-    // CASE 1: Use existing channel
+    let channelId;
+
     if (targetChannel) {
-      activeChannelId = targetChannel.id;
-
-      const baseName = targetChannel.name.split("•")[0] || defaultDesignName;
-
-      await targetChannel.setName(
-        `${baseName} • ${currentMetricValue}`
-      ).catch(() => null);
-
-      responseText = `✅ Connected to ${targetChannel}. Tracking **${type.toUpperCase()}** now.`;
-    }
-
-    // CASE 2: Auto create channel
-    else {
-      const channelName = `${defaultDesignName} • ${currentMetricValue}`;
-
+      channelId = targetChannel.id;
+      const nameParts = targetChannel.name.split("•");
+      const base = nameParts[0]?.trim() || baseName;
+      await targetChannel.setName(`${base} • ${currentCount}`).catch(() => null);
+    } else {
       const newChannel = await guild.channels.create({
-        name: channelName,
+        name: `${baseName} • ${currentCount}`,
         type: ChannelType.GuildVoice,
         permissionOverwrites: [
-          {
-            id: guild.roles.everyone.id,
-            deny: [PermissionFlagsBits.Connect]
-          }
+          { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.Connect] }
         ]
-      }).catch(() => null);
-
-      if (!newChannel) {
-        return interaction.editReply({
-          content: "❌ Failed to create stats channel. Check bot permissions."
-        });
-      }
-
-      activeChannelId = newChannel.id;
-      responseText = `🛠️ Created stats channel <#${newChannel.id}> for **${type.toUpperCase()}** tracking.`;
+      });
+      channelId = newChannel.id;
     }
 
-    await redis.set(`stats:channel:${type}:${guildId}`, activeChannelId);
+    await redis.set(`stats:channel:${type}:${guildId}`, channelId);
+    await redis.set(`stats:baseName:${type}:${guildId}`, baseName);
 
-    return interaction.editReply({ content: responseText });
+    return interaction.editReply({
+      content: `✅ Stats tracking enabled for **${type.toUpperCase()}** in <#${channelId}>.`
+    });
   }
 };
