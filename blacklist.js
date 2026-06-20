@@ -1,28 +1,24 @@
-// blacklist.js – Shared between main and helper bots
+// blacklist.js – Main bot (with logging)
 const { EmbedBuilder } = require("discord.js");
 
-/**
- * Check if a user or guild is blacklisted
- * @param {Redis} redis - Redis client
- * @param {string} userId - Discord user ID
- * @param {string} guildId - Discord guild ID
- * @returns {Promise<{type: 'user'|'guild', data: Object}|null>}
- */
 async function checkBlacklist(redis, userId, guildId) {
-  // Check guild blacklist first (server-wide block)
+  console.log(`[BLACKLIST] Checking user ${userId} in guild ${guildId}`);
+
+  // Check guild blacklist
   const guildKey = `blacklist:guild:${guildId}`;
   const guildData = await redis.get(guildKey);
   if (guildData) {
+    console.log(`[BLACKLIST] Guild blacklist found for ${guildId}`);
     try {
       const data = JSON.parse(guildData);
-      // Check expiry
       if (data.expiresAt && Date.now() > data.expiresAt) {
         await redis.del(guildKey);
+        console.log(`[BLACKLIST] Guild blacklist expired, removed.`);
         return null;
       }
       return { type: 'guild', data };
     } catch (e) {
-      // If data is corrupt, delete it
+      console.error(`[BLACKLIST] Error parsing guild blacklist:`, e);
       await redis.del(guildKey);
       return null;
     }
@@ -32,28 +28,26 @@ async function checkBlacklist(redis, userId, guildId) {
   const userKey = `blacklist:user:${userId}`;
   const userData = await redis.get(userKey);
   if (userData) {
+    console.log(`[BLACKLIST] User blacklist found for ${userId}`);
     try {
       const data = JSON.parse(userData);
       if (data.expiresAt && Date.now() > data.expiresAt) {
         await redis.del(userKey);
+        console.log(`[BLACKLIST] User blacklist expired, removed.`);
         return null;
       }
       return { type: 'user', data };
     } catch (e) {
+      console.error(`[BLACKLIST] Error parsing user blacklist:`, e);
       await redis.del(userKey);
       return null;
     }
   }
 
+  console.log(`[BLACKLIST] No blacklist found for user ${userId} or guild ${guildId}`);
   return null;
 }
 
-/**
- * Build the blacklist embed response
- * @param {Object} data - Blacklist data (reason, expiresAt)
- * @param {string} type - 'user' or 'guild'
- * @returns {EmbedBuilder}
- */
 function buildBlacklistEmbed(data, type) {
   const isPermanent = !data.expiresAt;
   const expiresText = isPermanent ? 'Permanent' : `<t:${Math.floor(data.expiresAt / 1000)}:R>`;
