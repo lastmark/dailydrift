@@ -1,4 +1,4 @@
-// events/messageCreate.js – PUBLIC ONLY (no dev commands)
+// events/messageCreate.js – Main Bot (Full)
 const { Events, EmbedBuilder } = require("discord.js");
 const { checkBlacklist, buildBlacklistEmbed } = require("../blacklist.js");
 
@@ -9,29 +9,33 @@ module.exports = {
   name: Events.MessageCreate,
 
   async execute(message, client, redis) {
+    // ---- Basic checks ----
     if (!message.guild || message.author.bot) return;
 
-    // ---- BLACKLIST CHECK ----
+    console.log(`[MSG] From ${message.author.tag}: ${message.content.slice(0, 50)}`);
+
+    // ---- BLACKLIST CHECK (FIRST) ----
     const blacklist = await checkBlacklist(redis, message.author.id, message.guild.id);
     if (blacklist) {
+      console.log(`[MSG] Blocked by blacklist: ${message.author.tag}`);
       if (message.content.startsWith("!")) {
         const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
         await message.reply({ embeds: [embed] });
         await message.delete().catch(() => {});
       }
-      return; // block all messages
+      return; // block all messages from blacklisted users/guilds
     }
 
     // ---- MAINTENANCE CHECK ----
     const maintenanceKey = `maintenance:${message.guild.id}`;
     if (await redis.get(maintenanceKey) === "true") {
       if (message.content.startsWith("!")) {
-        return message.reply("🔧 The bot is currently under maintenance. Please try again later.");
+        await message.reply("🔧 The bot is currently under maintenance. Please try again later.");
       }
       return; // block all messages during maintenance
     }
 
-    // Prevent duplicate processing
+    // ---- Prevent duplicate processing ----
     if (processedMessages.has(message.id)) return;
     processedMessages.add(message.id);
     setTimeout(() => processedMessages.delete(message.id), 5000);
@@ -61,18 +65,28 @@ module.exports = {
     }
 
     // ==========================================
-    // 💬 MESSAGE COMMANDS (all start with !)
+    // 💬 PREFIX COMMANDS
     // ==========================================
     if (content.startsWith("!")) {
       const args = content.slice(1).trim().split(/ +/);
       const cmd = args.shift().toLowerCase();
 
-      // -------- PUBLIC SHOP COMMANDS --------
+      // ---- DEBUG: Check blacklist status ----
+      if (cmd === "checkblacklist") {
+        const target = message.mentions.users.first() || message.author;
+        const blacklistStatus = await checkBlacklist(redis, target.id, message.guild.id);
+        if (!blacklistStatus) {
+          return message.reply(`✅ **${target.username}** is NOT blacklisted.`);
+        }
+        const embed = buildBlacklistEmbed(blacklistStatus.data, blacklistStatus.type);
+        return message.reply({ embeds: [embed] });
+      }
+
+      // ---- PUBLIC SHOP COMMANDS ----
       if (cmd === "shop") {
         const balance = Number(await redis.get(`eco:${userId}:money`) || 0);
         const shields = Number(await redis.get(`eco:${userId}:shield`) || 0);
         const doubleXP = Number(await redis.get(`eco:${userId}:double`) || 0);
-
         const embed = new EmbedBuilder()
           .setColor("#FF69B4")
           .setTitle("🛒 Counting Shop")
@@ -91,7 +105,6 @@ module.exports = {
           )
           .setFooter({ text: "Use !buy shield / !buy double" })
           .setTimestamp();
-
         return message.reply({ embeds: [embed] });
       }
 
@@ -100,17 +113,13 @@ module.exports = {
         if (!item || !["shield", "double"].includes(item)) {
           return message.reply("❌ Usage: `!buy shield` or `!buy double`");
         }
-
         const prices = { shield: 200, double: 500 };
         const price = prices[item];
         const balance = Number(await redis.get(`eco:${userId}:money`) || 0);
-
         if (balance < price) {
           return message.reply(`❌ You need **${price}** coins. You have **${balance}**.`);
         }
-
         await redis.set(`eco:${userId}:money`, balance - price);
-
         if (item === "shield") {
           await redis.incr(`eco:${userId}:shield`);
           const newShields = await redis.get(`eco:${userId}:shield`);
@@ -126,7 +135,6 @@ module.exports = {
         return message.reply(`🛡️ You have **${shields}** shield${shields !== 1 ? 's' : ''}.`);
       }
 
-      // -------- COUNTING STATS (anyone) --------
       if (cmd === "countingstats") {
         const target = message.mentions.users.first() || message.author;
         const id = target.id;
@@ -135,7 +143,6 @@ module.exports = {
         const streak = Number(await redis.get(`counting:${guildId}:${id}:streak`) || 0);
         const best = Number(await redis.get(`counting:${guildId}:${id}:bestStreak`) || 0);
         const coins = Number(await redis.get(`eco:${id}:money`) || 0);
-
         const embed = new EmbedBuilder()
           .setColor("#5865F2")
           .setAuthor({ name: `${target.username}'s Counting Stats`, iconURL: target.displayAvatarURL() })
@@ -150,19 +157,18 @@ module.exports = {
         return message.reply({ embeds: [embed] });
       }
 
-      // If command was not handled, return
+      // If command not recognized, ignore
       return;
     }
 
     // ==========================================
-    // 💎 XP / LEVEL SYSTEM (only for non-command messages)
+    // 💎 XP / LEVEL SYSTEM (non-command messages)
     // ==========================================
     const cooldownKey = `xp:cd:${userId}`;
     if (await redis.get(cooldownKey)) return;
     await redis.setex(cooldownKey, 60, "1");
 
     const isPremium = await redis.get(`premium:user:${userId}`);
-
     let xpGain = Math.floor(Math.random() * 11) + 15; // 15–25 XP
     if (isPremium) xpGain = Math.floor(xpGain * 1.8);
 
