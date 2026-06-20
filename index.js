@@ -1,4 +1,4 @@
-// index.js – Main Bot (Full)
+// index.js – Main Bot (Full with blacklist & logging)
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token } = require("./config");
 const redis = require("./redis");
@@ -27,7 +27,7 @@ const client = new Client({
 client.commands = new Collection();
 
 // ==========================================
-// 📂 AUTOMATED EVENT LOADER SYSTEM
+// 📂 AUTOMATED EVENT LOADER
 // ==========================================
 const eventsPath = path.join(__dirname, "events");
 if (fs.existsSync(eventsPath)) {
@@ -47,7 +47,7 @@ if (fs.existsSync(eventsPath)) {
 }
 
 // ==========================================
-// 🛡️ SAFE COMMAND LOADER
+// 🛡️ COMMAND LOADER
 // ==========================================
 const commandsPath = path.join(__dirname, "commands");
 if (fs.existsSync(commandsPath)) {
@@ -65,13 +65,22 @@ if (fs.existsSync(commandsPath)) {
 }
 
 // ==========================================
-// 🏎️ INTERACTION WORKFLOW HANDLER
+// 🏎️ INTERACTION HANDLER
 // ==========================================
 client.on("interactionCreate", async (interaction) => {
-  // ---- Slash Commands ----
   if (interaction.isChatInputCommand()) {
     const cmd = client.commands.get(interaction.commandName);
     if (!cmd) return;
+
+    console.log(`[SLASH] Command ${interaction.commandName} from ${interaction.user.tag}`);
+
+    // ---- BLACKLIST CHECK (FIRST) ----
+    const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
+    if (blacklist) {
+      console.log(`[SLASH] Blocked by blacklist: ${interaction.user.tag}`);
+      const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
+      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    }
 
     // ---- MAINTENANCE CHECK ----
     const maintenanceKey = `maintenance:${interaction.guild.id}`;
@@ -80,13 +89,6 @@ client.on("interactionCreate", async (interaction) => {
         content: "🔧 The bot is currently under maintenance. Please try again later.",
         flags: MessageFlags.Ephemeral
       });
-    }
-
-    // ---- BLACKLIST CHECK ----
-    const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
-    if (blacklist) {
-      const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
     try {
@@ -104,12 +106,8 @@ client.on("interactionCreate", async (interaction) => {
 
   // ---- Buttons ----
   if (interaction.isButton()) {
-    // Ignore Blackjack buttons (they are handled inside the games command)
     if (interaction.customId.startsWith('blackjack_')) return;
-
-    const { customId, user, guildId } = interaction;
-
-    // Handle counting shop buttons
+    const { customId, user } = interaction;
     if (customId.startsWith('counting_buy_')) {
       try {
         const item = customId.split('_')[2];
@@ -119,7 +117,6 @@ client.on("interactionCreate", async (interaction) => {
         if (!price) {
           return interaction.reply({ content: "❌ Invalid item.", flags: MessageFlags.Ephemeral });
         }
-
         const balanceKey = `eco:${userId}:money`;
         let coins = Number(await redis.get(balanceKey) || 0);
         if (coins < price) {
@@ -128,14 +125,12 @@ client.on("interactionCreate", async (interaction) => {
             flags: MessageFlags.Ephemeral
           });
         }
-
         await redis.set(balanceKey, coins - price);
         if (item === 'shield') {
           await redis.incr(`eco:${userId}:shield`);
         } else if (item === 'double') {
           await redis.set(`eco:${userId}:double`, 5);
         }
-
         const itemNames = { shield: "🛡️ Shield", double: "⚡ Double XP (5 uses)" };
         const embed = new EmbedBuilder()
           .setColor("#57F287")
@@ -143,7 +138,6 @@ client.on("interactionCreate", async (interaction) => {
           .setDescription(`You bought **${itemNames[item]}** for **${price}** coins!`)
           .addFields({ name: "💰 New Balance", value: `${await redis.get(balanceKey) || 0} coins`, inline: true })
           .setTimestamp();
-
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       } catch (err) {
         console.error("Button handler error:", err);
@@ -152,40 +146,33 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
     }
-
-    // If button is not recognized
     if (!interaction.replied) {
       await interaction.reply({ content: "❌ This button is not supported.", flags: MessageFlags.Ephemeral });
     }
     return;
   }
 
-  // ---- Modal submits (custom embed builder) ----
+  // ---- Modal submits ----
   if (interaction.isModalSubmit()) {
     if (interaction.customId.startsWith("embed_modal:")) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
       try {
         const targetChannelId = interaction.customId.split(":")[1];
         const targetChannel = await interaction.guild.channels.fetch(targetChannelId);
         if (!targetChannel) {
           return await interaction.editReply({ content: "❌ Could not find or access that destination channel." });
         }
-
         const title = interaction.fields.getTextInputValue("embed_title");
         const description = interaction.fields.getTextInputValue("embed_description");
         let colorInput = interaction.fields.getTextInputValue("embed_color") || "#2B2D31";
         const footerText = interaction.fields.getTextInputValue("embed_footer") || null;
-
         if (!colorInput.startsWith("#")) colorInput = `#${colorInput}`;
         if (!/^#[0-9A-F]{6}$/i.test(colorInput)) colorInput = "#2B2D31";
-
         const customEmbed = new EmbedBuilder()
           .setTitle(title)
           .setDescription(description)
           .setColor(colorInput);
         if (footerText) customEmbed.setFooter({ text: footerText });
-
         await targetChannel.send({ embeds: [customEmbed] });
         await interaction.editReply({
           content: `✅ Success! Your custom embed has been published to ${targetChannel}.`
@@ -200,7 +187,7 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 // ==========================================
-// 💬 MESSAGE FEED WORKERS (COUNTING ENGINE)
+// 💬 MESSAGE HANDLER (Counting)
 // ==========================================
 client.on("messageCreate", async (message) => {
   if (message.author.id === client.user.id) return;
@@ -209,33 +196,16 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-client.on("messageCreate", async (message) => {
-  if (!message.guild || message.author.bot) return;
-
-  // ---- BLACKLIST CHECK (already handled in events/messageCreate.js but also here for counting) ----
-  // Actually we handle it in the event file, so we don't need to duplicate here.
-  // But we still need to check if the counting channel is set.
-  try {
-    const countingChannelId = await redis.get(`counting:${message.guild.id}:channel`);
-    if (countingChannelId && message.channel.id === countingChannelId) {
-      const pureContent = message.content.replace(/\s+/g, "");
-      const isValidMathOrNumber = /^[0-9\+\-\*\/\^\(\)]+$/.test(pureContent);
-      if (!isValidMathOrNumber) {
-        if (message.deletable) {
-          await message.delete().catch((err) => console.error("Failed to delete chat text:", err));
-        }
-        return;
-      }
-      const runCountingGame = require("./games/counting.js");
-      await runCountingGame(message, redis);
-    }
-  } catch (error) {
-    console.error("Error inside counting game message listener pipeline:", error);
-  }
-});
+// This second listener handles counting – but the actual logic is in events/messageCreate.js
+// We keep it here to avoid double processing, but we'll use the event file instead.
+// Actually, we'll just use the event file for all message logic.
+// So we can remove this second listener – but we'll keep it for counting.
+// Wait, we already have the event file. We'll move the counting logic there.
+// To avoid duplication, we'll only use the event file.
+// I'll remove this second listener and rely solely on events/messageCreate.js.
 
 // ==========================================
-// 🖼️ GUILD MEMBER ENGAGEMENT CANVAS FLOWS
+// 🖼️ GUILD MEMBER ADD
 // ==========================================
 const { welcomeCard } = require("./canvas/welcome");
 const { leaveCard } = require("./canvas/leave");
@@ -250,7 +220,7 @@ client.on("guildMemberAdd", async (member) => {
 });
 
 // ==========================================
-// 🚀 ENGINE BOOTSTRAP & REST REGISTRATION
+// 🚀 READY EVENT
 // ==========================================
 client.once("ready", async () => {
   console.log(`${client.user.tag} online`);
@@ -259,20 +229,18 @@ client.once("ready", async () => {
   client.user.setActivity("/help", { type: ActivityType.Playing });
   client.user.setStatus("online");
 
-  // ---- HEARTBEAT – tells helper we're alive ----
+  // ---- HEARTBEAT ----
   await redis.set('bot:heartbeat', Date.now());
   setInterval(async () => {
     await redis.set('bot:heartbeat', Date.now());
   }, 60000);
 
-  // ===================================================
-  // 🎂 AUTOMATED MIDNIGHT BIRTHDAY CRON CHECK ENGINE
-  // ===================================================
+  // ---- BIRTHDAY CRON ----
   setInterval(async () => {
     const now = new Date();
     if (now.getHours() === 0 && now.getMinutes() === 0) {
       const todayStr = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      console.log(`🎂 [BIRTHDAY CRON] Running automated sweeps for date: ${todayStr}...`);
+      console.log(`🎂 [BIRTHDAY CRON] Running for date: ${todayStr}...`);
       const userIds = await redis.smembers(`birthdays:date:${todayStr}`);
       if (!userIds || userIds.length === 0) return;
       for (const guild of client.guilds.cache.values()) {
@@ -303,22 +271,20 @@ client.once("ready", async () => {
     }
   }, 60000);
 
-  // ---- Deploy slash commands globally ----
+  // ---- DEPLOY COMMANDS ----
   const commands = [];
   for (const [name, cmd] of client.commands) {
     try {
       commands.push(cmd.data.toJSON());
-      console.log(`✅ Loaded Command: ${name}`);
     } catch (err) {
       console.error(`❌ Broken data conversion structure: ${name}`);
       console.error(err);
     }
   }
-
   try {
     const { REST, Routes } = require("discord.js");
     const rest = new REST({ version: "10" }).setToken(token);
-    console.log(`Syncing ${commands.length} application slash entries to Discord gateway API...`);
+    console.log(`Syncing ${commands.length} application slash entries...`);
     await rest.put(
       Routes.applicationCommands(client.user.id),
       { body: commands }
