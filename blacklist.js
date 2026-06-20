@@ -1,32 +1,59 @@
-// blacklist.js
+// blacklist.js – Shared between main and helper bots
 const { EmbedBuilder } = require("discord.js");
 
+/**
+ * Check if a user or guild is blacklisted
+ * @param {Redis} redis - Redis client
+ * @param {string} userId - Discord user ID
+ * @param {string} guildId - Discord guild ID
+ * @returns {Promise<{type: 'user'|'guild', data: Object}|null>}
+ */
 async function checkBlacklist(redis, userId, guildId) {
-  // Check guild blacklist
-  const guildData = await redis.get(`blacklist:guild:${guildId}`);
+  // Check guild blacklist first (server-wide block)
+  const guildKey = `blacklist:guild:${guildId}`;
+  const guildData = await redis.get(guildKey);
   if (guildData) {
-    const data = JSON.parse(guildData);
-    if (data.expiresAt && Date.now() > data.expiresAt) {
-      await redis.del(`blacklist:guild:${guildId}`);
+    try {
+      const data = JSON.parse(guildData);
+      // Check expiry
+      if (data.expiresAt && Date.now() > data.expiresAt) {
+        await redis.del(guildKey);
+        return null;
+      }
+      return { type: 'guild', data };
+    } catch (e) {
+      // If data is corrupt, delete it
+      await redis.del(guildKey);
       return null;
     }
-    return { type: 'guild', data };
   }
 
   // Check user blacklist
-  const userData = await redis.get(`blacklist:user:${userId}`);
+  const userKey = `blacklist:user:${userId}`;
+  const userData = await redis.get(userKey);
   if (userData) {
-    const data = JSON.parse(userData);
-    if (data.expiresAt && Date.now() > data.expiresAt) {
-      await redis.del(`blacklist:user:${userId}`);
+    try {
+      const data = JSON.parse(userData);
+      if (data.expiresAt && Date.now() > data.expiresAt) {
+        await redis.del(userKey);
+        return null;
+      }
+      return { type: 'user', data };
+    } catch (e) {
+      await redis.del(userKey);
       return null;
     }
-    return { type: 'user', data };
   }
 
   return null;
 }
 
+/**
+ * Build the blacklist embed response
+ * @param {Object} data - Blacklist data (reason, expiresAt)
+ * @param {string} type - 'user' or 'guild'
+ * @returns {EmbedBuilder}
+ */
 function buildBlacklistEmbed(data, type) {
   const isPermanent = !data.expiresAt;
   const expiresText = isPermanent ? 'Permanent' : `<t:${Math.floor(data.expiresAt / 1000)}:R>`;
