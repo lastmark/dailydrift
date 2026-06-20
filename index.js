@@ -1,4 +1,4 @@
-// index.js – Full Main Bot
+// index.js – Full Main Bot (with fixed online count)
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token } = require("./config");
 const redis = require("./redis");
@@ -25,7 +25,7 @@ const client = new Client({
   ]
 });
 
-setupLogger(client, redis); // sets up edit/delete logging
+setupLogger(client, redis);
 client.commands = new Collection();
 
 // ==========================================
@@ -70,7 +70,6 @@ if (fs.existsSync(commandsPath)) {
 // 🏎️ INTERACTION HANDLER
 // ==========================================
 client.on("interactionCreate", async (interaction) => {
-  // ---- Slash Commands ----
   if (interaction.isChatInputCommand()) {
     const cmd = client.commands.get(interaction.commandName);
     if (!cmd) return;
@@ -108,12 +107,9 @@ client.on("interactionCreate", async (interaction) => {
 
   // ---- Buttons ----
   if (interaction.isButton()) {
-    // Ignore Blackjack buttons (handled in the games command)
     if (interaction.customId.startsWith('blackjack_')) return;
-
     const { customId, user } = interaction;
 
-    // Counting shop buttons
     if (customId.startsWith('counting_buy_')) {
       try {
         const item = customId.split('_')[2];
@@ -273,12 +269,12 @@ client.once("ready", async () => {
       }
     }
 
-    // Online Users (free)
+    // Online Users (free) – FIXED: only count members with presence & status not offline
     const onlineChannelId = await redis.get(`stats:channel:online:${guildId}`);
     if (onlineChannelId) {
       const channel = guild.channels.cache.get(onlineChannelId);
       if (channel) {
-        const onlineCount = guild.members.cache.filter(m => m.presence?.status !== "offline").size;
+        const onlineCount = guild.members.cache.filter(m => m.presence && m.presence.status !== "offline").size;
         const baseName = await redis.get(`stats:baseName:online:${guildId}`) || "🟢 ┃ Online";
         const newName = `${baseName} • ${onlineCount}`;
         if (channel.name !== newName) await channel.setName(newName).catch(() => {});
