@@ -1,4 +1,4 @@
-// index.js – Full Main Bot (with fixed online count)
+// index.js – Full Main Bot (with fixed online count & debug logs)
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token } = require("./config");
 const redis = require("./redis");
@@ -269,12 +269,15 @@ client.once("ready", async () => {
       }
     }
 
-    // Online Users (free) – FIXED: only count members with presence & status not offline
+    // Online Users (free) – FIXED: only count members with a valid presence and status not "offline"
     const onlineChannelId = await redis.get(`stats:channel:online:${guildId}`);
     if (onlineChannelId) {
       const channel = guild.channels.cache.get(onlineChannelId);
       if (channel) {
-        const onlineCount = guild.members.cache.filter(m => m.presence && m.presence.status !== "offline").size;
+        // Filter members with presence and status not offline
+        const onlineMembers = guild.members.cache.filter(m => m.presence && m.presence.status !== "offline");
+        const onlineCount = onlineMembers.size;
+        console.log(`[STATS] Online count for ${guild.name}: ${onlineCount}`);
         const baseName = await redis.get(`stats:baseName:online:${guildId}`) || "🟢 ┃ Online";
         const newName = `${baseName} • ${onlineCount}`;
         if (channel.name !== newName) await channel.setName(newName).catch(() => {});
