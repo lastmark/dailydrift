@@ -1,6 +1,6 @@
-// index.js – Full Main Bot (with fixed online count & debug logs)
+// index.js – Full Main Bot with Terms of Service
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
-const { token } = require("./config");
+const { token, TERMS_VERSION } = require("./config");
 const redis = require("./redis");
 const fs = require("fs");
 const path = require("path");
@@ -76,14 +76,31 @@ client.on("interactionCreate", async (interaction) => {
 
     console.log(`[SLASH] ${interaction.commandName} by ${interaction.user.tag}`);
 
-    // Blacklist check
+    // ---- TERMS CHECK (skip for /terms command) ----
+    if (interaction.commandName !== "terms") {
+      const accepted = await redis.get(`terms:accepted:${interaction.user.id}`);
+      if (accepted !== TERMS_VERSION) {
+        const embed = new EmbedBuilder()
+          .setColor("#ED4245")
+          .setTitle("📜 Terms of Service Required")
+          .setDescription("You must accept the Terms of Service before using this bot.")
+          .addFields({ 
+            name: "Next Steps", 
+            value: "Please run `/terms` to view and accept the Terms of Service." 
+          })
+          .setTimestamp();
+        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      }
+    }
+
+    // ---- BLACKLIST CHECK ----
     const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
     if (blacklist) {
       const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
-    // Maintenance check
+    // ---- MAINTENANCE CHECK ----
     const maintenanceKey = `maintenance:${interaction.guild.id}`;
     if (await redis.get(maintenanceKey) === "true") {
       return interaction.reply({
@@ -107,9 +124,34 @@ client.on("interactionCreate", async (interaction) => {
 
   // ---- Buttons ----
   if (interaction.isButton()) {
-    if (interaction.customId.startsWith('blackjack_')) return;
-    const { customId, user } = interaction;
+    // ---- Terms of Service button handler ----
+    if (interaction.customId === "terms_accept") {
+      const userId = interaction.user.id;
+      await redis.set(`terms:accepted:${userId}`, TERMS_VERSION);
+      await interaction.update({
+        content: "✅ You have accepted the Terms of Service. You may now use all features.",
+        embeds: [],
+        components: []
+      });
+      return;
+    }
 
+    if (interaction.customId === "terms_deny") {
+      const userId = interaction.user.id;
+      await redis.del(`terms:accepted:${userId}`);
+      await interaction.update({
+        content: "❌ You have denied the Terms of Service. You cannot use this bot until you accept.",
+        embeds: [],
+        components: []
+      });
+      return;
+    }
+
+    // ---- Blackjack buttons (ignored, handled in games command) ----
+    if (interaction.customId.startsWith('blackjack_')) return;
+
+    // ---- Counting shop buttons ----
+    const { customId, user } = interaction;
     if (customId.startsWith('counting_buy_')) {
       try {
         const item = customId.split('_')[2];
@@ -203,7 +245,37 @@ client.on("messageCreate", async (message) => {
 client.on("messageCreate", async (message) => {
   if (!message.guild || message.author.bot) return;
 
-  // Counting game – only if in the counting channel
+  // ---- TERMS CHECK (prefix commands) ----
+  const accepted = await redis.get(`terms:accepted:${message.author.id}`);
+  if (accepted !== TERMS_VERSION) {
+    // Block all prefix commands except !terms / ?terms
+    if (!message.content.match(/^[!?]terms$/)) {
+      return message.reply("📜 You must accept the Terms of Service first. Run `!terms` to view and accept.");
+    }
+    // Allow !terms to go through
+  }
+
+  // ---- BLACKLIST CHECK ----
+  const blacklist = await checkBlacklist(redis, message.author.id, message.guild.id);
+  if (blacklist) {
+    if (message.content.startsWith("!")) {
+      const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
+      await message.reply({ embeds: [embed] });
+      await message.delete().catch(() => {});
+    }
+    return;
+  }
+
+  // ---- MAINTENANCE CHECK ----
+  const maintenanceKey = `maintenance:${message.guild.id}`;
+  if (await redis.get(maintenanceKey) === "true") {
+    if (message.content.startsWith("!")) {
+      await message.reply("🔧 The bot is currently under maintenance. Please try again later.");
+    }
+    return;
+  }
+
+  // ---- Counting game ----
   try {
     const countingChannelId = await redis.get(`counting:${message.guild.id}:channel`);
     if (countingChannelId && message.channel.id === countingChannelId) {
@@ -269,15 +341,12 @@ client.once("ready", async () => {
       }
     }
 
-    // Online Users (free) – FIXED: only count members with a valid presence and status not "offline"
+    // Online Users (free)
     const onlineChannelId = await redis.get(`stats:channel:online:${guildId}`);
     if (onlineChannelId) {
       const channel = guild.channels.cache.get(onlineChannelId);
       if (channel) {
-        // Filter members with presence and status not offline
-        const onlineMembers = guild.members.cache.filter(m => m.presence && m.presence.status !== "offline");
-        const onlineCount = onlineMembers.size;
-        console.log(`[STATS] Online count for ${guild.name}: ${onlineCount}`);
+        const onlineCount = guild.members.cache.filter(m => m.presence && ["online", "idle", "dnd"].includes(m.presence.status)).size;
         const baseName = await redis.get(`stats:baseName:online:${guildId}`) || "🟢 ┃ Online";
         const newName = `${baseName} • ${onlineCount}`;
         if (channel.name !== newName) await channel.setName(newName).catch(() => {});
