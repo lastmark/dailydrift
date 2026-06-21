@@ -23,7 +23,7 @@ module.exports = {
       .setColor("#5865F2")
       .setTitle("📜 Terms of Service Agreement")
       .setDescription(
-        "This bot (“Service”) is operated under the following Terms of Service. " +
+        "This bot (“Daily Drift”) is operated under the following Terms of Service. " +
         "By accessing or using any command, feature, or functionality of this bot, " +
         "you agree to be legally bound by these terms. If you do not agree, " +
         "you must immediately stop using the Service.\n\n" +
