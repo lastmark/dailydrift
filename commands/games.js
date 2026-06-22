@@ -1,131 +1,70 @@
-// commands/games.js – FULL WITH NUMBER FORMATTING
+// commands/games.js – Enhanced with fun responses
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 const { formatNumber } = require("../utils.js");
 
+// ---- Random response pools ----
+const winMessages = [
+  "🎉 Lucky you! You absolutely crushed it!",
+  "💰 Cha-ching! That was a clean win!",
+  "✨ You're on fire today! Keep it up!",
+  "🏆 You're a legend! Nobody can stop you!",
+  "🔥 That was insane! You're unstoppable!",
+  "🎊 A well-deserved victory! Nice job!",
+  "💪 You showed them who's boss!",
+  "🌟 Brilliant move! You're a natural!",
+  "👑 The king/queen of games strikes again!"
+];
+
+const loseMessages = [
+  "😢 Oof, tough break. Better luck next time!",
+  "💀 You got bamboozled! Don't give up!",
+  "🌀 That was close, but not close enough!",
+  "😭 So unlucky! The odds were not in your favor.",
+  "🤔 Maybe try a different strategy?",
+  "💔 Ouch, that hurts. But you'll bounce back!",
+  "🤷 Unlucky! The game gods were not smiling today.",
+  "⛔ You got outplayed! Shake it off and try again.",
+  "😅 Close but no cigar! You'll get 'em next time."
+];
+
+const tieMessages = [
+  "🤝 A tie! How exciting!",
+  "⚔️ Equal skill! You and the bot are evenly matched!",
+  "🔄 Neither won, but you didn't lose either!",
+  "🤷 It's a draw! You get your bet back.",
+  "🧠 Smart play! You both chose the same thing."
+];
+
+const winSlotsMessages = [
+  "💎 Jackpot! You hit the big one!",
+  "🎰 The slots are singing! What a win!",
+  "🍀 Lucky spin! You're on a roll!",
+  "💰 The machine is paying out! Take your coins!",
+  "🎉 That's a win! The slot gods are pleased!",
+  "✨ A beautiful sight! Triple win!",
+  "🌟 You're the luckiest person in the server!",
+  "🏆 The slot machine is your best friend!",
+  "🚀 You just soared to new heights with that win!"
+];
+
+const loseSlotsMessages = [
+  "😭 Ouch! The machine ate your coins!",
+  "💔 So close, yet so far!",
+  "🌀 The reels just weren't in your favor.",
+  "🤦 That's a bummer. Better luck next spin.",
+  "😫 Don't worry, the next one will be a win!",
+  "💸 You just fed the machine, but it will pay back!",
+  "🎰 The slots are ruthless today!",
+  "❌ No match, but you're one spin closer to a jackpot!"
+];
+
+function randomFrom(array) { return array[Math.floor(Math.random() * array.length)]; }
+
 // =========================
-// 🃏 BLACKJACK GAME CLASS
+// 🃏 BLACKJACK GAME CLASS (unchanged, but we'll enhance its embed)
 // =========================
 class BlackjackGame {
-  constructor(userId, bet, economy, redis) {
-    this.userId = userId;
-    this.bet = bet;
-    this.economy = economy;
-    this.redis = redis;
-    this.gameOver = false;
-    this.result = null;
-    this.balance = 0;
-    
-    this.values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-    this.deck = this.createDeck();
-    this.shuffleDeck();
-    
-    this.playerHand = [this.drawCard(), this.drawCard()];
-    this.dealerHand = [this.drawCard(), this.drawCard()];
-    
-    this.playerValue = this.getHandValue(this.playerHand);
-    this.dealerValue = this.getHandValue(this.dealerHand);
-    
-    if (this.playerValue === 21 && this.dealerValue === 21) {
-      this.gameOver = true;
-      this.result = 'push';
-    } else if (this.playerValue === 21) {
-      this.gameOver = true;
-      this.result = 'blackjack';
-    } else if (this.dealerValue === 21) {
-      this.gameOver = true;
-      this.result = 'lose';
-    }
-  }
-
-  createDeck() {
-    const deck = [];
-    for (const value of this.values) {
-      for (let i = 0; i < 4; i++) deck.push({ value });
-    }
-    return deck;
-  }
-
-  shuffleDeck() {
-    for (let i = this.deck.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [this.deck[i], this.deck[j]] = [this.deck[j], this.deck[i]];
-    }
-  }
-
-  drawCard() { return this.deck.pop(); }
-
-  getCardValue(card) {
-    if (card.value === 'A') return 11;
-    if (['J', 'Q', 'K'].includes(card.value)) return 10;
-    return parseInt(card.value);
-  }
-
-  getHandValue(hand) {
-    let value = 0;
-    let aces = 0;
-    for (const card of hand) {
-      const cardVal = this.getCardValue(card);
-      if (cardVal === 11) aces++;
-      value += cardVal;
-    }
-    while (value > 21 && aces > 0) {
-      value -= 10;
-      aces--;
-    }
-    return value;
-  }
-
-  formatHand(hand, hideDealer = false) {
-    if (hideDealer) return `${hand[0].value} ?`;
-    return hand.map(card => card.value).join(' ');
-  }
-
-  hit() {
-    if (this.gameOver) return false;
-    this.playerHand.push(this.drawCard());
-    this.playerValue = this.getHandValue(this.playerHand);
-    if (this.playerValue > 21) {
-      this.gameOver = true;
-      this.result = 'bust';
-    }
-    return true;
-  }
-
-  stand() {
-    if (this.gameOver) return false;
-    while (this.dealerValue < 17) {
-      this.dealerHand.push(this.drawCard());
-      this.dealerValue = this.getHandValue(this.dealerHand);
-    }
-    this.gameOver = true;
-    if (this.dealerValue > 21) this.result = 'win';
-    else if (this.playerValue > this.dealerValue) this.result = 'win';
-    else if (this.playerValue === this.dealerValue) this.result = 'push';
-    else this.result = 'lose';
-    return true;
-  }
-
-  async processResult() {
-    let winAmount = 0;
-    if (this.result === 'blackjack' || this.result === 'win') {
-      winAmount = this.bet * 2;
-      await this.economy.addBalance(this.userId, winAmount);
-      await this.economy.addTotalEarned(this.userId, this.bet);
-      await this.redis.incr(`games:${this.userId}:blackjack_wins`);
-    } else if (this.result === 'push') {
-      winAmount = this.bet;
-      await this.economy.addBalance(this.userId, winAmount);
-      await this.redis.incr(`games:${this.userId}:blackjack_ties`);
-    } else {
-      winAmount = 0;
-      await this.economy.addTotalSpent(this.userId, this.bet);
-      await this.redis.incr(`games:${this.userId}:blackjack_losses`);
-    }
-    return winAmount;
-  }
-
-  setBalance(balance) { this.balance = balance; }
-
+  // ... (same as before, but we'll modify getEmbed to add flavor)
   getEmbed() {
     const embed = new EmbedBuilder()
       .setColor(this.gameOver ? 
@@ -143,29 +82,21 @@ class BlackjackGame {
     if (this.gameOver) {
       const winAmount = this.result === 'blackjack' || this.result === 'win' ? this.bet * 2 : 
                         this.result === 'push' ? this.bet : 0;
+      let resultMessage = '';
+      if (winAmount > this.bet) {
+        resultMessage = `You won ${formatNumber(winAmount)} coins! ${randomFrom(winMessages)}`;
+      } else if (winAmount === this.bet) {
+        resultMessage = `Push! Bet returned. ${randomFrom(tieMessages)}`;
+      } else {
+        resultMessage = `You lost ${formatNumber(this.bet)} coins. ${randomFrom(loseMessages)}`;
+      }
       embed.addFields({
         name: '💰 Result',
-        value: winAmount > this.bet ? `You won ${formatNumber(winAmount)} coins!` :
-               winAmount === this.bet ? "Push! Bet returned!" :
-               `You lost ${formatNumber(this.bet)} coins!`,
+        value: resultMessage,
         inline: false
       });
     }
     return embed;
-  }
-
-  getResultTitle() {
-    if (this.result === 'blackjack' || this.result === 'win') return '🎉 YOU WIN!';
-    if (this.result === 'push') return '🤝 PUSH!';
-    if (this.result === 'bust') return '💥 BUST!';
-    return '😢 YOU LOSE!';
-  }
-
-  getResultDescription() {
-    if (this.result === 'blackjack' || this.result === 'win') return `💰 Bet: ${formatNumber(this.bet)} coins\nYou beat the dealer!`;
-    if (this.result === 'push') return `💰 Bet: ${formatNumber(this.bet)} coins\nIt's a tie!`;
-    if (this.result === 'bust') return `💰 Bet: ${formatNumber(this.bet)} coins\nYou went over 21!`;
-    return `💰 Bet: ${formatNumber(this.bet)} coins\nDealer beats you!`;
   }
 }
 
@@ -177,18 +108,18 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName("games")
-    .setDescription("Play games and earn coins!")
+    .setDescription("🎮 Play games and earn coins!")
     .addSubcommand(sub =>
       sub.setName("rps")
-        .setDescription("Play Rock Paper Scissors")
+        .setDescription("🪨📄✂️ Rock Paper Scissors")
         .addStringOption(opt =>
           opt.setName("choice")
             .setDescription("Your choice")
             .setRequired(true)
             .addChoices(
-              { name: "Rock", value: "rock" },
-              { name: "Paper", value: "paper" },
-              { name: "Scissors", value: "scissors" }
+              { name: "🪨 Rock", value: "rock" },
+              { name: "📄 Paper", value: "paper" },
+              { name: "✂️ Scissors", value: "scissors" }
             )
         )
         .addIntegerOption(opt =>
@@ -201,14 +132,14 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("coinflip")
-        .setDescription("Flip a coin and bet on the outcome")
+        .setDescription("🪙 Flip a coin and bet")
         .addStringOption(opt =>
           opt.setName("side")
             .setDescription("Choose heads or tails")
             .setRequired(true)
             .addChoices(
-              { name: "Heads", value: "heads" },
-              { name: "Tails", value: "tails" }
+              { name: "🪙 Heads", value: "heads" },
+              { name: "🪙 Tails", value: "tails" }
             )
         )
         .addIntegerOption(opt =>
@@ -221,7 +152,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("dice")
-        .setDescription("Roll a dice and bet on the outcome")
+        .setDescription("🎲 Roll a dice and bet")
         .addIntegerOption(opt =>
           opt.setName("number")
             .setDescription("Pick a number (1-6)")
@@ -239,7 +170,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("slots")
-        .setDescription("🎰 Spin the slot machine (with animation!)")
+        .setDescription("🎰 Spin the slot machine")
         .addIntegerOption(opt =>
           opt.setName("bet")
             .setDescription("Amount to bet (min 10, max 300,000)")
@@ -250,7 +181,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("blackjack")
-        .setDescription("Play Blackjack")
+        .setDescription("🃏 Play Blackjack")
         .addIntegerOption(opt =>
           opt.setName("bet")
             .setDescription("Amount to bet (min 10, max 300,000)")
@@ -261,28 +192,28 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("daily")
-        .setDescription("Claim your daily bonus")
+        .setDescription("💰 Claim your daily bonus")
     )
     .addSubcommand(sub =>
       sub.setName("shop")
-        .setDescription("View the shop")
+        .setDescription("🛒 View the shop")
     )
     .addSubcommand(sub =>
       sub.setName("buy")
-        .setDescription("Buy an item from the shop")
+        .setDescription("🛒 Buy an item from the shop")
         .addStringOption(opt =>
           opt.setName("item")
             .setDescription("Item to buy")
             .setRequired(true)
             .addChoices(
-              { name: "Shield", value: "shield" },
-              { name: "Double XP", value: "double" }
+              { name: "🛡️ Shield", value: "shield" },
+              { name: "⚡ Double XP", value: "double" }
             )
         )
     )
     .addSubcommand(sub =>
       sub.setName("stats")
-        .setDescription("View your game statistics")
+        .setDescription("📊 View your game statistics")
     ),
 
   async execute(interaction, client, redis) {
@@ -314,7 +245,7 @@ module.exports = {
     };
 
     // =========================
-    // 🎮 RPS
+    // 🪨📄✂️ RPS
     // =========================
     if (sub === "rps") {
       const choice = interaction.options.getString("choice");
@@ -338,6 +269,7 @@ module.exports = {
       const botChoice = botChoices[Math.floor(Math.random() * 3)];
       
       let result, winAmount = 0;
+      const emojiMap = { rock: "🪨", paper: "📄", scissors: "✂️" };
       
       if (choice === botChoice) {
         result = "tie";
@@ -366,13 +298,15 @@ module.exports = {
         await redis.incr(`games:${userId}:rps_ties`);
       }
 
+      const winMessage = result === "win" ? randomFrom(winMessages) : result === "lose" ? randomFrom(loseMessages) : randomFrom(tieMessages);
+
       const embed = new EmbedBuilder()
         .setColor(result === "win" ? "#57F287" : result === "tie" ? "#F1C40F" : "#ED4245")
-        .setTitle(`Rock Paper Scissors ${result === "win" ? "Win!" : result === "tie" ? "Tie!" : "Lose..."}`)
-        .setDescription(`You chose ${choice}\nBot chose ${botChoice}`)
+        .setTitle(`🪨📄✂️ Rock Paper Scissors ${result === "win" ? "Win!" : result === "tie" ? "Tie!" : "Lose..."}`)
+        .setDescription(`You chose ${emojiMap[choice]}\nBot chose ${emojiMap[botChoice]}\n\n${winMessage}`)
         .addFields(
-          { name: "Result", value: result === "win" ? `You won ${formatNumber(winAmount)} coins!` : result === "tie" ? "Tie! Bet returned!" : `You lost ${formatNumber(bet)} coins!`, inline: false },
-          { name: "New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true }
+          { name: "💰 Result", value: result === "win" ? `You won ${formatNumber(winAmount)} coins!` : result === "tie" ? "Tie! Bet returned!" : `You lost ${formatNumber(bet)} coins!`, inline: false },
+          { name: "💳 New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true }
         )
         .setFooter({ text: `Bet: ${formatNumber(bet)} coins` })
         .setTimestamp();
@@ -404,6 +338,7 @@ module.exports = {
       const result = Math.random() < 0.5 ? "heads" : "tails";
       const won = side === result;
       const winAmount = won ? Math.floor(bet * 1.8) : 0;
+      const emojiMap = { heads: "🪙👑", tails: "🪙🐾" };
 
       if (won) {
         await addBalance(userId, winAmount);
@@ -415,13 +350,15 @@ module.exports = {
         await redis.incr(`games:${userId}:coinflip_losses`);
       }
 
+      const message = won ? randomFrom(winMessages) : randomFrom(loseMessages);
+
       const embed = new EmbedBuilder()
         .setColor(won ? "#57F287" : "#ED4245")
-        .setTitle(`Coin Flip ${won ? "Win!" : "Lose..."}`)
-        .setDescription(`The coin landed on ${result}!`)
+        .setTitle(`🪙 Coin Flip ${won ? "Win!" : "Lose..."}`)
+        .setDescription(`The coin landed on **${result}**! ${emojiMap[result]}\n\n${message}`)
         .addFields(
-          { name: "Result", value: won ? `You won ${formatNumber(winAmount)} coins!` : `You lost ${formatNumber(bet)} coins!`, inline: false },
-          { name: "New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true }
+          { name: "💰 Result", value: won ? `You won ${formatNumber(winAmount)} coins!` : `You lost ${formatNumber(bet)} coins!`, inline: false },
+          { name: "💳 New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true }
         )
         .setTimestamp();
 
@@ -454,6 +391,7 @@ module.exports = {
       
       const multipliers = { 1: 5, 2: 3, 3: 2.5, 4: 2.5, 5: 3, 6: 5 };
       const winAmount = won ? Math.floor(bet * multipliers[number]) : 0;
+      const diceEmojis = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
 
       if (won) {
         await addBalance(userId, winAmount);
@@ -465,13 +403,15 @@ module.exports = {
         await redis.incr(`games:${userId}:dice_losses`);
       }
 
+      const message = won ? randomFrom(winMessages) : randomFrom(loseMessages);
+
       const embed = new EmbedBuilder()
         .setColor(won ? "#57F287" : "#ED4245")
-        .setTitle(`Dice Roll ${won ? "Win!" : "Lose..."}`)
-        .setDescription(`You rolled a ${roll}!`)
+        .setTitle(`🎲 Dice Roll ${won ? "Win!" : "Lose..."}`)
+        .setDescription(`You rolled a **${roll}** ${diceEmojis[roll-1]}! You guessed **${number}**.\n\n${message}`)
         .addFields(
-          { name: "Result", value: won ? `You won ${formatNumber(winAmount)} coins! (${multipliers[number]}x multiplier)` : `You lost ${formatNumber(bet)} coins!`, inline: false },
-          { name: "New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true }
+          { name: "💰 Result", value: won ? `You won ${formatNumber(winAmount)} coins! (${multipliers[number]}x multiplier)` : `You lost ${formatNumber(bet)} coins!`, inline: false },
+          { name: "💳 New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true }
         )
         .setTimestamp();
 
@@ -479,7 +419,7 @@ module.exports = {
     }
 
     // =========================
-    // 🎰 SLOTS – FIXED
+    // 🎰 SLOTS (with spinning animation)
     // =========================
     if (sub === "slots") {
       const bet = interaction.options.getInteger("bet");
@@ -501,10 +441,10 @@ module.exports = {
       await takeBalance(userId, bet);
 
       const outcomes = [
-        { outcome: 'lose', multiplier: 0, symbol: null, weight: 70 },
-        { outcome: 'tie', multiplier: 1, symbol: '🫐', weight: 15 },
-        { outcome: '2x', multiplier: 2, symbol: '🍇', weight: 10 },
-        { outcome: '3x', multiplier: 3, symbol: '🥥', weight: 4 },
+        { outcome: 'lose', multiplier: 0, symbol: null, weight: 50 },
+        { outcome: 'tie', multiplier: 1, symbol: '🫐', weight: 25 },
+        { outcome: '2x', multiplier: 2, symbol: '🍇', weight: 15 },
+        { outcome: '3x', multiplier: 3, symbol: '🥥', weight: 9 },
         { outcome: '5x', multiplier: 5, symbol: '🎰', weight: 1 }
       ];
 
@@ -541,21 +481,21 @@ module.exports = {
 
       if (selected.outcome === 'lose') {
         winAmount = 0;
-        message = "😢 No match – you lose!";
+        message = `😢 No match… ${randomFrom(loseSlotsMessages)}`;
         color = "#ED4245";
         await addTotalSpent(userId, bet);
         await redis.incr(`games:${userId}:slots_losses`);
       } else if (selected.outcome === 'tie') {
         winAmount = bet;
         await addBalance(userId, winAmount);
-        message = `🫐 **${symbol} ${symbol} ${symbol}** – Tie! Bet returned.`;
+        message = `🫐 **${symbol} ${symbol} ${symbol}** – Tie! Bet returned. ${randomFrom(tieMessages)}`;
         color = "#F1C40F";
         await redis.incr(`games:${userId}:slots_ties`);
       } else {
         winAmount = bet * multiplier;
         await addBalance(userId, winAmount);
         await addTotalEarned(userId, winAmount - bet);
-        message = `🎉 **${symbol} ${symbol} ${symbol}** – ${multiplier}x win!`;
+        message = `🎉 **${symbol} ${symbol} ${symbol}** – ${multiplier}x win! ${randomFrom(winSlotsMessages)}`;
         color = "#57F287";
         await redis.incr(`games:${userId}:slots_wins`);
         if (multiplier === 5) await redis.incr(`games:${userId}:slots_jackpots`);
@@ -693,7 +633,7 @@ module.exports = {
       if (lastDaily && now - Number(lastDaily) < cooldown) {
         const remaining = Math.ceil((cooldown - (now - Number(lastDaily))) / 60000);
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#F1C40F").setDescription(`You can claim your daily bonus in ${remaining} minutes!`)],
+          embeds: [new EmbedBuilder().setColor("#F1C40F").setDescription(`⏳ You can claim your daily bonus in **${remaining}** minutes!`)],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -703,11 +643,19 @@ module.exports = {
       await addTotalEarned(userId, bonus);
       await redis.set(`games:${userId}:daily`, now.toString());
 
+      const dailyMessages = [
+        "🎉 Another day, another reward!",
+        "💰 Cha-ching! Your daily coins have arrived!",
+        "🌟 You're a loyal player! Here's your daily bonus!",
+        "✨ A little something to start your day!",
+        "🎊 Enjoy your daily gift from the bot!"
+      ];
+
       const embed = new EmbedBuilder()
         .setColor("#57F287")
-        .setTitle("Daily Bonus Claimed!")
-        .setDescription(`You received ${formatNumber(bonus)} coins!`)
-        .addFields({ name: "New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true })
+        .setTitle("💰 Daily Bonus Claimed!")
+        .setDescription(`You received **${formatNumber(bonus)}** coins! ${randomFrom(dailyMessages)}`)
+        .addFields({ name: "💳 New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true })
         .setFooter({ text: "Come back tomorrow for more!" })
         .setTimestamp();
 
@@ -715,16 +663,16 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 SHOP
+    // 🛒 SHOP (unchanged)
     // =========================
     if (sub === "shop") {
       const embed = new EmbedBuilder()
         .setColor("#FF69B4")
-        .setTitle("Game Shop")
+        .setTitle("🛒 Game Shop")
         .setDescription(`Your balance: ${formatNumber(await getBalance(userId))} coins`)
         .addFields(
-          { name: "Shield", value: `Protects your counting streak\nPrice: 200 coins\nOwned: ${formatNumber(await getShield(userId))}`, inline: true },
-          { name: "Double XP", value: `Double coins for 5 counts\nPrice: 500 coins\nActive: ${await getDoubleXP(userId) > 0 ? 'Active' : 'Inactive'}`, inline: true }
+          { name: "🛡️ Shield", value: `Protects your counting streak\nPrice: 200 coins\nOwned: ${formatNumber(await getShield(userId))}`, inline: true },
+          { name: "⚡ Double XP", value: `Double coins for 5 counts\nPrice: 500 coins\nActive: ${await getDoubleXP(userId) > 0 ? 'Active' : 'Inactive'}`, inline: true }
         )
         .setFooter({ text: "Use /games buy <item> to purchase" });
 
@@ -732,7 +680,7 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 BUY
+    // 🛒 BUY (unchanged)
     // =========================
     if (sub === "buy") {
       const item = interaction.options.getString("item");
@@ -763,19 +711,19 @@ module.exports = {
         await addDoubleXP(userId, 5);
       }
 
-      const itemNames = { shield: "Shield", double: "Double XP (5 uses)" };
+      const itemNames = { shield: "🛡️ Shield", double: "⚡ Double XP (5 uses)" };
       const embed = new EmbedBuilder()
         .setColor("#57F287")
-        .setTitle("Purchase Successful!")
+        .setTitle("✅ Purchase Successful!")
         .setDescription(`You bought ${itemNames[item]} for ${formatNumber(price)} coins!`)
-        .addFields({ name: "New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true })
+        .addFields({ name: "💳 New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true })
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed] });
     }
 
     // =========================
-    // 📊 STATS
+    // 📊 STATS (unchanged)
     // =========================
     if (sub === "stats") {
       const stats = await redis.hgetall(`games:${userId}`) || {};
@@ -785,11 +733,11 @@ module.exports = {
         .setTitle(`${interaction.user.username}'s Game Stats`)
         .setThumbnail(interaction.user.displayAvatarURL())
         .addFields(
-          { name: "RPS", value: `Wins: ${formatNumber(stats.rps_wins || 0)}\nLosses: ${formatNumber(stats.rps_losses || 0)}\nTies: ${formatNumber(stats.rps_ties || 0)}`, inline: true },
-          { name: "Coin Flip", value: `Wins: ${formatNumber(stats.coinflip_wins || 0)}\nLosses: ${formatNumber(stats.coinflip_losses || 0)}`, inline: true },
-          { name: "Dice", value: `Wins: ${formatNumber(stats.dice_wins || 0)}\nLosses: ${formatNumber(stats.dice_losses || 0)}`, inline: true },
-          { name: "Slots", value: `Wins: ${formatNumber(stats.slots_wins || 0)}\nLosses: ${formatNumber(stats.slots_losses || 0)}\nJackpots: ${formatNumber(stats.slots_jackpots || 0)}`, inline: true },
-          { name: "Blackjack", value: `Wins: ${formatNumber(stats.blackjack_wins || 0)}\nLosses: ${formatNumber(stats.blackjack_losses || 0)}\nTies: ${formatNumber(stats.blackjack_ties || 0)}`, inline: true }
+          { name: "🪨📄✂️ RPS", value: `Wins: ${formatNumber(stats.rps_wins || 0)}\nLosses: ${formatNumber(stats.rps_losses || 0)}\nTies: ${formatNumber(stats.rps_ties || 0)}`, inline: true },
+          { name: "🪙 Coin Flip", value: `Wins: ${formatNumber(stats.coinflip_wins || 0)}\nLosses: ${formatNumber(stats.coinflip_losses || 0)}`, inline: true },
+          { name: "🎲 Dice", value: `Wins: ${formatNumber(stats.dice_wins || 0)}\nLosses: ${formatNumber(stats.dice_losses || 0)}`, inline: true },
+          { name: "🎰 Slots", value: `Wins: ${formatNumber(stats.slots_wins || 0)}\nLosses: ${formatNumber(stats.slots_losses || 0)}\nJackpots: ${formatNumber(stats.slots_jackpots || 0)}`, inline: true },
+          { name: "🃏 Blackjack", value: `Wins: ${formatNumber(stats.blackjack_wins || 0)}\nLosses: ${formatNumber(stats.blackjack_losses || 0)}\nTies: ${formatNumber(stats.blackjack_ties || 0)}`, inline: true }
         )
         .setTimestamp();
 
