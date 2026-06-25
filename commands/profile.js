@@ -236,7 +236,7 @@ module.exports = {
         )
     )
     .addSubcommand(sub =>
-      sub.setName("rep")
+      sub.setName("givekarma")
         .setDescription("Give reputation to a user (once per 24h)")
         .addUserOption(opt =>
           opt.setName("user")
@@ -731,6 +731,15 @@ module.exports = {
       ctx.stroke();
       ctx.shadowBlur = 0;
 
+      // ---- Status below profile picture (moved here) ----
+      if (status) {
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.font = getFont("italic", 14);
+        ctx.textAlign = "center";
+        ctx.fillText(`"${status}"`, 130, 250); // centered under the avatar
+        ctx.textAlign = "left"; // reset to left for subsequent text
+      }
+
       // ---- Username ----
       const nameColorHex = nameColor || "#FFFFFF";
       ctx.fillStyle = nameColorHex;
@@ -745,21 +754,14 @@ module.exports = {
       ctx.font = getFont("bold", 18);
       ctx.fillText(title, 270, 140);
 
-      // ---- Status below title (before bio) ----
-      if (status) {
-        ctx.fillStyle = "rgba(255,255,255,0.6)";
-        ctx.font = getFont("italic", 14);
-        ctx.fillText(`"${status}"`, 270, 165);
-      }
-
-      // ---- Bio (shifted down if status exists) ----
+      // ---- Bio (no longer shifted by status) ----
       ctx.fillStyle = "rgba(255,255,255,0.8)";
       ctx.font = getFont("normal", 16);
       let displayBio = bio;
       if (displayBio.length > 60) displayBio = displayBio.substring(0, 57) + "...";
-      ctx.fillText(displayBio, 270, status ? 195 : 175);
+      ctx.fillText(displayBio, 270, 175); // always at this y, status now under avatar
 
-      // ---- Stats (coins, reputation, level) with spacing ----
+      // ---- Stats (coins, reputation, level) with increased spacing ----
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.font = getFont("bold", 16);
       let xPos = 270;
@@ -778,11 +780,11 @@ module.exports = {
         ctx.fillStyle = "rgba(255,255,255,0.9)";
         ctx.font = getFont("bold", 16);
         ctx.fillText(stat.label, xPos, 205);
-        xPos += 80;
+        xPos += 100; // increased from 80 to 100 → number moves farther right
         ctx.font = getFont("normal", 16);
         ctx.fillStyle = color;
         ctx.fillText(stat.value, xPos, 205);
-        xPos += 80;
+        xPos += 100; // increased from 80 to 100 to keep overall spacing
       });
 
       // ---- Social Links under stats ----
