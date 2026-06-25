@@ -1,4 +1,4 @@
-// events/ticketButtons.js
+// events/ticketButtons.js – Handle ticket button interactions
 const { Events } = require("discord.js");
 
 module.exports = {
@@ -34,18 +34,16 @@ module.exports = {
       return;
     }
 
-    // ---- ADD USER (modal) ----
+    // ---- ADD USER (prompt) ----
     if (action === "ticket_add_user") {
-      // For simplicity, we'll just prompt them to use /ticket add
       return interaction.reply({
         content: "Use `/ticket add @user` to add someone.",
         ephemeral: true
       });
     }
 
-    // ---- CLOSE ----
+    // ---- CLOSE (prompt) ----
     if (action === "ticket_close") {
-      // Trigger close process
       return interaction.reply({
         content: "Use `/ticket close` in the ticket channel.",
         ephemeral: true
