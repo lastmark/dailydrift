@@ -1,4 +1,4 @@
-// commands/profile.js – with social links on canvas, status at top right
+// commands/profile.js – FINAL with deferReply fix
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
@@ -266,6 +266,9 @@ module.exports = {
     ),
 
   async execute(interaction, client, redis) {
+    // ---- Defer reply to avoid "application did not respond" ----
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
 
@@ -289,7 +292,7 @@ module.exports = {
       const text = interaction.options.getString("text");
       await redis.hset(`profile:${userId}`, "bio", text);
       await addActivity(redis, userId, "Updated bio");
-      return interaction.reply({ content: "✅ Bio updated.", flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: "✅ Bio updated.", flags: MessageFlags.Ephemeral });
     }
 
     // ---- SETCOLOR ----
@@ -297,31 +300,31 @@ module.exports = {
       let color = interaction.options.getString("color");
       if (!color.startsWith("#")) color = `#${color}`;
       if (!/^#[0-9A-F]{6}$/i.test(color)) {
-        return interaction.reply({ content: "❌ Invalid hex color.", flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: "❌ Invalid hex color.", flags: MessageFlags.Ephemeral });
       }
       await redis.hset(`profile:${userId}`, "color", color);
       await addActivity(redis, userId, "Updated profile color");
-      return interaction.reply({ content: "✅ Color updated.", flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: "✅ Color updated.", flags: MessageFlags.Ephemeral });
     }
 
     // ---- UPLOAD (premium) ----
     if (sub === "upload") {
       const premium = await isPremium(userId);
       if (!premium) {
-        return interaction.reply({ content: "❌ Premium only.", flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: "❌ Premium only.", flags: MessageFlags.Ephemeral });
       }
       const attachment = interaction.options.getAttachment("image");
       if (!attachment.contentType?.startsWith("image/")) {
-        return interaction.reply({ content: "❌ Invalid image.", flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: "❌ Invalid image.", flags: MessageFlags.Ephemeral });
       }
       await redis.hset(`profile:${userId}`, "custom_bg", attachment.url);
       await addActivity(redis, userId, "Uploaded custom background");
-      return interaction.reply({ content: "✅ Background uploaded.", flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: "✅ Background uploaded.", flags: MessageFlags.Ephemeral });
     }
 
     // ---- RESET ----
     if (sub === "reset") {
-      await interaction.reply({ content: "⚠️ Type `confirm` to reset your profile.", flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: "⚠️ Type `confirm` to reset your profile.", flags: MessageFlags.Ephemeral });
       const collected = await interaction.channel.awaitMessages({
         filter: m => m.author.id === userId && m.content.toLowerCase() === "confirm",
         max: 1,
@@ -356,7 +359,7 @@ module.exports = {
       await redis.set(`profile:${userId}:status`, status);
       await redis.set(`profile:${userId}:statusTimestamp`, Date.now());
       await addActivity(redis, userId, `Set status: "${status}"`);
-      return interaction.reply({ content: "✅ Status set (auto‑clears after 24h).", flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: "✅ Status set (auto‑clears after 24h).", flags: MessageFlags.Ephemeral });
     }
 
     // ---- SETTHEME (buy with coins) ----
@@ -365,12 +368,12 @@ module.exports = {
       const price = 500;
       const bal = await getBalance(userId);
       if (bal < price) {
-        return interaction.reply({ content: `❌ You need ${price} coins. You have ${bal}.`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `❌ You need ${price} coins. You have ${bal}.`, flags: MessageFlags.Ephemeral });
       }
       await takeBalance(userId, price);
       await redis.set(`profile:${userId}:theme`, theme);
       await addActivity(redis, userId, `Unlocked theme: ${theme}`);
-      return interaction.reply({ content: `✅ Theme set to ${theme}. (${price} coins spent)`, flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: `✅ Theme set to ${theme}. (${price} coins spent)`, flags: MessageFlags.Ephemeral });
     }
 
     // ---- SETBAR (buy with coins) ----
@@ -379,28 +382,28 @@ module.exports = {
       const price = 300;
       const bal = await getBalance(userId);
       if (bal < price) {
-        return interaction.reply({ content: `❌ You need ${price} coins. You have ${bal}.`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `❌ You need ${price} coins. You have ${bal}.`, flags: MessageFlags.Ephemeral });
       }
       await takeBalance(userId, price);
       await redis.set(`profile:${userId}:barStyle`, style);
       await addActivity(redis, userId, `Unlocked bar style: ${style}`);
-      return interaction.reply({ content: `✅ Bar style set to ${style}. (${price} coins spent)`, flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: `✅ Bar style set to ${style}. (${price} coins spent)`, flags: MessageFlags.Ephemeral });
     }
 
     // ---- SETEMBEDBG (premium) ----
     if (sub === "setembedbg") {
       const premium = await isPremium(userId);
       if (!premium) {
-        return interaction.reply({ content: "❌ Premium only.", flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: "❌ Premium only.", flags: MessageFlags.Ephemeral });
       }
       let color = interaction.options.getString("color");
       if (!color.startsWith("#")) color = `#${color}`;
       if (!/^#[0-9A-F]{6}$/i.test(color)) {
-        return interaction.reply({ content: "❌ Invalid hex color.", flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: "❌ Invalid hex color.", flags: MessageFlags.Ephemeral });
       }
       await redis.set(`profile:${userId}:embedBg`, color);
       await addActivity(redis, userId, "Updated embed background");
-      return interaction.reply({ content: "✅ Embed background updated.", flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: "✅ Embed background updated.", flags: MessageFlags.Ephemeral });
     }
 
     // ---- LINK (add/remove social link) ----
@@ -415,16 +418,16 @@ module.exports = {
         links = links.filter(l => l.platform !== platform);
         await redis.set(key, JSON.stringify(links));
         await addActivity(redis, userId, `Removed ${platform} link`);
-        return interaction.reply({ content: `✅ Removed ${platform} link.`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `✅ Removed ${platform} link.`, flags: MessageFlags.Ephemeral });
       } else {
         const premium = await isPremium(userId);
         if (!premium && links.length >= 1) {
-          return interaction.reply({ content: "❌ Premium needed for more than 1 link.", flags: MessageFlags.Ephemeral });
+          return interaction.editReply({ content: "❌ Premium needed for more than 1 link.", flags: MessageFlags.Ephemeral });
         }
         links.push({ platform, url });
         await redis.set(key, JSON.stringify(links));
         await addActivity(redis, userId, `Added ${platform} link`);
-        return interaction.reply({ content: `✅ Added ${platform} link.`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `✅ Added ${platform} link.`, flags: MessageFlags.Ephemeral });
       }
     }
 
@@ -432,17 +435,17 @@ module.exports = {
     if (sub === "marry") {
       const targetUser = interaction.options.getUser("user");
       if (targetUser.id === userId) {
-        return interaction.reply({ content: "❌ You can't marry yourself.", flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: "❌ You can't marry yourself.", flags: MessageFlags.Ephemeral });
       }
       const currentSpouse = await redis.get(`profile:${userId}:marriedTo`);
       if (currentSpouse) {
-        return interaction.reply({ content: `❌ You are already married to <@${currentSpouse}>.`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `❌ You are already married to <@${currentSpouse}>.`, flags: MessageFlags.Ephemeral });
       }
       const targetSpouse = await redis.get(`profile:${targetUser.id}:marriedTo`);
       if (targetSpouse) {
-        return interaction.reply({ content: `❌ ${targetUser.username} is already married.`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `❌ ${targetUser.username} is already married.`, flags: MessageFlags.Ephemeral });
       }
-      await interaction.reply({
+      await interaction.editReply({
         content: `💍 <@${targetUser.id}>, do you accept ${interaction.user.username}'s marriage proposal? React with ✅ within 30 seconds.`,
         fetchReply: true
       });
@@ -471,13 +474,13 @@ module.exports = {
     if (sub === "divorce") {
       const spouseId = await redis.get(`profile:${userId}:marriedTo`);
       if (!spouseId) {
-        return interaction.reply({ content: "❌ You are not married.", flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: "❌ You are not married.", flags: MessageFlags.Ephemeral });
       }
       await redis.del(`profile:${userId}:marriedTo`);
       await redis.del(`profile:${spouseId}:marriedTo`);
       await addActivity(redis, userId, `Divorced`);
       await addActivity(redis, spouseId, `Divorced`);
-      return interaction.reply({ content: "💔 You are now divorced.", flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: "💔 You are now divorced.", flags: MessageFlags.Ephemeral });
     }
 
     // ---- FRIEND REQUESTS ----
@@ -487,27 +490,27 @@ module.exports = {
       const targetId = targetUser.id;
 
       if (targetId === userId) {
-        return interaction.reply({ content: "❌ You can't friend yourself.", flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: "❌ You can't friend yourself.", flags: MessageFlags.Ephemeral });
       }
 
       if (action === "request") {
         const friends = await redis.smembers(`profile:${userId}:friends`);
         if (friends.includes(targetId)) {
-          return interaction.reply({ content: "❌ You are already friends.", flags: MessageFlags.Ephemeral });
+          return interaction.editReply({ content: "❌ You are already friends.", flags: MessageFlags.Ephemeral });
         }
         const existing = await redis.sismember(`profile:${userId}:friendRequests`, targetId);
         if (existing) {
-          return interaction.reply({ content: "❌ Friend request already sent.", flags: MessageFlags.Ephemeral });
+          return interaction.editReply({ content: "❌ Friend request already sent.", flags: MessageFlags.Ephemeral });
         }
         await redis.sadd(`profile:${userId}:friendRequests`, targetId);
         await redis.sadd(`profile:${targetId}:friendRequestsIncoming`, userId);
-        return interaction.reply({ content: `✅ Friend request sent to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `✅ Friend request sent to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
       }
 
       if (action === "accept") {
         const incoming = await redis.sismember(`profile:${userId}:friendRequestsIncoming`, targetId);
         if (!incoming) {
-          return interaction.reply({ content: `❌ No friend request from ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+          return interaction.editReply({ content: `❌ No friend request from ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
         }
         await redis.sadd(`profile:${userId}:friends`, targetId);
         await redis.sadd(`profile:${targetId}:friends`, userId);
@@ -517,17 +520,17 @@ module.exports = {
         await addActivity(redis, targetId, `Became friends with ${interaction.user.username}`);
         await grantAchievement(redis, userId, 'friend');
         await grantAchievement(redis, targetId, 'friend');
-        return interaction.reply({ content: `✅ You are now friends with ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `✅ You are now friends with ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
       }
 
       if (action === "deny") {
         const incoming = await redis.sismember(`profile:${userId}:friendRequestsIncoming`, targetId);
         if (!incoming) {
-          return interaction.reply({ content: `❌ No friend request from ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+          return interaction.editReply({ content: `❌ No friend request from ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
         }
         await redis.srem(`profile:${userId}:friendRequestsIncoming`, targetId);
         await redis.srem(`profile:${targetId}:friendRequests`, userId);
-        return interaction.reply({ content: `✅ Friend request from ${targetUser.username} denied.`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `✅ Friend request from ${targetUser.username} denied.`, flags: MessageFlags.Ephemeral });
       }
     }
 
@@ -536,19 +539,19 @@ module.exports = {
       const targetUser = interaction.options.getUser("user");
       const targetId = targetUser.id;
       if (targetId === userId) {
-        return interaction.reply({ content: "❌ You can't give reputation to yourself.", flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: "❌ You can't give reputation to yourself.", flags: MessageFlags.Ephemeral });
       }
       const cooldownKey = `profile:${userId}:lastRepGiven`;
       const last = await redis.get(cooldownKey);
       if (last && (Date.now() - Number(last) < 24 * 60 * 60 * 1000)) {
         const remaining = Math.ceil((24 * 60 * 60 * 1000 - (Date.now() - Number(last))) / 60000);
-        return interaction.reply({ content: `⏳ You can give reputation again in ${remaining} minutes.`, flags: MessageFlags.Ephemeral });
+        return interaction.editReply({ content: `⏳ You can give reputation again in ${remaining} minutes.`, flags: MessageFlags.Ephemeral });
       }
       await redis.incrby(`profile:${targetId}:reputation`, 1);
       await redis.set(cooldownKey, Date.now());
       await addActivity(redis, targetId, `Received reputation from ${interaction.user.username}`);
       await addActivity(redis, userId, `Gave reputation to ${targetUser.username}`);
-      return interaction.reply({ content: `✅ Gave 1 reputation to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: `✅ Gave 1 reputation to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
     }
 
     // ---- SETFAVGAME ----
@@ -556,7 +559,7 @@ module.exports = {
       const game = interaction.options.getString("game");
       await redis.set(`profile:${userId}:favGame`, game);
       await addActivity(redis, userId, `Set favorite game: ${game}`);
-      return interaction.reply({ content: `✅ Favorite game set to ${game}.`, flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: `✅ Favorite game set to ${game}.`, flags: MessageFlags.Ephemeral });
     }
 
     // ---- ACHIEVEMENTS ----
@@ -570,7 +573,7 @@ module.exports = {
           return ach ? `${ach.icon} **${ach.name}** - ${ach.desc}` : id;
         }).join('\n') : "No achievements yet.")
         .setTimestamp();
-      return interaction.reply({ embeds: [embed] });
+      return interaction.editReply({ embeds: [embed] });
     }
 
     // ---- VIEW (default) ----
@@ -840,7 +843,7 @@ module.exports = {
 
       embed.setImage("attachment://profile.png");
 
-      return interaction.reply({
+      return interaction.editReply({
         embeds: [embed],
         files: [new AttachmentBuilder(buffer, { name: "profile.png" })]
       });
