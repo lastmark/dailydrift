@@ -1,4 +1,4 @@
-// commands/games.js – Enhanced with fun responses
+// commands/games.js – FULL ENHANCED VERSION (with working daily)
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 const { formatNumber } = require("../utils.js");
 
@@ -58,13 +58,145 @@ const loseSlotsMessages = [
   "❌ No match, but you're one spin closer to a jackpot!"
 ];
 
+const dailyMessages = [
+  "🎉 Another day, another reward!",
+  "💰 Cha-ching! Your daily coins have arrived!",
+  "🌟 You're a loyal player! Here's your daily bonus!",
+  "✨ A little something to start your day!",
+  "🎊 Enjoy your daily gift from the bot!",
+  "💎 A shiny bonus just for you!",
+  "🌈 Every day is a new adventure!",
+  "🎁 Surprise! Daily coins delivered!",
+  "⭐ You're amazing! Here's a reward!",
+  "💪 Keep up the great work! Daily bonus!"
+];
+
 function randomFrom(array) { return array[Math.floor(Math.random() * array.length)]; }
 
 // =========================
-// 🃏 BLACKJACK GAME CLASS (unchanged, but we'll enhance its embed)
+// 🃏 BLACKJACK GAME CLASS
 // =========================
 class BlackjackGame {
-  // ... (same as before, but we'll modify getEmbed to add flavor)
+  constructor(userId, bet, economy, redis) {
+    this.userId = userId;
+    this.bet = bet;
+    this.economy = economy;
+    this.redis = redis;
+    this.gameOver = false;
+    this.result = null;
+    this.balance = 0;
+    
+    this.values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+    this.deck = this.createDeck();
+    this.shuffleDeck();
+    
+    this.playerHand = [this.drawCard(), this.drawCard()];
+    this.dealerHand = [this.drawCard(), this.drawCard()];
+    
+    this.playerValue = this.getHandValue(this.playerHand);
+    this.dealerValue = this.getHandValue(this.dealerHand);
+    
+    if (this.playerValue === 21 && this.dealerValue === 21) {
+      this.gameOver = true;
+      this.result = 'push';
+    } else if (this.playerValue === 21) {
+      this.gameOver = true;
+      this.result = 'blackjack';
+    } else if (this.dealerValue === 21) {
+      this.gameOver = true;
+      this.result = 'lose';
+    }
+  }
+
+  createDeck() {
+    const deck = [];
+    for (const value of this.values) {
+      for (let i = 0; i < 4; i++) deck.push({ value });
+    }
+    return deck;
+  }
+
+  shuffleDeck() {
+    for (let i = this.deck.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.deck[i], this.deck[j]] = [this.deck[j], this.deck[i]];
+    }
+  }
+
+  drawCard() { return this.deck.pop(); }
+
+  getCardValue(card) {
+    if (card.value === 'A') return 11;
+    if (['J', 'Q', 'K'].includes(card.value)) return 10;
+    return parseInt(card.value);
+  }
+
+  getHandValue(hand) {
+    let value = 0;
+    let aces = 0;
+    for (const card of hand) {
+      const cardVal = this.getCardValue(card);
+      if (cardVal === 11) aces++;
+      value += cardVal;
+    }
+    while (value > 21 && aces > 0) {
+      value -= 10;
+      aces--;
+    }
+    return value;
+  }
+
+  formatHand(hand, hideDealer = false) {
+    if (hideDealer) return `${hand[0].value} ?`;
+    return hand.map(card => card.value).join(' ');
+  }
+
+  hit() {
+    if (this.gameOver) return false;
+    this.playerHand.push(this.drawCard());
+    this.playerValue = this.getHandValue(this.playerHand);
+    if (this.playerValue > 21) {
+      this.gameOver = true;
+      this.result = 'bust';
+    }
+    return true;
+  }
+
+  stand() {
+    if (this.gameOver) return false;
+    while (this.dealerValue < 17) {
+      this.dealerHand.push(this.drawCard());
+      this.dealerValue = this.getHandValue(this.dealerHand);
+    }
+    this.gameOver = true;
+    if (this.dealerValue > 21) this.result = 'win';
+    else if (this.playerValue > this.dealerValue) this.result = 'win';
+    else if (this.playerValue === this.dealerValue) this.result = 'push';
+    else this.result = 'lose';
+    return true;
+  }
+
+  async processResult() {
+    let winAmount = 0;
+    if (this.result === 'blackjack' || this.result === 'win') {
+      winAmount = this.bet * 2;
+      await this.economy.addBalance(this.userId, winAmount);
+      await this.economy.addTotalEarned(this.userId, this.bet);
+      await this.redis.incr(`games:${this.userId}:blackjack_wins`);
+    } else if (this.result === 'push') {
+      winAmount = this.bet;
+      await this.economy.addBalance(this.userId, winAmount);
+      await this.redis.incr(`games:${this.userId}:blackjack_ties`);
+    } else {
+      winAmount = 0;
+      await this.economy.addTotalSpent(this.userId, this.bet);
+      await this.redis.incr(`games:${this.userId}:blackjack_losses`);
+    }
+    return winAmount;
+  }
+
+  setBalance(balance) { this.balance = balance; }
+
   getEmbed() {
     const embed = new EmbedBuilder()
       .setColor(this.gameOver ? 
@@ -97,6 +229,20 @@ class BlackjackGame {
       });
     }
     return embed;
+  }
+
+  getResultTitle() {
+    if (this.result === 'blackjack' || this.result === 'win') return '🎉 YOU WIN!';
+    if (this.result === 'push') return '🤝 PUSH!';
+    if (this.result === 'bust') return '💥 BUST!';
+    return '😢 YOU LOSE!';
+  }
+
+  getResultDescription() {
+    if (this.result === 'blackjack' || this.result === 'win') return `💰 Bet: ${formatNumber(this.bet)} coins\nYou beat the dealer!`;
+    if (this.result === 'push') return `💰 Bet: ${formatNumber(this.bet)} coins\nIt's a tie!`;
+    if (this.result === 'bust') return `💰 Bet: ${formatNumber(this.bet)} coins\nYou went over 21!`;
+    return `💰 Bet: ${formatNumber(this.bet)} coins\nDealer beats you!`;
   }
 }
 
@@ -623,7 +769,7 @@ module.exports = {
     }
 
     // =========================
-    // 💰 DAILY
+    // 💰 DAILY – FIXED & ENHANCED
     // =========================
     if (sub === "daily") {
       const lastDaily = await redis.get(`games:${userId}:daily`);
@@ -632,30 +778,38 @@ module.exports = {
 
       if (lastDaily && now - Number(lastDaily) < cooldown) {
         const remaining = Math.ceil((cooldown - (now - Number(lastDaily))) / 60000);
+        const hours = Math.floor(remaining / 60);
+        const mins = remaining % 60;
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#F1C40F").setDescription(`⏳ You can claim your daily bonus in **${remaining}** minutes!`)],
+          embeds: [
+            new EmbedBuilder()
+              .setColor("#F1C40F")
+              .setDescription(`⏳ You can claim your daily bonus in **${hours}h ${mins}m**!`)
+              .setFooter({ text: "Patience, young grasshopper!" })
+          ],
           flags: MessageFlags.Ephemeral
         });
       }
 
-      const bonus = 100 + Math.floor(Math.random() * 50);
+      // Calculate bonus (100–150 coins)
+      const bonus = 100 + Math.floor(Math.random() * 51);
+      // Add coins
       await addBalance(userId, bonus);
       await addTotalEarned(userId, bonus);
+      // Set cooldown
       await redis.set(`games:${userId}:daily`, now.toString());
 
-      const dailyMessages = [
-        "🎉 Another day, another reward!",
-        "💰 Cha-ching! Your daily coins have arrived!",
-        "🌟 You're a loyal player! Here's your daily bonus!",
-        "✨ A little something to start your day!",
-        "🎊 Enjoy your daily gift from the bot!"
-      ];
+      const newBalance = await getBalance(userId);
+      const flavor = randomFrom(dailyMessages);
 
       const embed = new EmbedBuilder()
         .setColor("#57F287")
         .setTitle("💰 Daily Bonus Claimed!")
-        .setDescription(`You received **${formatNumber(bonus)}** coins! ${randomFrom(dailyMessages)}`)
-        .addFields({ name: "💳 New Balance", value: `${formatNumber(await getBalance(userId))} coins`, inline: true })
+        .setDescription(`${flavor}`)
+        .addFields(
+          { name: "🎁 Bonus Coins", value: `+${formatNumber(bonus)}`, inline: true },
+          { name: "💳 New Balance", value: `${formatNumber(newBalance)}`, inline: true }
+        )
         .setFooter({ text: "Come back tomorrow for more!" })
         .setTimestamp();
 
