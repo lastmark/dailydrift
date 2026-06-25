@@ -1,4 +1,4 @@
-// commands/ticket.js – Complete ticket system (no language dependency)
+// commands/ticket.js – Complete ticket system with reaction panel
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType, MessageFlags } = require("discord.js");
 const { createTranscript } = require("../utils/ticketUtils.js");
 
@@ -9,47 +9,45 @@ module.exports = {
     .setDescription("🎫 Ticket system")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
     .addSubcommand(sub =>
-      sub.setName("create")
-        .setDescription("Create a new ticket")
+      sub.setName("panel")
+        .setDescription("Send the ticket creation panel")
         .addStringOption(opt =>
-          opt.setName("category")
-            .setDescription("Ticket category")
-            .setRequired(true)
-            .addChoices(
-              { name: "🛠️ Support", value: "support" },
-              { name: "📢 Report", value: "report" },
-              { name: "💡 Suggestion", value: "suggestion" },
-              { name: "❓ Other", value: "other" }
-            )
-        )
-        .addStringOption(opt =>
-          opt.setName("priority")
-            .setDescription("Priority level (premium feature)")
+          opt.setName("title")
+            .setDescription("Title of the panel")
             .setRequired(false)
-            .addChoices(
-              { name: "🟢 Low", value: "low" },
-              { name: "🟡 Medium", value: "medium" },
-              { name: "🔴 High", value: "high" }
-            )
         )
         .addStringOption(opt =>
-          opt.setName("subject")
-            .setDescription("Brief subject of your issue")
+          opt.setName("description")
+            .setDescription("Description of the panel")
             .setRequired(false)
         )
     )
     .addSubcommand(sub =>
+      sub.setName("create")
+        .setDescription("Create a ticket (for testing)")
+        .addStringOption(opt =>
+          opt.setName("category")
+            .setDescription("Category")
+            .setRequired(false)
+            .addChoices(
+              { name: "Support", value: "support" },
+              { name: "Report", value: "report" },
+              { name: "Other", value: "other" }
+            )
+        )
+    )
+    .addSubcommand(sub =>
       sub.setName("close")
-        .setDescription("Close a ticket")
+        .setDescription("Close the current ticket")
         .addStringOption(opt =>
           opt.setName("reason")
-            .setDescription("Reason for closing (optional)")
+            .setDescription("Reason for closing")
             .setRequired(false)
         )
     )
     .addSubcommand(sub =>
       sub.setName("claim")
-        .setDescription("Claim a ticket")
+        .setDescription("Claim the current ticket")
     )
     .addSubcommand(sub =>
       sub.setName("add")
@@ -70,12 +68,8 @@ module.exports = {
         )
     )
     .addSubcommand(sub =>
-      sub.setName("transcript")
-        .setDescription("Get the transcript of a ticket")
-    )
-    .addSubcommand(sub =>
       sub.setName("settings")
-        .setDescription("Configure ticket settings (admin only)")
+        .setDescription("Configure ticket settings")
         .addChannelOption(opt =>
           opt.setName("category")
             .setDescription("Category for ticket channels")
@@ -90,11 +84,10 @@ module.exports = {
           opt.setName("support_role")
             .setDescription("Role that can manage tickets")
         )
-        .addIntegerOption(opt =>
-          opt.setName("cooldown")
-            .setDescription("Cooldown between ticket creation (seconds)")
-            .setMinValue(10)
-            .setMaxValue(3600)
+        .addChannelOption(opt =>
+          opt.setName("panel_channel")
+            .setDescription("Channel to send the ticket panel")
+            .addChannelTypes(ChannelType.GuildText)
         )
     ),
 
@@ -102,32 +95,39 @@ module.exports = {
     const sub = interaction.options.getSubcommand();
     const guildId = interaction.guild.id;
     const userId = interaction.user.id;
-
-    // ---- Check if user is in a ticket channel ----
     const channel = interaction.channel;
-    const ticketData = await redis.get(`ticket:${guildId}:${channel.id}`);
-    const isTicketChannel = !!ticketData;
 
-    // ---- CREATE ----
-    if (sub === "create") {
-      // Check cooldown
-      const cooldownKey = `ticket:cooldown:${guildId}:${userId}`;
-      const cooldown = await redis.get(cooldownKey);
-      if (cooldown) {
-        const remaining = Math.ceil((Number(cooldown) - Date.now()) / 1000);
-        if (remaining > 0) {
-          return interaction.reply({
-            content: `⏳ Please wait ${remaining} seconds before creating another ticket.`,
-            flags: MessageFlags.Ephemeral
-          });
-        }
+    // ---- PANEL ----
+    if (sub === "panel") {
+      // Check admin
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: "❌ You need Administrator permission.", flags: MessageFlags.Ephemeral });
       }
 
-      // Get settings
-      const categoryId = await redis.get(`ticket:settings:${guildId}:category`) || null;
-      const supportRoleId = await redis.get(`ticket:settings:${guildId}:support_role`) || null;
-      const cooldownTime = Number(await redis.get(`ticket:settings:${guildId}:cooldown`) || 30);
+      const title = interaction.options.getString("title") || "🎫 Create a Ticket";
+      const description = interaction.options.getString("description") || "Click the 🎫 reaction below to create a ticket. A staff member will assist you shortly.";
 
+      const embed = new EmbedBuilder()
+        .setColor("#5865F2")
+        .setTitle(title)
+        .setDescription(description)
+        .setFooter({ text: "React with 🎫 to create a ticket" })
+        .setTimestamp();
+
+      const msg = await interaction.channel.send({ embeds: [embed] });
+      await msg.react("🎫");
+
+      // Save panel message ID to Redis so we can handle reactions
+      await redis.set(`ticket:panel:${guildId}`, msg.id);
+
+      return interaction.reply({
+        content: `✅ Ticket panel sent in ${interaction.channel}`,
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    // ---- CREATE (manual) ----
+    if (sub === "create") {
       // Check if user already has an open ticket
       const existingKey = `ticket:open:${guildId}:${userId}`;
       if (await redis.get(existingKey)) {
@@ -137,110 +137,15 @@ module.exports = {
         });
       }
 
-      // Premium check for priority
-      const isPremium = await redis.get(`premium:guild:${guildId}`) !== null;
-      const priority = interaction.options.getString("priority") || "low";
-      if (priority !== "low" && !isPremium) {
-        return interaction.reply({
-          content: "❌ Priority levels are a **Guild Premium** feature.",
-          flags: MessageFlags.Ephemeral
-        });
-      }
-
-      // Get category and subject
-      const category = interaction.options.getString("category");
-      const subject = interaction.options.getString("subject") || "No subject";
-
-      // Create channel
-      const guild = interaction.guild;
-      const member = interaction.member;
-
-      // Prepare channel name
-      const channelName = `ticket-${member.user.username.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
-
-      // Set permissions
-      const permissionOverwrites = [
-        {
-          id: guild.id,
-          deny: [PermissionFlagsBits.ViewChannel],
-        },
-        {
-          id: member.id,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages],
-        },
-      ];
-
-      // Add support role if configured
-      if (supportRoleId) {
-        permissionOverwrites.push({
-          id: supportRoleId,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels],
-        });
-      }
-
-      // Create channel
-      const ticketChannel = await guild.channels.create({
-        name: channelName,
-        type: ChannelType.GuildText,
-        parent: categoryId,
-        permissionOverwrites,
-        topic: `Ticket for ${member.user.tag} | Category: ${category} | Priority: ${priority}`,
-      });
-
-      // Send opening message
-      const embed = new EmbedBuilder()
-        .setColor(priority === "high" ? "#ED4245" : priority === "medium" ? "#F1C40F" : "#57F287")
-        .setTitle("🎫 Ticket Created")
-        .setDescription(`Welcome ${member}, your ticket has been created.\nA staff member will assist you shortly.`)
-        .addFields(
-          { name: "Subject", value: subject, inline: false },
-          { name: "Category", value: category, inline: true },
-          { name: "Priority", value: priority.toUpperCase(), inline: true }
-        )
-        .setTimestamp();
-
-      const row = new ActionRowBuilder()
-        .addComponents(
-          new ButtonBuilder()
-            .setCustomId(`ticket_claim:${ticketChannel.id}`)
-            .setLabel("Claim Ticket")
-            .setStyle(ButtonStyle.Success),
-          new ButtonBuilder()
-            .setCustomId(`ticket_add_user:${ticketChannel.id}`)
-            .setLabel("Add User")
-            .setStyle(ButtonStyle.Primary),
-          new ButtonBuilder()
-            .setCustomId(`ticket_close:${ticketChannel.id}`)
-            .setLabel("Close Ticket")
-            .setStyle(ButtonStyle.Danger)
-        );
-
-      await ticketChannel.send({ embeds: [embed], components: [row] });
-
-      // Save ticket data
-      const ticketId = `ticket:${guildId}:${ticketChannel.id}`;
-      await redis.hset(ticketId, {
-        creator: userId,
-        category: category,
-        priority: priority,
-        subject: subject,
-        claimedBy: "",
-        createdAt: Date.now(),
-        closedAt: "",
-        transcript: "",
-      });
-      await redis.set(`ticket:open:${guildId}:${userId}`, ticketChannel.id);
-      await redis.setex(`ticket:cooldown:${guildId}:${userId}`, cooldownTime, Date.now() + cooldownTime * 1000);
-
-      return interaction.reply({
-        content: `✅ Ticket created: ${ticketChannel}`,
-        flags: MessageFlags.Ephemeral
-      });
+      const category = interaction.options.getString("category") || "support";
+      await createTicket(interaction, client, redis, userId, category);
+      return;
     }
 
     // ---- CLOSE ----
     if (sub === "close") {
-      if (!isTicketChannel) {
+      const ticketData = await redis.get(`ticket:${guildId}:${channel.id}`);
+      if (!ticketData) {
         return interaction.reply({
           content: "❌ This is not a ticket channel.",
           flags: MessageFlags.Ephemeral
@@ -248,7 +153,9 @@ module.exports = {
       }
 
       const data = JSON.parse(ticketData);
-      if (data.creator !== userId && !interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
+      // Allow only creator, claimed user, or admin
+      const isAuthorized = data.creator === userId || data.claimedBy === userId || interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels);
+      if (!isAuthorized) {
         return interaction.reply({
           content: "❌ You don't have permission to close this ticket.",
           flags: MessageFlags.Ephemeral
@@ -264,7 +171,7 @@ module.exports = {
         const transcriptChannel = interaction.guild.channels.cache.get(transcriptChannelId);
         if (transcriptChannel) {
           await transcriptChannel.send({
-            content: `📜 Transcript for ticket ${channel.name}`,
+            content: `📜 Transcript for ${channel.name}`,
             files: [{ attachment: Buffer.from(transcript, 'utf-8'), name: `transcript-${channel.name}.txt` }]
           });
         }
@@ -301,7 +208,8 @@ module.exports = {
 
     // ---- CLAIM ----
     if (sub === "claim") {
-      if (!isTicketChannel) {
+      const ticketData = await redis.get(`ticket:${guildId}:${channel.id}`);
+      if (!ticketData) {
         return interaction.reply({
           content: "❌ This is not a ticket channel.",
           flags: MessageFlags.Ephemeral
@@ -311,20 +219,19 @@ module.exports = {
       const data = JSON.parse(ticketData);
       if (data.claimedBy) {
         return interaction.reply({
-          content: `❌ This ticket is already claimed by <@${data.claimedBy}>.`,
+          content: `❌ Already claimed by <@${data.claimedBy}>.`,
           flags: MessageFlags.Ephemeral
         });
       }
 
-      // Check if user has support role or manage channels
-      if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels)) {
-        const supportRoleId = await redis.get(`ticket:settings:${guildId}:support_role`);
-        if (!supportRoleId || !interaction.member.roles.cache.has(supportRoleId)) {
-          return interaction.reply({
-            content: "❌ You don't have permission to claim tickets.",
-            flags: MessageFlags.Ephemeral
-          });
-        }
+      // Check permission
+      const supportRoleId = await redis.get(`ticket:settings:${guildId}:support_role`);
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels) &&
+          (!supportRoleId || !interaction.member.roles.cache.has(supportRoleId))) {
+        return interaction.reply({
+          content: "❌ You don't have permission to claim.",
+          flags: MessageFlags.Ephemeral
+        });
       }
 
       await redis.hset(`ticket:${guildId}:${channel.id}`, { ...data, claimedBy: userId });
@@ -338,7 +245,8 @@ module.exports = {
 
     // ---- ADD USER ----
     if (sub === "add") {
-      if (!isTicketChannel) {
+      const ticketData = await redis.get(`ticket:${guildId}:${channel.id}`);
+      if (!ticketData) {
         return interaction.reply({
           content: "❌ This is not a ticket channel.",
           flags: MessageFlags.Ephemeral
@@ -360,7 +268,8 @@ module.exports = {
 
     // ---- REMOVE USER ----
     if (sub === "remove") {
-      if (!isTicketChannel) {
+      const ticketData = await redis.get(`ticket:${guildId}:${channel.id}`);
+      if (!ticketData) {
         return interaction.reply({
           content: "❌ This is not a ticket channel.",
           flags: MessageFlags.Ephemeral
@@ -384,33 +293,8 @@ module.exports = {
       });
     }
 
-    // ---- TRANSCRIPT ----
-    if (sub === "transcript") {
-      if (!isTicketChannel) {
-        return interaction.reply({
-          content: "❌ This is not a ticket channel.",
-          flags: MessageFlags.Ephemeral
-        });
-      }
-
-      const data = JSON.parse(ticketData);
-      if (!data.transcript) {
-        return interaction.reply({
-          content: "❌ No transcript available for this ticket.",
-          flags: MessageFlags.Ephemeral
-        });
-      }
-
-      return interaction.reply({
-        content: "📜 Transcript:",
-        files: [{ attachment: Buffer.from(data.transcript, 'utf-8'), name: `transcript-${channel.name}.txt` }],
-        flags: MessageFlags.Ephemeral
-      });
-    }
-
     // ---- SETTINGS ----
     if (sub === "settings") {
-      // Check admin
       if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
         return interaction.reply({
           content: "❌ You need Administrator permission.",
@@ -421,12 +305,12 @@ module.exports = {
       const category = interaction.options.getChannel("category");
       const transcriptChannel = interaction.options.getChannel("transcript_channel");
       const supportRole = interaction.options.getRole("support_role");
-      const cooldown = interaction.options.getInteger("cooldown");
+      const panelChannel = interaction.options.getChannel("panel_channel");
 
       if (category) await redis.set(`ticket:settings:${guildId}:category`, category.id);
       if (transcriptChannel) await redis.set(`ticket:settings:${guildId}:transcript_channel`, transcriptChannel.id);
       if (supportRole) await redis.set(`ticket:settings:${guildId}:support_role`, supportRole.id);
-      if (cooldown) await redis.set(`ticket:settings:${guildId}:cooldown`, cooldown);
+      if (panelChannel) await redis.set(`ticket:settings:${guildId}:panel_channel`, panelChannel.id);
 
       return interaction.reply({
         content: "✅ Ticket settings updated!",
@@ -435,3 +319,80 @@ module.exports = {
     }
   }
 };
+
+// ---------- Helper: createTicket ----------
+async function createTicket(interaction, client, redis, userId, category) {
+  const guild = interaction.guild;
+  const member = await guild.members.fetch(userId);
+  const guildId = guild.id;
+
+  const supportRoleId = await redis.get(`ticket:settings:${guildId}:support_role`);
+  const categoryId = await redis.get(`ticket:settings:${guildId}:category`);
+
+  // Create channel
+  const channelName = `ticket-${member.user.username.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+
+  const permissionOverwrites = [
+    { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+    { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+  ];
+
+  if (supportRoleId) {
+    permissionOverwrites.push({
+      id: supportRoleId,
+      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels],
+    });
+  }
+
+  const ticketChannel = await guild.channels.create({
+    name: channelName,
+    type: ChannelType.GuildText,
+    parent: categoryId,
+    permissionOverwrites,
+    topic: `Ticket for ${member.user.tag} | Category: ${category}`,
+  });
+
+  // Send opening message
+  const embed = new EmbedBuilder()
+    .setColor("#57F287")
+    .setTitle("🎫 Ticket Created")
+    .setDescription(`Welcome ${member}, your ticket has been created.\nA staff member will assist you shortly.`)
+    .addFields(
+      { name: "Category", value: category, inline: true }
+    )
+    .setTimestamp();
+
+  const row = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`ticket_claim:${ticketChannel.id}`)
+        .setLabel("Claim")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`ticket_add_user:${ticketChannel.id}`)
+        .setLabel("Add User")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`ticket_close:${ticketChannel.id}`)
+        .setLabel("Close")
+        .setStyle(ButtonStyle.Danger)
+    );
+
+  await ticketChannel.send({ embeds: [embed], components: [row] });
+
+  // Save data
+  const ticketId = `ticket:${guildId}:${ticketChannel.id}`;
+  await redis.hset(ticketId, {
+    creator: userId,
+    category: category,
+    claimedBy: "",
+    createdAt: Date.now(),
+    closedAt: "",
+    transcript: "",
+  });
+  await redis.set(`ticket:open:${guildId}:${userId}`, ticketChannel.id);
+
+  return ticketChannel;
+}
+
+module.exports.createTicket = createTicket;
