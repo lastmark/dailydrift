@@ -1,4 +1,4 @@
-// index.js – Full Main Bot with Terms of Service
+// index.js – Full Main Bot (with fixed online count)
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
 const redis = require("./redis");
@@ -341,7 +341,7 @@ client.once("ready", async () => {
       }
     }
 
-    // Online Users (free)
+    // Online Users (free) – FIXED: only count members with a valid presence and status (online/idle/dnd)
     const onlineChannelId = await redis.get(`stats:channel:online:${guildId}`);
     if (onlineChannelId) {
       const channel = guild.channels.cache.get(onlineChannelId);
