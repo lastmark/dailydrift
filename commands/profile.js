@@ -1,4 +1,4 @@
-// commands/profile.js – FINAL with deferReply fix
+// commands/profile.js – FRIENDS REMOVED FROM EMBED + friend list action
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
@@ -217,7 +217,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("friend")
-        .setDescription("Send, accept, or deny a friend request")
+        .setDescription("Friend management")
         .addStringOption(opt =>
           opt.setName("action")
             .setDescription("Action to perform")
@@ -225,13 +225,14 @@ module.exports = {
             .addChoices(
               { name: "request", value: "request" },
               { name: "accept", value: "accept" },
-              { name: "deny", value: "deny" }
+              { name: "deny", value: "deny" },
+              { name: "list", value: "list" }
             )
         )
         .addUserOption(opt =>
           opt.setName("user")
             .setDescription("User for request/accept/deny")
-            .setRequired(true)
+            .setRequired(false)
         )
     )
     .addSubcommand(sub =>
@@ -266,8 +267,8 @@ module.exports = {
     ),
 
   async execute(interaction, client, redis) {
-    // ---- Defer reply to avoid "application did not respond" ----
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    // ---- PUBLIC REPLY – no ephemeral flag ----
+    await interaction.deferReply();
 
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
@@ -483,10 +484,33 @@ module.exports = {
       return interaction.editReply({ content: "💔 You are now divorced.", flags: MessageFlags.Ephemeral });
     }
 
-    // ---- FRIEND REQUESTS ----
+    // ---- FRIEND REQUESTS & LIST ----
     if (sub === "friend") {
       const action = interaction.options.getString("action");
       const targetUser = interaction.options.getUser("user");
+
+      // ---- LIST FRIENDS ----
+      if (action === "list") {
+        const friends = await redis.smembers(`profile:${userId}:friends`);
+        if (!friends.length) {
+          return interaction.editReply({ content: "📭 You have no friends yet.", flags: MessageFlags.Ephemeral });
+        }
+        const friendNames = await Promise.all(friends.map(async id => {
+          const user = await client.users.fetch(id).catch(() => null);
+          return user ? user.username : "Unknown User";
+        }));
+        const embed = new EmbedBuilder()
+          .setColor("#57F287")
+          .setTitle(`👥 ${interaction.user.username}'s Friends`)
+          .setDescription(friendNames.map((name, i) => `${i+1}. ${name}`).join('\n'))
+          .setTimestamp();
+        return interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      }
+
+      // ---- REQUEST / ACCEPT / DENY ----
+      if (!targetUser) {
+        return interaction.editReply({ content: "❌ Please specify a user for this action.", flags: MessageFlags.Ephemeral });
+      }
       const targetId = targetUser.id;
 
       if (targetId === userId) {
@@ -604,7 +628,7 @@ module.exports = {
       const nameColor = await redis.get(`profile:${targetId}:nameColor`) || color;
       const status = await redis.get(`profile:${targetId}:status`) || "";
       const spouseId = await redis.get(`profile:${targetId}:marriedTo`);
-      const friends = await redis.smembers(`profile:${targetId}:friends`) || [];
+      // ---- We no longer fetch friends for embed ----
       const favGame = await redis.get(`profile:${targetId}:favGame`) || "None";
       const activityFeed = await redis.lrange(`profile:${targetId}:activityFeed`, 0, 9) || [];
       const embedBg = await redis.get(`profile:${targetId}:embedBg`) || null;
@@ -627,7 +651,6 @@ module.exports = {
           { name: "🎮 Favorite Game", value: favGame, inline: true },
           { name: "📝 Status", value: status || "None", inline: false },
           { name: "💍 Spouse", value: spouseId ? `<@${spouseId}>` : "None", inline: true },
-          { name: "👥 Friends", value: friends.length ? friends.map(id => `<@${id}>`).join(', ') : "None", inline: false },
           { name: "🔗 Social Links", value: links.length ? links.map(l => `${l.platform}: ${l.url}`).join('\n') : "None", inline: false },
           { name: "🏅 Achievements", value: achievements.length ? achievements.map(id => {
             const ach = getAchievement(id);
@@ -714,15 +737,6 @@ module.exports = {
       ctx.font = getFont("bold", 32);
       ctx.fillText(targetUser.username, 270, 100);
 
-      // ---- Status moved to top-right corner ----
-      if (status) {
-        ctx.textAlign = "right";
-        ctx.fillStyle = "rgba(255,255,255,0.5)";
-        ctx.font = getFont("italic", 14);
-        ctx.fillText(`"${status}"`, 850, 100);
-        ctx.textAlign = "left";
-      }
-
       // ---- Title ----
       let title = "Member";
       if (premium) title = "💎 Premium";
@@ -731,20 +745,27 @@ module.exports = {
       ctx.font = getFont("bold", 18);
       ctx.fillText(title, 270, 140);
 
-      // ---- Bio ----
+      // ---- Status below title (before bio) ----
+      if (status) {
+        ctx.fillStyle = "rgba(255,255,255,0.6)";
+        ctx.font = getFont("italic", 14);
+        ctx.fillText(`"${status}"`, 270, 165);
+      }
+
+      // ---- Bio (shifted down if status exists) ----
       ctx.fillStyle = "rgba(255,255,255,0.8)";
       ctx.font = getFont("normal", 16);
       let displayBio = bio;
       if (displayBio.length > 60) displayBio = displayBio.substring(0, 57) + "...";
-      ctx.fillText(displayBio, 270, 175);
+      ctx.fillText(displayBio, 270, status ? 195 : 175);
 
-      // ---- Stats (coins, reputation, level) ----
+      // ---- Stats (coins, reputation, level) with spacing ----
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.font = getFont("bold", 16);
       let xPos = 270;
       const stats = [
         { label: "Coins:", value: formatNumber(balance) },
-        { label: "Reputation:", value: reputation },
+        { label: "Reputation:", value: formatNumber(reputation) },
         { label: "Level:", value: level }
       ];
       stats.forEach((stat, index) => {
@@ -757,7 +778,7 @@ module.exports = {
         ctx.fillStyle = "rgba(255,255,255,0.9)";
         ctx.font = getFont("bold", 16);
         ctx.fillText(stat.label, xPos, 205);
-        xPos += 70;
+        xPos += 80;
         ctx.font = getFont("normal", 16);
         ctx.fillStyle = color;
         ctx.fillText(stat.value, xPos, 205);
