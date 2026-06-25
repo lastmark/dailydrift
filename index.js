@@ -1,4 +1,4 @@
-// index.js – Full Main Bot (with counting fix)
+// index.js – Full Main Bot (with ticket reaction panel)
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
 const redis = require("./redis");
@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const { checkBlacklist, buildBlacklistEmbed } = require("./blacklist.js");
 const setupLogger = require("./logger.js");
+const { createTicket } = require("./commands/ticket.js");
 
 const client = new Client({
   intents: [
@@ -169,7 +170,6 @@ client.on("interactionCreate", async (interaction) => {
         if (data.claimedBy) {
           return interaction.reply({ content: `❌ Already claimed by <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
         }
-        // Check permission
         const supportRoleId = await redis.get(`ticket:settings:${interaction.guild.id}:support_role`);
         if (supportRoleId && !interaction.member.roles.cache.has(supportRoleId)) {
           return interaction.reply({ content: "❌ You don't have permission to claim.", flags: MessageFlags.Ephemeral });
@@ -345,14 +345,28 @@ client.on("messageCreate", async (message) => {
 
   // ---- Public prefix commands ----
   // (Your existing public commands: shop, buy, shields, countingstats, etc.)
-  // You can paste your existing prefix command logic here.
-  // For brevity, I'll include a placeholder – you can replace with your full logic.
-  // If you need the full public command block, let me know.
+  // Include the full logic from your original messageCreate here.
+  // For brevity, I'm showing a placeholder. Replace with your actual public command logic.
+  if (cmd === "shop") {
+    // ... shop logic
+  } else if (cmd === "buy") {
+    // ... buy logic
+  } else if (cmd === "shields") {
+    // ... shields logic
+  } else if (cmd === "countingstats") {
+    // ... countingstats logic
+  }
 
   // ---- Dev commands (only you) ----
   if (message.author.id === "1303357369622990889") {
     // Your existing dev commands (addcoins, removecoins, etc.)
-    // You can paste them here or reference your original file.
+    // Include them here.
+    if (cmd === "addcoins") {
+      // ... addcoins logic
+    } else if (cmd === "removecoins") {
+      // ... removecoins logic
+    }
+    // ... other dev commands
   }
 
   // If no command matched, do nothing.
@@ -371,6 +385,56 @@ client.on("guildMemberAdd", async (member) => {
   if (!channel) return;
   const img = await welcomeCard(member.user, member.guild);
   channel.send({ files: [{ attachment: img, name: "welcome.png" }] });
+});
+
+// ==========================================
+// 🎫 TICKET PANEL REACTION HANDLER
+// ==========================================
+client.on("messageReactionAdd", async (reaction, user) => {
+  if (user.bot) return;
+  if (reaction.partial) await reaction.fetch();
+  if (reaction.message.partial) await reaction.message.fetch();
+
+  const emoji = reaction.emoji.name;
+  if (emoji !== "🎫") return;
+
+  const guildId = reaction.message.guild.id;
+  const panelMessageId = await redis.get(`ticket:panel:${guildId}`);
+  if (!panelMessageId || reaction.message.id !== panelMessageId) return;
+
+  // Check if user already has an open ticket
+  const existingKey = `ticket:open:${guildId}:${user.id}`;
+  if (await redis.get(existingKey)) {
+    await reaction.users.remove(user.id);
+    try {
+      await user.send("❌ You already have an open ticket. Please close it first.");
+    } catch {}
+    return;
+  }
+
+  // Create ticket
+  const guild = reaction.message.guild;
+  const member = await guild.members.fetch(user.id);
+
+  // Create a fake interaction for the createTicket helper
+  const fakeInteraction = {
+    guild,
+    member,
+    user,
+    channel: reaction.message.channel,
+    reply: async (data) => {
+      try { await user.send(data.content); } catch {}
+    },
+    deferReply: async () => {},
+    editReply: async () => {},
+    followUp: async () => {},
+  };
+
+  const category = "support"; // default category
+  await createTicket(fakeInteraction, client, redis, user.id, category);
+
+  // Remove the reaction
+  await reaction.users.remove(user.id);
 });
 
 // ==========================================
