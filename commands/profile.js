@@ -1,4 +1,4 @@
-// commands/profile.js – FULLY FIXED with all subcommands
+// commands/profile.js – FULLY WORKING (lowercase Redis methods + canvas)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
@@ -58,26 +58,26 @@ const ACHIEVEMENTS = {
 
 function getAchievement(id) { return ACHIEVEMENTS[id]; }
 
-// ---------- Helper: add activity feed (with error handling) ----------
+// ---------- Helper: add activity feed (lowercase) ----------
 async function addActivity(redis, userId, activity) {
   try {
     const key = `profile:${userId}:activityFeed`;
     const timestamp = new Date().toLocaleString();
     const entry = `[${timestamp}] ${activity}`;
-    await redis.lPush(key, entry);
-    await redis.lTrim(key, 0, 9);
+    await redis.lpush(key, entry);
+    await redis.ltrim(key, 0, 9);
   } catch (error) {
     console.error('addActivity error:', error);
   }
 }
 
-// ---------- Helper: grant achievement (with error handling) ----------
+// ---------- Helper: grant achievement (lowercase) ----------
 async function grantAchievement(redis, userId, achievementId) {
   try {
     const key = `profile:${userId}:achievements`;
-    const exists = await redis.sIsMember(key, achievementId);
+    const exists = await redis.sismember(key, achievementId);
     if (!exists) {
-      await redis.sAdd(key, achievementId);
+      await redis.sadd(key, achievementId);
       return true;
     }
     return false;
@@ -271,15 +271,14 @@ module.exports = {
   async execute(interaction, client, redis) {
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
-    const user = interaction.user;
 
-    // ---- Helpers ----
+    // ---- Helpers (lowercase Redis methods) ----
     const getBalance = async (id) => Number(await redis.get(`eco:${id}:money`) || 0);
-    const addBalance = async (id, amt) => await redis.incrBy(`eco:${id}:money`, amt);
+    const addBalance = async (id, amt) => await redis.incrby(`eco:${id}:money`, amt);
     const takeBalance = async (id, amt) => {
       const bal = await getBalance(id);
       if (bal < amt) return false;
-      await redis.decrBy(`eco:${id}:money`, amt);
+      await redis.decrby(`eco:${id}:money`, amt);
       return true;
     };
     const isPremium = async (id) => {
@@ -291,7 +290,7 @@ module.exports = {
     // ---- SETBIO ----
     if (sub === "setbio") {
       const text = interaction.options.getString("text");
-      await redis.hSet(`profile:${userId}`, "bio", text);
+      await redis.hset(`profile:${userId}`, "bio", text);
       await addActivity(redis, userId, "Updated bio");
       return interaction.reply({ content: "✅ Bio updated.", flags: MessageFlags.Ephemeral });
     }
@@ -303,7 +302,7 @@ module.exports = {
       if (!/^#[0-9A-F]{6}$/i.test(color)) {
         return interaction.reply({ content: "❌ Invalid hex color.", flags: MessageFlags.Ephemeral });
       }
-      await redis.hSet(`profile:${userId}`, "color", color);
+      await redis.hset(`profile:${userId}`, "color", color);
       await addActivity(redis, userId, "Updated profile color");
       return interaction.reply({ content: "✅ Color updated.", flags: MessageFlags.Ephemeral });
     }
@@ -318,7 +317,7 @@ module.exports = {
       if (!attachment.contentType?.startsWith("image/")) {
         return interaction.reply({ content: "❌ Invalid image.", flags: MessageFlags.Ephemeral });
       }
-      await redis.hSet(`profile:${userId}`, "custom_bg", attachment.url);
+      await redis.hset(`profile:${userId}`, "custom_bg", attachment.url);
       await addActivity(redis, userId, "Uploaded custom background");
       return interaction.reply({ content: "✅ Background uploaded.", flags: MessageFlags.Ephemeral });
     }
@@ -487,15 +486,15 @@ module.exports = {
       const remove = interaction.options.getBoolean("remove") || false;
       const key = `profile:${userId}:friends`;
       if (remove) {
-        await redis.sRem(key, targetUser.id);
+        await redis.srem(key, targetUser.id);
         await addActivity(redis, userId, `Removed ${targetUser.username} as friend`);
         return interaction.reply({ content: `✅ Removed ${targetUser.username} from friends.`, flags: MessageFlags.Ephemeral });
       } else {
-        const exists = await redis.sIsMember(key, targetUser.id);
+        const exists = await redis.sismember(key, targetUser.id);
         if (exists) {
           return interaction.reply({ content: `❌ ${targetUser.username} is already your friend.`, flags: MessageFlags.Ephemeral });
         }
-        await redis.sAdd(key, targetUser.id);
+        await redis.sadd(key, targetUser.id);
         await grantAchievement(redis, userId, 'friend');
         await addActivity(redis, userId, `Added ${targetUser.username} as friend`);
         return interaction.reply({ content: `✅ ${targetUser.username} added as friend.`, flags: MessageFlags.Ephemeral });
@@ -509,7 +508,7 @@ module.exports = {
       if (targetUser.id === userId) {
         return interaction.reply({ content: "❌ You can't give karma to yourself.", flags: MessageFlags.Ephemeral });
       }
-      await redis.incrBy(`profile:${targetUser.id}:reputation`, amount);
+      await redis.incrby(`profile:${targetUser.id}:reputation`, amount);
       await addActivity(redis, targetUser.id, `Received ${amount} karma from ${interaction.user.username}`);
       return interaction.reply({ content: `✅ Gave ${amount} karma to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
     }
@@ -524,7 +523,7 @@ module.exports = {
 
     // ---- ACHIEVEMENTS ----
     if (sub === "achievements") {
-      const achSet = await redis.sMembers(`profile:${userId}:achievements`);
+      const achSet = await redis.smembers(`profile:${userId}:achievements`);
       const embed = new EmbedBuilder()
         .setColor("#FFD700")
         .setTitle(`${interaction.user.username}'s Achievements`)
@@ -541,7 +540,7 @@ module.exports = {
       const targetUser = interaction.options.getUser("user") || interaction.user;
       const targetId = targetUser.id;
 
-      const profile = await redis.hGetAll(`profile:${targetId}`) || {};
+      const profile = await redis.hgetall(`profile:${targetId}`) || {};
       const balance = Number(await redis.get(`eco:${targetId}:money`) || 0);
       const shield = Number(await redis.get(`eco:${targetId}:shield`) || 0);
       const premium = await isPremium(targetId);
@@ -556,13 +555,13 @@ module.exports = {
       const nameColor = await redis.get(`profile:${targetId}:nameColor`) || color;
       const status = await redis.get(`profile:${targetId}:status`) || "";
       const spouseId = await redis.get(`profile:${targetId}:marriedTo`);
-      const friends = await redis.sMembers(`profile:${targetId}:friends`) || [];
+      const friends = await redis.smembers(`profile:${targetId}:friends`) || [];
       const reputation = Number(await redis.get(`profile:${targetId}:reputation`) || 0);
       const favGame = await redis.get(`profile:${targetId}:favGame`) || "None";
-      const activityFeed = await redis.lRange(`profile:${targetId}:activityFeed`, 0, 9) || [];
+      const activityFeed = await redis.lrange(`profile:${targetId}:activityFeed`, 0, 9) || [];
       const embedBg = await redis.get(`profile:${targetId}:embedBg`) || null;
       const barStyle = await redis.get(`profile:${targetId}:barStyle`) || "default";
-      const achievements = await redis.sMembers(`profile:${targetId}:achievements`) || [];
+      const achievements = await redis.smembers(`profile:${targetId}:achievements`) || [];
 
       const needed = Math.floor(100 * Math.pow(level, 1.6));
       const progress = Math.min(xp / needed, 1);
@@ -600,7 +599,7 @@ module.exports = {
         try { bgImage = await loadImage(customBg); } catch {}
       }
       if (!bgImage && bg) {
-        const shopData = await redis.hGetAll(`shop:bg:${bg}`);
+        const shopData = await redis.hgetall(`shop:bg:${bg}`);
         if (shopData?.url) {
           try { bgImage = await loadImage(shopData.url); } catch {}
         }
