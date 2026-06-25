@@ -1,4 +1,4 @@
-// commands/stats.js – Setup stats channels (voice & joined are premium)
+// commands/stats.js – Setup stats channels (voice & joined are premium) – FIXED
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require("discord.js");
 
 module.exports = {
@@ -57,7 +57,8 @@ module.exports = {
     const getCount = () => {
       if (type === "total") return guild.memberCount;
       if (type === "online") {
-        return guild.members.cache.filter(m => m.presence?.status !== "offline").size;
+        // ✅ FIX: only count members with a valid presence and status not "offline"
+        return guild.members.cache.filter(m => m.presence && m.presence.status !== "offline").size;
       }
       if (type === "voice") {
         return guild.members.cache.filter(m => m.voice.channel).size;
