@@ -1,4 +1,4 @@
-// index.js – Full Main Bot (with fixed online count)
+// index.js – Full Main Bot (with ticket button handler)
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
 const redis = require("./redis");
@@ -145,6 +145,55 @@ client.on("interactionCreate", async (interaction) => {
         components: []
       });
       return;
+    }
+
+    // ---- Ticket button handler ----
+    if (interaction.customId.startsWith("ticket_")) {
+      const [action, channelId] = interaction.customId.split(':');
+      const channel = interaction.guild.channels.cache.get(channelId);
+      if (!channel) {
+        return interaction.reply({ content: "❌ Ticket channel not found.", flags: MessageFlags.Ephemeral });
+      }
+
+      const ticketData = await redis.get(`ticket:${interaction.guild.id}:${channelId}`);
+      if (!ticketData) {
+        return interaction.reply({ content: "❌ Invalid ticket.", flags: MessageFlags.Ephemeral });
+      }
+      const data = JSON.parse(ticketData);
+
+      // ---- Claim ----
+      if (action === "ticket_claim") {
+        if (data.claimedBy) {
+          return interaction.reply({ content: `❌ Already claimed by <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
+        }
+        // Check permission
+        const supportRoleId = await redis.get(`ticket:settings:${interaction.guild.id}:support_role`);
+        if (supportRoleId && !interaction.member.roles.cache.has(supportRoleId)) {
+          return interaction.reply({ content: "❌ You don't have permission to claim.", flags: MessageFlags.Ephemeral });
+        }
+        await redis.hset(`ticket:${interaction.guild.id}:${channelId}`, { ...data, claimedBy: interaction.user.id });
+        await channel.send(`✅ ${interaction.user} has claimed this ticket.`);
+        return interaction.reply({ content: "✅ Ticket claimed!", flags: MessageFlags.Ephemeral });
+      }
+
+      // ---- Add User (prompt) ----
+      if (action === "ticket_add_user") {
+        return interaction.reply({
+          content: "Use `/ticket add @user` to add someone.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // ---- Close (prompt) ----
+      if (action === "ticket_close") {
+        return interaction.reply({
+          content: "Use `/ticket close` in the ticket channel.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // ---- Fallback ----
+      return interaction.reply({ content: "❌ Unknown ticket action.", flags: MessageFlags.Ephemeral });
     }
 
     // ---- Blackjack buttons (ignored, handled in games command) ----
@@ -341,7 +390,7 @@ client.once("ready", async () => {
       }
     }
 
-    // Online Users (free) – FIXED: only count members with a valid presence and status (online/idle/dnd)
+    // Online Users (free) – FIXED
     const onlineChannelId = await redis.get(`stats:channel:online:${guildId}`);
     if (onlineChannelId) {
       const channel = guild.channels.cache.get(onlineChannelId);
