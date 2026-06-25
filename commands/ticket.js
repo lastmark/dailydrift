@@ -1,6 +1,5 @@
-// commands/ticket.js – Complete ticket system
+// commands/ticket.js – Complete ticket system (no language dependency)
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ChannelType, MessageFlags } = require("discord.js");
-const { t } = require("../utils/language.js");
 const { createTranscript } = require("../utils/ticketUtils.js");
 
 module.exports = {
@@ -103,9 +102,6 @@ module.exports = {
     const sub = interaction.options.getSubcommand();
     const guildId = interaction.guild.id;
     const userId = interaction.user.id;
-    const lang = interaction.lang || "en";
-
-    const T = (key, params) => t(lang, `ticket.${key}`, params);
 
     // ---- Check if user is in a ticket channel ----
     const channel = interaction.channel;
@@ -292,7 +288,7 @@ module.exports = {
 
       await channel.send({ embeds: [embed] });
 
-      // Delete channel after 5 seconds (optional)
+      // Delete channel after 5 seconds
       setTimeout(async () => {
         await channel.delete().catch(() => {});
       }, 5000);
