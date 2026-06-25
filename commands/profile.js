@@ -1,4 +1,4 @@
-// commands/profile.js – FULLY WORKING (lowercase Redis methods + canvas)
+// commands/profile.js – FINAL with reputation, friend requests, theme, status auto-clear
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
@@ -58,7 +58,7 @@ const ACHIEVEMENTS = {
 
 function getAchievement(id) { return ACHIEVEMENTS[id]; }
 
-// ---------- Helper: add activity feed (lowercase) ----------
+// ---------- Helpers (lowercase Redis) ----------
 async function addActivity(redis, userId, activity) {
   try {
     const key = `profile:${userId}:activityFeed`;
@@ -71,7 +71,6 @@ async function addActivity(redis, userId, activity) {
   }
 }
 
-// ---------- Helper: grant achievement (lowercase) ----------
 async function grantAchievement(redis, userId, achievementId) {
   try {
     const key = `profile:${userId}:achievements`;
@@ -131,7 +130,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("setstatus")
-        .setDescription("Set a custom status")
+        .setDescription("Set a custom status (auto-clears after 24h)")
         .addStringOption(opt =>
           opt.setName("status")
             .setDescription("Status text (max 60 chars)")
@@ -216,34 +215,33 @@ module.exports = {
       sub.setName("divorce")
         .setDescription("Divorce your spouse")
     )
+    // ---- Friend request subcommands ----
     .addSubcommand(sub =>
       sub.setName("friend")
-        .setDescription("Add or remove a friend")
+        .setDescription("Send, accept, or deny a friend request")
+        .addStringOption(opt =>
+          opt.setName("action")
+            .setDescription("Action to perform")
+            .setRequired(true)
+            .addChoices(
+              { name: "request", value: "request" },
+              { name: "accept", value: "accept" },
+              { name: "deny", value: "deny" }
+            )
+        )
         .addUserOption(opt =>
           opt.setName("user")
-            .setDescription("User to add/remove")
+            .setDescription("User for request/accept/deny")
             .setRequired(true)
-        )
-        .addBooleanOption(opt =>
-          opt.setName("remove")
-            .setDescription("Remove friend")
-            .setRequired(false)
         )
     )
     .addSubcommand(sub =>
       sub.setName("givekarma")
-        .setDescription("Give karma to a user")
+        .setDescription("Give reputation to a user (once per 24h)")
         .addUserOption(opt =>
           opt.setName("user")
-            .setDescription("User to give karma")
+            .setDescription("User to give reputation")
             .setRequired(true)
-        )
-        .addIntegerOption(opt =>
-          opt.setName("amount")
-            .setDescription("Amount (1-5)")
-            .setRequired(true)
-            .setMinValue(1)
-            .setMaxValue(5)
         )
     )
     .addSubcommand(sub =>
@@ -272,7 +270,7 @@ module.exports = {
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
 
-    // ---- Helpers (lowercase Redis methods) ----
+    // ---- Helpers (lowercase Redis) ----
     const getBalance = async (id) => Number(await redis.get(`eco:${id}:money`) || 0);
     const addBalance = async (id, amt) => await redis.incrby(`eco:${id}:money`, amt);
     const takeBalance = async (id, amt) => {
@@ -334,11 +332,13 @@ module.exports = {
       if (!collected) {
         return interaction.editReply({ content: "❌ Reset cancelled." });
       }
+      // Delete all profile keys
       await redis.del(`profile:${userId}`);
       await redis.del(`profile:${userId}:theme`);
       await redis.del(`profile:${userId}:nameColor`);
       await redis.del(`profile:${userId}:socialLinks`);
       await redis.del(`profile:${userId}:status`);
+      await redis.del(`profile:${userId}:statusTimestamp`);
       await redis.del(`profile:${userId}:marriedTo`);
       await redis.del(`profile:${userId}:friends`);
       await redis.del(`profile:${userId}:reputation`);
@@ -347,16 +347,18 @@ module.exports = {
       await redis.del(`profile:${userId}:embedBg`);
       await redis.del(`profile:${userId}:barStyle`);
       await redis.del(`profile:${userId}:achievements`);
+      await redis.del(`profile:${userId}:friendRequests`);
       await interaction.editReply({ content: "✅ Profile reset." });
       return;
     }
 
-    // ---- SETSTATUS ----
+    // ---- SETSTATUS (with timestamp for auto-clear) ----
     if (sub === "setstatus") {
       const status = interaction.options.getString("status");
       await redis.set(`profile:${userId}:status`, status);
-      await addActivity(redis, userId, "Updated status");
-      return interaction.reply({ content: "✅ Status updated.", flags: MessageFlags.Ephemeral });
+      await redis.set(`profile:${userId}:statusTimestamp`, Date.now());
+      await addActivity(redis, userId, `Set status: "${status}"`);
+      return interaction.reply({ content: "✅ Status set (auto‑clears after 24h).", flags: MessageFlags.Ephemeral });
     }
 
     // ---- SETTHEME (buy with coins) ----
@@ -480,37 +482,88 @@ module.exports = {
       return interaction.reply({ content: "💔 You are now divorced.", flags: MessageFlags.Ephemeral });
     }
 
-    // ---- FRIEND ----
+    // ---- FRIEND REQUESTS ----
     if (sub === "friend") {
+      const action = interaction.options.getString("action");
       const targetUser = interaction.options.getUser("user");
-      const remove = interaction.options.getBoolean("remove") || false;
-      const key = `profile:${userId}:friends`;
-      if (remove) {
-        await redis.srem(key, targetUser.id);
-        await addActivity(redis, userId, `Removed ${targetUser.username} as friend`);
-        return interaction.reply({ content: `✅ Removed ${targetUser.username} from friends.`, flags: MessageFlags.Ephemeral });
-      } else {
-        const exists = await redis.sismember(key, targetUser.id);
-        if (exists) {
-          return interaction.reply({ content: `❌ ${targetUser.username} is already your friend.`, flags: MessageFlags.Ephemeral });
+      const targetId = targetUser.id;
+
+      if (targetId === userId) {
+        return interaction.reply({ content: "❌ You can't friend yourself.", flags: MessageFlags.Ephemeral });
+      }
+
+      const requestsKey = `profile:${userId}:friendRequests`;
+
+      if (action === "request") {
+        // Check if already friends
+        const friends = await redis.smembers(`profile:${userId}:friends`);
+        if (friends.includes(targetId)) {
+          return interaction.reply({ content: "❌ You are already friends.", flags: MessageFlags.Ephemeral });
         }
-        await redis.sadd(key, targetUser.id);
+        // Check if request already sent
+        const existing = await redis.sismember(requestsKey, targetId);
+        if (existing) {
+          return interaction.reply({ content: "❌ Friend request already sent.", flags: MessageFlags.Ephemeral });
+        }
+        // Send request
+        await redis.sadd(requestsKey, targetId);
+        // Also store the request in the target's incoming list (we'll use the same key but we need to let them accept)
+        // Actually we'll store requests in the target's pending list.
+        await redis.sadd(`profile:${targetId}:friendRequestsIncoming`, userId);
+        return interaction.reply({ content: `✅ Friend request sent to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+      }
+
+      if (action === "accept") {
+        // Check if there's an incoming request
+        const incoming = await redis.sismember(`profile:${userId}:friendRequestsIncoming`, targetId);
+        if (!incoming) {
+          return interaction.reply({ content: `❌ No friend request from ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+        }
+        // Add to friends lists
+        await redis.sadd(`profile:${userId}:friends`, targetId);
+        await redis.sadd(`profile:${targetId}:friends`, userId);
+        // Remove request
+        await redis.srem(`profile:${userId}:friendRequestsIncoming`, targetId);
+        await redis.srem(`profile:${targetId}:friendRequests`, userId);
+        await addActivity(redis, userId, `Became friends with ${targetUser.username}`);
+        await addActivity(redis, targetId, `Became friends with ${interaction.user.username}`);
         await grantAchievement(redis, userId, 'friend');
-        await addActivity(redis, userId, `Added ${targetUser.username} as friend`);
-        return interaction.reply({ content: `✅ ${targetUser.username} added as friend.`, flags: MessageFlags.Ephemeral });
+        await grantAchievement(redis, targetId, 'friend');
+        return interaction.reply({ content: `✅ You are now friends with ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+      }
+
+      if (action === "deny") {
+        const incoming = await redis.sismember(`profile:${userId}:friendRequestsIncoming`, targetId);
+        if (!incoming) {
+          return interaction.reply({ content: `❌ No friend request from ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+        }
+        // Remove request
+        await redis.srem(`profile:${userId}:friendRequestsIncoming`, targetId);
+        await redis.srem(`profile:${targetId}:friendRequests`, userId);
+        return interaction.reply({ content: `✅ Friend request from ${targetUser.username} denied.`, flags: MessageFlags.Ephemeral });
       }
     }
 
-    // ---- GIVEKARMA ----
+    // ---- GIVEKARMA (reputation) ----
     if (sub === "givekarma") {
       const targetUser = interaction.options.getUser("user");
-      const amount = interaction.options.getInteger("amount");
-      if (targetUser.id === userId) {
-        return interaction.reply({ content: "❌ You can't give karma to yourself.", flags: MessageFlags.Ephemeral });
+      const targetId = targetUser.id;
+      if (targetId === userId) {
+        return interaction.reply({ content: "❌ You can't give reputation to yourself.", flags: MessageFlags.Ephemeral });
       }
-      await redis.incrby(`profile:${targetUser.id}:reputation`, amount);
-      await addActivity(redis, targetUser.id, `Received ${amount} karma from ${interaction.user.username}`);
-      return interaction.reply({ content: `✅ Gave ${amount} karma to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+      // Check cooldown
+      const cooldownKey = `profile:${userId}:lastRepGiven`;
+      const last = await redis.get(cooldownKey);
+      if (last && (Date.now() - Number(last) < 24 * 60 * 60 * 1000)) {
+        const remaining = Math.ceil((24 * 60 * 60 * 1000 - (Date.now() - Number(last))) / 60000);
+        return interaction.reply({ content: `⏳ You can give reputation again in ${remaining} minutes.`, flags: MessageFlags.Ephemeral });
+      }
+      // Give rep
+      await redis.incrby(`profile:${targetId}:reputation`, 1);
+      await redis.set(cooldownKey, Date.now());
+      await addActivity(redis, targetId, `Received reputation from ${interaction.user.username}`);
+      await addActivity(redis, userId, `Gave reputation to ${targetUser.username}`);
+      return interaction.reply({ content: `✅ Gave 1 reputation to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
     }
 
     // ---- SETFAVGAME ----
@@ -540,9 +593,17 @@ module.exports = {
       const targetUser = interaction.options.getUser("user") || interaction.user;
       const targetId = targetUser.id;
 
+      // ---- Auto‑clear status after 24h ----
+      const statusTimestamp = await redis.get(`profile:${targetId}:statusTimestamp`);
+      if (statusTimestamp && (Date.now() - Number(statusTimestamp) > 24 * 60 * 60 * 1000)) {
+        await redis.del(`profile:${targetId}:status`);
+        await redis.del(`profile:${targetId}:statusTimestamp`);
+      }
+
+      // ---- Fetch data ----
       const profile = await redis.hgetall(`profile:${targetId}`) || {};
       const balance = Number(await redis.get(`eco:${targetId}:money`) || 0);
-      const shield = Number(await redis.get(`eco:${targetId}:shield`) || 0);
+      const reputation = Number(await redis.get(`profile:${targetId}:reputation`) || 0);
       const premium = await isPremium(targetId);
       const beta = await isBeta(targetId);
       const level = Number(profile.level || 1);
@@ -556,7 +617,6 @@ module.exports = {
       const status = await redis.get(`profile:${targetId}:status`) || "";
       const spouseId = await redis.get(`profile:${targetId}:marriedTo`);
       const friends = await redis.smembers(`profile:${targetId}:friends`) || [];
-      const reputation = Number(await redis.get(`profile:${targetId}:reputation`) || 0);
       const favGame = await redis.get(`profile:${targetId}:favGame`) || "None";
       const activityFeed = await redis.lrange(`profile:${targetId}:activityFeed`, 0, 9) || [];
       const embedBg = await redis.get(`profile:${targetId}:embedBg`) || null;
@@ -573,10 +633,9 @@ module.exports = {
         .setDescription(`Level ${level} • ${premium ? 'Premium' : beta ? 'Beta Tester' : 'Member'}`)
         .addFields(
           { name: "💰 Coins", value: `${formatNumber(balance)}`, inline: true },
-          { name: "🛡️ Shields", value: `${formatNumber(shield)}`, inline: true },
           { name: "⭐ Reputation", value: `${reputation}`, inline: true },
-          { name: "📝 Status", value: status || "None", inline: false },
           { name: "🎮 Favorite Game", value: favGame, inline: true },
+          { name: "📝 Status", value: status || "None", inline: false },
           { name: "💍 Spouse", value: spouseId ? `<@${spouseId}>` : "None", inline: true },
           { name: "👥 Friends", value: friends.length ? friends.map(id => `<@${id}>`).join(', ') : "None", inline: false },
           { name: "🏅 Achievements", value: achievements.length ? achievements.map(id => {
@@ -593,7 +652,7 @@ module.exports = {
       const canvas = createCanvas(900, 350);
       const ctx = canvas.getContext("2d");
 
-      // Background
+      // Background – apply theme if set
       let bgImage = null;
       if (customBg) {
         try { bgImage = await loadImage(customBg); } catch {}
@@ -607,9 +666,27 @@ module.exports = {
       if (bgImage) {
         ctx.drawImage(bgImage, 0, 0, 900, 350);
       } else {
+        // Use theme to choose a gradient
+        let gradColors;
+        switch (theme) {
+          case "neon":
+            gradColors = ["#FF00FF33", "#00FFFF33"];
+            break;
+          case "space":
+            gradColors = ["#00003333", "#33006633"];
+            break;
+          case "nature":
+            gradColors = ["#00FF0033", "#00660033"];
+            break;
+          case "retro":
+            gradColors = ["#FF6B6B33", "#FFD93D33"];
+            break;
+          default:
+            gradColors = [color + "33", "#2C3E50"];
+        }
         const gradient = ctx.createLinearGradient(0, 0, 900, 350);
-        gradient.addColorStop(0, color + "33");
-        gradient.addColorStop(1, "#2C3E50");
+        gradient.addColorStop(0, gradColors[0]);
+        gradient.addColorStop(1, gradColors[1]);
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, 900, 350);
       }
@@ -647,7 +724,7 @@ module.exports = {
       ctx.font = getFont("bold", 32);
       ctx.fillText(targetUser.username, 270, 100);
 
-      // Title
+      // Title (Premium/Beta/Member)
       let title = "Member";
       if (premium) title = "💎 Premium";
       else if (beta) title = "🧪 Beta Tester";
@@ -655,27 +732,27 @@ module.exports = {
       ctx.font = getFont("bold", 18);
       ctx.fillText(title, 270, 140);
 
-      // Status
+      // Status (placed under title, before bio)
       if (status) {
         ctx.fillStyle = "rgba(255,255,255,0.6)";
         ctx.font = getFont("italic", 14);
         ctx.fillText(`"${status}"`, 270, 165);
       }
 
-      // Bio
+      // Bio (shifted down if status exists)
       ctx.fillStyle = "rgba(255,255,255,0.8)";
       ctx.font = getFont("normal", 16);
       let displayBio = bio;
       if (displayBio.length > 60) displayBio = displayBio.substring(0, 57) + "...";
       ctx.fillText(displayBio, 270, status ? 195 : 175);
 
-      // Stats
+      // Stats (coins, reputation, level – no shields)
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.font = getFont("bold", 16);
       let xPos = 270;
       const stats = [
         { label: "Coins:", value: formatNumber(balance) },
-        { label: "Shields:", value: formatNumber(shield) },
+        { label: "Reputation:", value: reputation },
         { label: "Level:", value: level }
       ];
       stats.forEach((stat, index) => {
