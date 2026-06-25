@@ -1,6 +1,8 @@
-// commands/games.js – FULL ENHANCED VERSION (with working daily)
+// commands/games.js – FULL ENHANCED VERSION (with achievements & activity)
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 const { formatNumber } = require("../utils.js");
+const { grantAchievement } = require("../utils/achievements.js");
+const { addActivity } = require("../utils/activity.js");
 
 // ---- Random response pools ----
 const winMessages = [
@@ -72,6 +74,15 @@ const dailyMessages = [
 ];
 
 function randomFrom(array) { return array[Math.floor(Math.random() * array.length)]; }
+
+// ---- Game play counter ----
+async function trackGamePlayed(redis, userId) {
+  const key = `profile:${userId}:gamesPlayed`;
+  const count = await redis.incr(key);
+  if (count === 10) await grantAchievement(redis, userId, 'games_10');
+  if (count === 50) await grantAchievement(redis, userId, 'games_50');
+  return count;
+}
 
 // =========================
 // 🃏 BLACKJACK GAME CLASS
@@ -183,6 +194,9 @@ class BlackjackGame {
       await this.economy.addBalance(this.userId, winAmount);
       await this.economy.addTotalEarned(this.userId, this.bet);
       await this.redis.incr(`games:${this.userId}:blackjack_wins`);
+      // Grant achievement
+      await grantAchievement(this.redis, this.userId, 'blackjack_win');
+      await addActivity(this.redis, this.userId, `Won Blackjack (${formatNumber(winAmount)} coins)`);
     } else if (this.result === 'push') {
       winAmount = this.bet;
       await this.economy.addBalance(this.userId, winAmount);
@@ -337,10 +351,6 @@ module.exports = {
         )
     )
     .addSubcommand(sub =>
-      sub.setName("daily")
-        .setDescription("💰 Claim your daily bonus")
-    )
-    .addSubcommand(sub =>
       sub.setName("shop")
         .setDescription("🛒 View the shop")
     )
@@ -432,10 +442,15 @@ module.exports = {
         winAmount = 0;
       }
 
+      // Track game played
+      await trackGamePlayed(redis, userId);
+
       if (result === "win") {
         await addBalance(userId, winAmount);
         await addTotalEarned(userId, winAmount);
         await redis.incr(`games:${userId}:rps_wins`);
+        await grantAchievement(redis, userId, 'rps_win');
+        await addActivity(redis, userId, `Won RPS (${formatNumber(winAmount)} coins)`);
       } else if (result === "lose") {
         await takeBalance(userId, bet);
         await addTotalSpent(userId, bet);
@@ -486,10 +501,15 @@ module.exports = {
       const winAmount = won ? Math.floor(bet * 1.8) : 0;
       const emojiMap = { heads: "🪙👑", tails: "🪙🐾" };
 
+      // Track game played
+      await trackGamePlayed(redis, userId);
+
       if (won) {
         await addBalance(userId, winAmount);
         await addTotalEarned(userId, winAmount);
         await redis.incr(`games:${userId}:coinflip_wins`);
+        await grantAchievement(redis, userId, 'coinflip_win');
+        await addActivity(redis, userId, `Won Coinflip (${formatNumber(winAmount)} coins)`);
       } else {
         await takeBalance(userId, bet);
         await addTotalSpent(userId, bet);
@@ -539,10 +559,15 @@ module.exports = {
       const winAmount = won ? Math.floor(bet * multipliers[number]) : 0;
       const diceEmojis = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
 
+      // Track game played
+      await trackGamePlayed(redis, userId);
+
       if (won) {
         await addBalance(userId, winAmount);
         await addTotalEarned(userId, winAmount);
         await redis.incr(`games:${userId}:dice_wins`);
+        await grantAchievement(redis, userId, 'dice_win');
+        await addActivity(redis, userId, `Won Dice (${formatNumber(winAmount)} coins)`);
       } else {
         await takeBalance(userId, bet);
         await addTotalSpent(userId, bet);
@@ -583,6 +608,9 @@ module.exports = {
           flags: MessageFlags.Ephemeral
         });
       }
+
+      // Track game played
+      await trackGamePlayed(redis, userId);
 
       await takeBalance(userId, bet);
 
@@ -645,6 +673,8 @@ module.exports = {
         color = "#57F287";
         await redis.incr(`games:${userId}:slots_wins`);
         if (multiplier === 5) await redis.incr(`games:${userId}:slots_jackpots`);
+        await grantAchievement(redis, userId, 'slots_win');
+        await addActivity(redis, userId, `Won Slots (${formatNumber(winAmount)} coins)`);
       }
 
       const allSymbols = ['🫐', '🍇', '🥥', '🎰'];
@@ -699,6 +729,10 @@ module.exports = {
           flags: MessageFlags.Ephemeral
         });
       }
+
+      // Track game played
+      await trackGamePlayed(redis, userId);
+
       await takeBalance(userId, bet);
 
       const game = new BlackjackGame(userId, bet, economy, redis);
@@ -769,55 +803,7 @@ module.exports = {
     }
 
     // =========================
-    // 💰 DAILY – FIXED & ENHANCED
-    // =========================
-    if (sub === "daily") {
-      const lastDaily = await redis.get(`games:${userId}:daily`);
-      const now = Date.now();
-      const cooldown = 24 * 60 * 60 * 1000;
-
-      if (lastDaily && now - Number(lastDaily) < cooldown) {
-        const remaining = Math.ceil((cooldown - (now - Number(lastDaily))) / 60000);
-        const hours = Math.floor(remaining / 60);
-        const mins = remaining % 60;
-        return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#F1C40F")
-              .setDescription(`⏳ You can claim your daily bonus in **${hours}h ${mins}m**!`)
-              .setFooter({ text: "Patience, young grasshopper!" })
-          ],
-          flags: MessageFlags.Ephemeral
-        });
-      }
-
-      // Calculate bonus (100–150 coins)
-      const bonus = 100 + Math.floor(Math.random() * 51);
-      // Add coins
-      await addBalance(userId, bonus);
-      await addTotalEarned(userId, bonus);
-      // Set cooldown
-      await redis.set(`games:${userId}:daily`, now.toString());
-
-      const newBalance = await getBalance(userId);
-      const flavor = randomFrom(dailyMessages);
-
-      const embed = new EmbedBuilder()
-        .setColor("#57F287")
-        .setTitle("💰 Daily Bonus Claimed!")
-        .setDescription(`${flavor}`)
-        .addFields(
-          { name: "🎁 Bonus Coins", value: `+${formatNumber(bonus)}`, inline: true },
-          { name: "💳 New Balance", value: `${formatNumber(newBalance)}`, inline: true }
-        )
-        .setFooter({ text: "Come back tomorrow for more!" })
-        .setTimestamp();
-
-      return interaction.reply({ embeds: [embed] });
-    }
-
-    // =========================
-    // 🛒 SHOP (unchanged)
+    // 🛒 SHOP
     // =========================
     if (sub === "shop") {
       const embed = new EmbedBuilder()
@@ -834,7 +820,7 @@ module.exports = {
     }
 
     // =========================
-    // 🛒 BUY (unchanged)
+    // 🛒 BUY
     // =========================
     if (sub === "buy") {
       const item = interaction.options.getString("item");
@@ -877,7 +863,7 @@ module.exports = {
     }
 
     // =========================
-    // 📊 STATS (unchanged)
+    // 📊 STATS
     // =========================
     if (sub === "stats") {
       const stats = await redis.hgetall(`games:${userId}`) || {};
