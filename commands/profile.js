@@ -236,7 +236,7 @@ module.exports = {
         )
     )
     .addSubcommand(sub =>
-      sub.setName("givekarma")
+      sub.setName("rep")
         .setDescription("Give reputation to a user (once per 24h)")
         .addUserOption(opt =>
           opt.setName("user")
