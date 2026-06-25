@@ -321,7 +321,7 @@ client.on("messageCreate", async (message) => {
   if (cmd !== "terms") {
     const accepted = await redis.get(`terms:accepted:${message.author.id}`);
     if (accepted !== TERMS_VERSION) {
-      return message.reply("📜 You must accept the Terms of Service first. Run `!terms` to view and accept.");
+      return message.reply("📜 You must accept the Terms of Service first. Run `/terms` to view and accept.");
     }
   }
 
