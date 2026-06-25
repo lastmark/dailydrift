@@ -1,4 +1,4 @@
-
+// commands/profile.js – FULLY FIXED with all subcommands
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
@@ -17,7 +17,8 @@ try {
 
 function getFont(weight = "normal", size = 16) {
   const family = customFontLoaded ? "CustomFont" : "Arial, sans-serif";
-  return `${weight} ${size}px ${family}`;
+  const emojiFallback = ", 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', 'EmojiOne Color', sans-serif";
+  return `${weight} ${size}px ${family}${emojiFallback}`;
 }
 
 // ---------- roundRect polyfill ----------
@@ -52,38 +53,40 @@ const ACHIEVEMENTS = {
   coinflip_win: { id: 'coinflip_win', name: 'Coin Flipper', desc: 'Won a Coinflip', icon: '🪙' },
   rich: { id: 'rich', name: 'Rich', desc: 'Accumulated 10,000 coins', icon: '💰' },
   friend: { id: 'friend', name: 'Social', desc: 'Added a friend', icon: '🤝' },
+  married: { id: 'married', name: 'Married', desc: 'Got married', icon: '💍' },
 };
 
 function getAchievement(id) { return ACHIEVEMENTS[id]; }
 
-// ---------- Helper: add activity feed ----------
+// ---------- Helper: add activity feed (with error handling) ----------
 async function addActivity(redis, userId, activity) {
-  const key = `profile:${userId}:activityFeed`;
-  const list = await redis.lrange(key, 0, -1) || [];
-  list.unshift(activity);
-  if (list.length > 10) list.pop();
-  await redis.ltrim(key, 0, 9);
-  // Store as JSON
-  await redis.lset(key, 0, activity); // Actually we need to replace the whole list? Let's just use LPUSH and LTRIM.
-  // Better: use redis.lpush and redis.ltrim
-  await redis.lpush(key, activity);
-  await redis.ltrim(key, 0, 9);
-}
-
-// ---------- Helper: grant achievement ----------
-async function grantAchievement(redis, userId, achievementId) {
-  const key = `profile:${userId}:achievements`;
-  const exists = await redis.sismember(key, achievementId);
-  if (!exists) {
-    await redis.sadd(key, achievementId);
-    return true; // newly granted
+  try {
+    const key = `profile:${userId}:activityFeed`;
+    const timestamp = new Date().toLocaleString();
+    const entry = `[${timestamp}] ${activity}`;
+    await redis.lPush(key, entry);
+    await redis.lTrim(key, 0, 9);
+  } catch (error) {
+    console.error('addActivity error:', error);
   }
-  return false;
 }
 
-// =========================
-// COMMAND EXPORT
-// =========================
+// ---------- Helper: grant achievement (with error handling) ----------
+async function grantAchievement(redis, userId, achievementId) {
+  try {
+    const key = `profile:${userId}:achievements`;
+    const exists = await redis.sIsMember(key, achievementId);
+    if (!exists) {
+      await redis.sAdd(key, achievementId);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('grantAchievement error:', error);
+    return false;
+  }
+}
+
 module.exports = {
   category: "User",
   data: new SlashCommandBuilder()
@@ -272,11 +275,11 @@ module.exports = {
 
     // ---- Helpers ----
     const getBalance = async (id) => Number(await redis.get(`eco:${id}:money`) || 0);
-    const addBalance = async (id, amt) => await redis.incrby(`eco:${id}:money`, amt);
+    const addBalance = async (id, amt) => await redis.incrBy(`eco:${id}:money`, amt);
     const takeBalance = async (id, amt) => {
       const bal = await getBalance(id);
       if (bal < amt) return false;
-      await redis.decrby(`eco:${id}:money`, amt);
+      await redis.decrBy(`eco:${id}:money`, amt);
       return true;
     };
     const isPremium = async (id) => {
@@ -288,7 +291,7 @@ module.exports = {
     // ---- SETBIO ----
     if (sub === "setbio") {
       const text = interaction.options.getString("text");
-      await redis.hset(`profile:${userId}`, "bio", text);
+      await redis.hSet(`profile:${userId}`, "bio", text);
       await addActivity(redis, userId, "Updated bio");
       return interaction.reply({ content: "✅ Bio updated.", flags: MessageFlags.Ephemeral });
     }
@@ -300,7 +303,7 @@ module.exports = {
       if (!/^#[0-9A-F]{6}$/i.test(color)) {
         return interaction.reply({ content: "❌ Invalid hex color.", flags: MessageFlags.Ephemeral });
       }
-      await redis.hset(`profile:${userId}`, "color", color);
+      await redis.hSet(`profile:${userId}`, "color", color);
       await addActivity(redis, userId, "Updated profile color");
       return interaction.reply({ content: "✅ Color updated.", flags: MessageFlags.Ephemeral });
     }
@@ -315,7 +318,7 @@ module.exports = {
       if (!attachment.contentType?.startsWith("image/")) {
         return interaction.reply({ content: "❌ Invalid image.", flags: MessageFlags.Ephemeral });
       }
-      await redis.hset(`profile:${userId}`, "custom_bg", attachment.url);
+      await redis.hSet(`profile:${userId}`, "custom_bg", attachment.url);
       await addActivity(redis, userId, "Uploaded custom background");
       return interaction.reply({ content: "✅ Background uploaded.", flags: MessageFlags.Ephemeral });
     }
@@ -338,7 +341,6 @@ module.exports = {
       await redis.del(`profile:${userId}:socialLinks`);
       await redis.del(`profile:${userId}:status`);
       await redis.del(`profile:${userId}:marriedTo`);
-      await redis.srem(`profile:${userId}:friends`, userId); // remove all friends? Actually we need to clear the set.
       await redis.del(`profile:${userId}:friends`);
       await redis.del(`profile:${userId}:reputation`);
       await redis.del(`profile:${userId}:favGame`);
@@ -361,7 +363,7 @@ module.exports = {
     // ---- SETTHEME (buy with coins) ----
     if (sub === "settheme") {
       const theme = interaction.options.getString("theme");
-      const price = 500; // cost to unlock a theme
+      const price = 500;
       const bal = await getBalance(userId);
       if (bal < price) {
         return interaction.reply({ content: `❌ You need ${price} coins. You have ${bal}.`, flags: MessageFlags.Ephemeral });
@@ -416,7 +418,6 @@ module.exports = {
         await addActivity(redis, userId, `Removed ${platform} link`);
         return interaction.reply({ content: `✅ Removed ${platform} link.`, flags: MessageFlags.Ephemeral });
       } else {
-        // Check if premium for multiple links
         const premium = await isPremium(userId);
         if (!premium && links.length >= 1) {
           return interaction.reply({ content: "❌ Premium needed for more than 1 link.", flags: MessageFlags.Ephemeral });
@@ -442,10 +443,9 @@ module.exports = {
       if (targetSpouse) {
         return interaction.reply({ content: `❌ ${targetUser.username} is already married.`, flags: MessageFlags.Ephemeral });
       }
-      // Both agree? We'll ask for confirmation.
       await interaction.reply({
         content: `💍 <@${targetUser.id}>, do you accept ${interaction.user.username}'s marriage proposal? React with ✅ within 30 seconds.`,
-        withResponse: true
+        fetchReply: true
       });
       const msg = await interaction.fetchReply();
       await msg.react('✅');
@@ -457,13 +457,13 @@ module.exports = {
           await redis.set(`profile:${targetUser.id}:marriedTo`, userId);
           await addActivity(redis, userId, `Married ${targetUser.username}`);
           await addActivity(redis, targetUser.id, `Married ${interaction.user.username}`);
-          await grantAchievement(redis, userId, 'friend'); // marriage counts as friend?
+          await grantAchievement(redis, userId, 'married');
           await interaction.editReply({ content: `💍 Congratulations! You are now married to ${targetUser.username}!` });
         } else {
-          await interaction.editReply({ content: "❌ Proposal declined.", embeds: [], components: [] });
+          await interaction.editReply({ content: "❌ Proposal declined." });
         }
       } catch {
-        await interaction.editReply({ content: "❌ Proposal timed out.", embeds: [], components: [] });
+        await interaction.editReply({ content: "❌ Proposal timed out." });
       }
       return;
     }
@@ -487,15 +487,15 @@ module.exports = {
       const remove = interaction.options.getBoolean("remove") || false;
       const key = `profile:${userId}:friends`;
       if (remove) {
-        await redis.srem(key, targetUser.id);
+        await redis.sRem(key, targetUser.id);
         await addActivity(redis, userId, `Removed ${targetUser.username} as friend`);
         return interaction.reply({ content: `✅ Removed ${targetUser.username} from friends.`, flags: MessageFlags.Ephemeral });
       } else {
-        const exists = await redis.sismember(key, targetUser.id);
+        const exists = await redis.sIsMember(key, targetUser.id);
         if (exists) {
           return interaction.reply({ content: `❌ ${targetUser.username} is already your friend.`, flags: MessageFlags.Ephemeral });
         }
-        await redis.sadd(key, targetUser.id);
+        await redis.sAdd(key, targetUser.id);
         await grantAchievement(redis, userId, 'friend');
         await addActivity(redis, userId, `Added ${targetUser.username} as friend`);
         return interaction.reply({ content: `✅ ${targetUser.username} added as friend.`, flags: MessageFlags.Ephemeral });
@@ -509,8 +509,7 @@ module.exports = {
       if (targetUser.id === userId) {
         return interaction.reply({ content: "❌ You can't give karma to yourself.", flags: MessageFlags.Ephemeral });
       }
-      // Check cooldown per user per day? Not implemented for simplicity.
-      await redis.incrby(`profile:${targetUser.id}:reputation`, amount);
+      await redis.incrBy(`profile:${targetUser.id}:reputation`, amount);
       await addActivity(redis, targetUser.id, `Received ${amount} karma from ${interaction.user.username}`);
       return interaction.reply({ content: `✅ Gave ${amount} karma to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
     }
@@ -525,7 +524,7 @@ module.exports = {
 
     // ---- ACHIEVEMENTS ----
     if (sub === "achievements") {
-      const achSet = await redis.smembers(`profile:${userId}:achievements`);
+      const achSet = await redis.sMembers(`profile:${userId}:achievements`);
       const embed = new EmbedBuilder()
         .setColor("#FFD700")
         .setTitle(`${interaction.user.username}'s Achievements`)
@@ -542,8 +541,7 @@ module.exports = {
       const targetUser = interaction.options.getUser("user") || interaction.user;
       const targetId = targetUser.id;
 
-      // Fetch all data
-      const profile = await redis.hgetall(`profile:${targetId}`) || {};
+      const profile = await redis.hGetAll(`profile:${targetId}`) || {};
       const balance = Number(await redis.get(`eco:${targetId}:money`) || 0);
       const shield = Number(await redis.get(`eco:${targetId}:shield`) || 0);
       const premium = await isPremium(targetId);
@@ -558,68 +556,51 @@ module.exports = {
       const nameColor = await redis.get(`profile:${targetId}:nameColor`) || color;
       const status = await redis.get(`profile:${targetId}:status`) || "";
       const spouseId = await redis.get(`profile:${targetId}:marriedTo`);
-      const friends = await redis.smembers(`profile:${targetId}:friends`) || [];
+      const friends = await redis.sMembers(`profile:${targetId}:friends`) || [];
       const reputation = Number(await redis.get(`profile:${targetId}:reputation`) || 0);
       const favGame = await redis.get(`profile:${targetId}:favGame`) || "None";
-      const activityFeed = await redis.lrange(`profile:${targetId}:activityFeed`, 0, 9) || [];
+      const activityFeed = await redis.lRange(`profile:${targetId}:activityFeed`, 0, 9) || [];
       const embedBg = await redis.get(`profile:${targetId}:embedBg`) || null;
       const barStyle = await redis.get(`profile:${targetId}:barStyle`) || "default";
-      const achievements = await redis.smembers(`profile:${targetId}:achievements`) || [];
+      const achievements = await redis.sMembers(`profile:${targetId}:achievements`) || [];
 
       const needed = Math.floor(100 * Math.pow(level, 1.6));
       const progress = Math.min(xp / needed, 1);
 
-      // Build embed
+      // ---- Build embed ----
       const embed = new EmbedBuilder()
         .setColor(embedBg || color)
         .setTitle(`${targetUser.username}'s Profile`)
         .setDescription(`Level ${level} • ${premium ? 'Premium' : beta ? 'Beta Tester' : 'Member'}`)
         .addFields(
-          { name: "Coins", value: `${formatNumber(balance)}`, inline: true },
-          { name: "Shields", value: `${formatNumber(shield)}`, inline: true },
-          { name: "Reputation", value: `${reputation}`, inline: true },
-          { name: "Status", value: status || "None", inline: false },
-          { name: "Favorite Game", value: favGame, inline: true },
-          { name: "Spouse", value: spouseId ? `<@${spouseId}>` : "None", inline: true },
-          { name: "Friends", value: friends.length ? friends.map(id => `<@${id}>`).join(', ') : "None", inline: false },
-          { name: "Achievements", value: achievements.length ? achievements.map(id => {
+          { name: "💰 Coins", value: `${formatNumber(balance)}`, inline: true },
+          { name: "🛡️ Shields", value: `${formatNumber(shield)}`, inline: true },
+          { name: "⭐ Reputation", value: `${reputation}`, inline: true },
+          { name: "📝 Status", value: status || "None", inline: false },
+          { name: "🎮 Favorite Game", value: favGame, inline: true },
+          { name: "💍 Spouse", value: spouseId ? `<@${spouseId}>` : "None", inline: true },
+          { name: "👥 Friends", value: friends.length ? friends.map(id => `<@${id}>`).join(', ') : "None", inline: false },
+          { name: "🏅 Achievements", value: achievements.length ? achievements.map(id => {
             const ach = getAchievement(id);
             return ach ? `${ach.icon}` : id;
           }).join(' ') : "None", inline: false },
-          { name: "Recent Activity", value: activityFeed.length ? activityFeed.slice(0, 5).join('\n') : "None", inline: false }
+          { name: "📋 Recent Activity", value: activityFeed.length ? activityFeed.slice(0, 5).join('\n') : "None", inline: false }
         )
         .setImage("attachment://profile.png")
         .setFooter({ text: `Requested by ${interaction.user.username}` })
         .setTimestamp();
 
-      // Generate canvas image with all new elements (if time permits, we can add more visuals)
-      // For now, embed is enough. But we can generate a canvas if needed.
-
-      // Send embed with image – we'll generate the canvas as before but include additional elements.
-      // We'll just reuse the existing canvas generation but add new fields like status, theme, etc.
-      // Since this is a large command, we'll keep the existing canvas generation (it already has coins, shields, level, xp, bio, color, background).
-      // We can add status, theme, etc. to the canvas.
-      // But for simplicity, I'll keep the embed fields and the image as before, with added fields in the embed.
-      // The user will see the same image plus new embed fields.
-      // To save code length, I'll reuse the existing canvas generation from the previous profile code.
-
-      // For brevity, I'll copy the canvas generation from earlier and add status, theme icons.
-      // Since this is a long response, I'll provide the canvas generation part now.
-
-      // ... canvas generation (same as before, but we can add status text at bottom, etc.)
-      // I'll include the full canvas generation in the final answer if needed, but for now, let's just use embed.
-
-      // Generate canvas
+      // ---- Generate canvas image ----
       const canvas = createCanvas(900, 350);
       const ctx = canvas.getContext("2d");
 
-      // Background (existing)
+      // Background
       let bgImage = null;
       if (customBg) {
         try { bgImage = await loadImage(customBg); } catch {}
       }
       if (!bgImage && bg) {
-        const shopData = await redis.hgetall(`shop:bg:${bg}`);
+        const shopData = await redis.hGetAll(`shop:bg:${bg}`);
         if (shopData?.url) {
           try { bgImage = await loadImage(shopData.url); } catch {}
         }
@@ -651,7 +632,7 @@ module.exports = {
       ctx.drawImage(avatar, 45, 65, 170, 170);
       ctx.restore();
 
-      // Avatar ring (custom color)
+      // Avatar ring
       ctx.shadowColor = color;
       ctx.shadowBlur = 30;
       ctx.strokeStyle = color;
@@ -661,13 +642,13 @@ module.exports = {
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      // Username (with custom name color if set)
+      // Username (custom color)
       const nameColorHex = nameColor || "#FFFFFF";
       ctx.fillStyle = nameColorHex;
       ctx.font = getFont("bold", 32);
       ctx.fillText(targetUser.username, 270, 100);
 
-      // Title (Premium/Beta/Member)
+      // Title
       let title = "Member";
       if (premium) title = "💎 Premium";
       else if (beta) title = "🧪 Beta Tester";
@@ -675,7 +656,7 @@ module.exports = {
       ctx.font = getFont("bold", 18);
       ctx.fillText(title, 270, 140);
 
-      // Status (if set)
+      // Status
       if (status) {
         ctx.fillStyle = "rgba(255,255,255,0.6)";
         ctx.font = getFont("italic", 14);
@@ -689,7 +670,7 @@ module.exports = {
       if (displayBio.length > 60) displayBio = displayBio.substring(0, 57) + "...";
       ctx.fillText(displayBio, 270, status ? 195 : 175);
 
-      // Stats (coins, shields, level)
+      // Stats
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.font = getFont("bold", 16);
       let xPos = 270;
@@ -715,7 +696,7 @@ module.exports = {
         xPos += 80;
       });
 
-      // XP Bar with custom style
+      // XP Bar
       const barX = 270, barY = 240, barWidth = 540, barHeight = 22;
       ctx.shadowBlur = 5;
       ctx.shadowColor = "rgba(0,0,0,0.2)";
@@ -784,7 +765,6 @@ module.exports = {
 
       const buffer = canvas.toBuffer("image/png");
 
-      // Add image to embed
       embed.setImage("attachment://profile.png");
 
       return interaction.reply({
