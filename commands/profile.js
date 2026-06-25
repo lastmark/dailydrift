@@ -1,4 +1,4 @@
-// commands/profile.js – FINAL with reputation, friend requests, theme, status auto-clear
+// commands/profile.js – with social links on canvas, status at top right
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
@@ -178,7 +178,7 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("link")
-        .setDescription("Add a social link")
+        .setDescription("Add a social link (shows on profile)")
         .addStringOption(opt =>
           opt.setName("platform")
             .setDescription("Platform name")
@@ -215,7 +215,6 @@ module.exports = {
       sub.setName("divorce")
         .setDescription("Divorce your spouse")
     )
-    // ---- Friend request subcommands ----
     .addSubcommand(sub =>
       sub.setName("friend")
         .setDescription("Send, accept, or deny a friend request")
@@ -332,7 +331,6 @@ module.exports = {
       if (!collected) {
         return interaction.editReply({ content: "❌ Reset cancelled." });
       }
-      // Delete all profile keys
       await redis.del(`profile:${userId}`);
       await redis.del(`profile:${userId}:theme`);
       await redis.del(`profile:${userId}:nameColor`);
@@ -492,37 +490,27 @@ module.exports = {
         return interaction.reply({ content: "❌ You can't friend yourself.", flags: MessageFlags.Ephemeral });
       }
 
-      const requestsKey = `profile:${userId}:friendRequests`;
-
       if (action === "request") {
-        // Check if already friends
         const friends = await redis.smembers(`profile:${userId}:friends`);
         if (friends.includes(targetId)) {
           return interaction.reply({ content: "❌ You are already friends.", flags: MessageFlags.Ephemeral });
         }
-        // Check if request already sent
-        const existing = await redis.sismember(requestsKey, targetId);
+        const existing = await redis.sismember(`profile:${userId}:friendRequests`, targetId);
         if (existing) {
           return interaction.reply({ content: "❌ Friend request already sent.", flags: MessageFlags.Ephemeral });
         }
-        // Send request
-        await redis.sadd(requestsKey, targetId);
-        // Also store the request in the target's incoming list (we'll use the same key but we need to let them accept)
-        // Actually we'll store requests in the target's pending list.
+        await redis.sadd(`profile:${userId}:friendRequests`, targetId);
         await redis.sadd(`profile:${targetId}:friendRequestsIncoming`, userId);
         return interaction.reply({ content: `✅ Friend request sent to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
       }
 
       if (action === "accept") {
-        // Check if there's an incoming request
         const incoming = await redis.sismember(`profile:${userId}:friendRequestsIncoming`, targetId);
         if (!incoming) {
           return interaction.reply({ content: `❌ No friend request from ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
         }
-        // Add to friends lists
         await redis.sadd(`profile:${userId}:friends`, targetId);
         await redis.sadd(`profile:${targetId}:friends`, userId);
-        // Remove request
         await redis.srem(`profile:${userId}:friendRequestsIncoming`, targetId);
         await redis.srem(`profile:${targetId}:friendRequests`, userId);
         await addActivity(redis, userId, `Became friends with ${targetUser.username}`);
@@ -537,7 +525,6 @@ module.exports = {
         if (!incoming) {
           return interaction.reply({ content: `❌ No friend request from ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
         }
-        // Remove request
         await redis.srem(`profile:${userId}:friendRequestsIncoming`, targetId);
         await redis.srem(`profile:${targetId}:friendRequests`, userId);
         return interaction.reply({ content: `✅ Friend request from ${targetUser.username} denied.`, flags: MessageFlags.Ephemeral });
@@ -551,14 +538,12 @@ module.exports = {
       if (targetId === userId) {
         return interaction.reply({ content: "❌ You can't give reputation to yourself.", flags: MessageFlags.Ephemeral });
       }
-      // Check cooldown
       const cooldownKey = `profile:${userId}:lastRepGiven`;
       const last = await redis.get(cooldownKey);
       if (last && (Date.now() - Number(last) < 24 * 60 * 60 * 1000)) {
         const remaining = Math.ceil((24 * 60 * 60 * 1000 - (Date.now() - Number(last))) / 60000);
         return interaction.reply({ content: `⏳ You can give reputation again in ${remaining} minutes.`, flags: MessageFlags.Ephemeral });
       }
-      // Give rep
       await redis.incrby(`profile:${targetId}:reputation`, 1);
       await redis.set(cooldownKey, Date.now());
       await addActivity(redis, targetId, `Received reputation from ${interaction.user.username}`);
@@ -622,6 +607,8 @@ module.exports = {
       const embedBg = await redis.get(`profile:${targetId}:embedBg`) || null;
       const barStyle = await redis.get(`profile:${targetId}:barStyle`) || "default";
       const achievements = await redis.smembers(`profile:${targetId}:achievements`) || [];
+      const socialLinks = await redis.get(`profile:${targetId}:socialLinks`);
+      const links = socialLinks ? JSON.parse(socialLinks) : [];
 
       const needed = Math.floor(100 * Math.pow(level, 1.6));
       const progress = Math.min(xp / needed, 1);
@@ -638,6 +625,7 @@ module.exports = {
           { name: "📝 Status", value: status || "None", inline: false },
           { name: "💍 Spouse", value: spouseId ? `<@${spouseId}>` : "None", inline: true },
           { name: "👥 Friends", value: friends.length ? friends.map(id => `<@${id}>`).join(', ') : "None", inline: false },
+          { name: "🔗 Social Links", value: links.length ? links.map(l => `${l.platform}: ${l.url}`).join('\n') : "None", inline: false },
           { name: "🏅 Achievements", value: achievements.length ? achievements.map(id => {
             const ach = getAchievement(id);
             return ach ? `${ach.icon}` : id;
@@ -652,7 +640,7 @@ module.exports = {
       const canvas = createCanvas(900, 350);
       const ctx = canvas.getContext("2d");
 
-      // Background – apply theme if set
+      // Background
       let bgImage = null;
       if (customBg) {
         try { bgImage = await loadImage(customBg); } catch {}
@@ -666,7 +654,6 @@ module.exports = {
       if (bgImage) {
         ctx.drawImage(bgImage, 0, 0, 900, 350);
       } else {
-        // Use theme to choose a gradient
         let gradColors;
         switch (theme) {
           case "neon":
@@ -718,13 +705,22 @@ module.exports = {
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      // Username (custom color)
+      // ---- Username ----
       const nameColorHex = nameColor || "#FFFFFF";
       ctx.fillStyle = nameColorHex;
       ctx.font = getFont("bold", 32);
       ctx.fillText(targetUser.username, 270, 100);
 
-      // Title (Premium/Beta/Member)
+      // ---- Status moved to top-right corner ----
+      if (status) {
+        ctx.textAlign = "right";
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = getFont("italic", 14);
+        ctx.fillText(`"${status}"`, 850, 100);
+        ctx.textAlign = "left";
+      }
+
+      // ---- Title ----
       let title = "Member";
       if (premium) title = "💎 Premium";
       else if (beta) title = "🧪 Beta Tester";
@@ -732,21 +728,14 @@ module.exports = {
       ctx.font = getFont("bold", 18);
       ctx.fillText(title, 270, 140);
 
-      // Status (placed under title, before bio)
-      if (status) {
-        ctx.fillStyle = "rgba(255,255,255,0.6)";
-        ctx.font = getFont("italic", 14);
-        ctx.fillText(`"${status}"`, 270, 165);
-      }
-
-      // Bio (shifted down if status exists)
+      // ---- Bio ----
       ctx.fillStyle = "rgba(255,255,255,0.8)";
       ctx.font = getFont("normal", 16);
       let displayBio = bio;
       if (displayBio.length > 60) displayBio = displayBio.substring(0, 57) + "...";
-      ctx.fillText(displayBio, 270, status ? 195 : 175);
+      ctx.fillText(displayBio, 270, 175);
 
-      // Stats (coins, reputation, level – no shields)
+      // ---- Stats (coins, reputation, level) ----
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.font = getFont("bold", 16);
       let xPos = 270;
@@ -772,7 +761,15 @@ module.exports = {
         xPos += 80;
       });
 
-      // XP Bar
+      // ---- Social Links under stats ----
+      if (links.length) {
+        const linkText = links.map(l => `${l.platform}: ${l.url}`).join('  •  ');
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = getFont("normal", 12);
+        ctx.fillText(linkText, 270, 225);
+      }
+
+      // ---- XP Bar ----
       const barX = 270, barY = 240, barWidth = 540, barHeight = 22;
       ctx.shadowBlur = 5;
       ctx.shadowColor = "rgba(0,0,0,0.2)";
@@ -809,7 +806,7 @@ module.exports = {
       ctx.textAlign = "center";
       ctx.fillText(`${formatNumber(xp)}/${formatNumber(needed)} XP`, barX + barWidth / 2, barY + 17);
 
-      // Level badge
+      // ---- Level badge ----
       ctx.textAlign = "center";
       const levelX = 780, levelY = 80;
       ctx.shadowBlur = 20;
@@ -831,7 +828,7 @@ module.exports = {
       ctx.font = getFont("bold", 28);
       ctx.fillText(level, levelX, levelY + 22);
 
-      // Footer
+      // ---- Footer ----
       ctx.textAlign = "left";
       ctx.fillStyle = "rgba(255,255,255,0.2)";
       ctx.font = getFont("normal", 12);
