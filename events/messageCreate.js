@@ -1,4 +1,4 @@
-// events/messageCreate.js – Main Bot (Full)
+// events/messageCreate.js – Main Bot (Full) – COUNTING REMOVED (handled in index.js)
 const { Events, EmbedBuilder } = require("discord.js");
 const { checkBlacklist, buildBlacklistEmbed } = require("../blacklist.js");
 
@@ -35,7 +35,7 @@ module.exports = {
       return; // block all messages during maintenance
     }
 
-    // ---- Prevent duplicate processing ----
+    // ---- Prevent duplicate processing (within this handler only) ----
     if (processedMessages.has(message.id)) return;
     processedMessages.add(message.id);
     setTimeout(() => processedMessages.delete(message.id), 5000);
@@ -56,28 +56,9 @@ module.exports = {
     }
 
     // ==========================================
-    // 🔥 COUNTING GAME – if in counting channel
+    // ⚠️ COUNTING GAME IS NOW HANDLED IN index.js
+    //    (removed from here to avoid double processing)
     // ==========================================
-    try {
-      const countingChannelId = await redis.get(`counting:${guildId}:channel`);
-      if (countingChannelId && message.channel.id === countingChannelId) {
-        const pure = content.replace(/\s+/g, "");
-        const isValid = /^[0-9+\-*/^()]+$/.test(pure);
-        if (!isValid) {
-          if (message.deletable) await message.delete().catch(() => {});
-          return;
-        }
-
-        // Dynamic import instead of require()
-        const countingModule = await import("../games/counting.js");
-        const runCounting = countingModule.default || countingModule;
-
-        await runCounting(message, redis);
-        return;
-      }
-    } catch (err) {
-      console.error("Counting game error:", err);
-    }
 
     // ==========================================
     // 💬 PREFIX COMMANDS
