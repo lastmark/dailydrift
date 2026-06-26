@@ -305,7 +305,11 @@ client.on("messageCreate", async (message) => {
         if (message.deletable) await message.delete().catch((err) => console.error("Failed to delete chat text:", err));
         return;
       }
-      const runCountingGame = require("./games/counting.js");
+
+      // ✅ FIX: dynamic import instead of require()
+      const countingModule = await import("./games/counting.js");
+      const runCountingGame = countingModule.default || countingModule;
+
       await runCountingGame(message, redis);
       return; // Stop processing – don't treat as prefix command
     }
