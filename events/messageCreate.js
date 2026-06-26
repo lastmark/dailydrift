@@ -45,15 +45,16 @@ module.exports = {
     const content = message.content;
 
     // ---- TERMS CHECK (prefix commands) ----
-const accepted = await redis.get(`terms:accepted:${message.author.id}`);
-const currentVersion = require("../config").TERMS_VERSION || "1.0";
-if (accepted !== currentVersion) {
-  // Block all prefix commands except `!terms` or `?terms`
-  if (!message.content.match(/^[!?]terms$/)) {
-    return message.reply("📜 You must accept the Terms of Service first. Run `!terms` to view and accept.");
-  }
-  // Allow !terms to go through
-}
+    const accepted = await redis.get(`terms:accepted:${message.author.id}`);
+    const currentVersion = require("../config").TERMS_VERSION || "1.0";
+    if (accepted !== currentVersion) {
+      // Block all prefix commands except `!terms` or `?terms`
+      if (!message.content.match(/^[!?]terms$/)) {
+        return message.reply("📜 You must accept the Terms of Service first. Run `!terms` to view and accept.");
+      }
+      // Allow !terms to go through
+    }
+
     // ==========================================
     // 🔥 COUNTING GAME – if in counting channel
     // ==========================================
@@ -66,7 +67,11 @@ if (accepted !== currentVersion) {
           if (message.deletable) await message.delete().catch(() => {});
           return;
         }
-        const runCounting = require("../games/counting.js");
+
+        // Dynamic import instead of require()
+        const countingModule = await import("../games/counting.js");
+        const runCounting = countingModule.default || countingModule;
+
         await runCounting(message, redis);
         return;
       }
