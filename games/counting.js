@@ -1,4 +1,4 @@
-// games/counting.js – ESM version with achievements & activity
+// games/counting.js – ESM version with achievements, activity & anti‑double count
 import { EmbedBuilder } from 'discord.js';
 import { grantAchievement } from '../utils/achievements.js';
 import { addActivity } from '../utils/activity.js';
@@ -11,15 +11,28 @@ export default async function counting(message, redis) {
   const nextKey = `counting:${guildId}:next`;
   const expected = Number(await redis.get(nextKey)) || 1;
   const rawContent = message.content.trim();
-  let userNumber;
 
+  // ---- Prevent same user from counting twice in a row ----
+  const lastCounter = await redis.get(`counting:${guildId}:last`);
+  if (lastCounter === userId) {
+    // Delete the duplicate attempt
+    if (message.deletable) await message.delete().catch(() => {});
+    // Send a quick warning that auto‑deletes after 3 seconds
+    const warnMsg = await message.channel.send(
+      `⚠️ ${message.author.username}, you can't count twice in a row!`
+    ).catch(() => {});
+    if (warnMsg) setTimeout(() => warnMsg.delete().catch(() => {}), 3000);
+    return; // Stop processing – count is not reset
+  }
+
+  let userNumber;
   try {
-    // Allow expressions like "3+2" → evaluate safely (only digits, + - * / ^ ( ) )
-    const sanitized = rawContent.replace(/\^/g, '**'); // convert ^ to ** for eval
-    if (!/^[0-9+\-*/() ]+$/.test(rawContent)) {
+    // Convert ^ to ** for exponent support
+    const sanitized = rawContent.replace(/\^/g, '**');
+    if (!/^[0-9+\-*/() ]+$/.test(sanitized)) {
       userNumber = NaN;
     } else {
-      userNumber = eval(sanitized); // Note: eval is safe here because of the regex
+      userNumber = eval(sanitized);
     }
   } catch {
     userNumber = NaN;
@@ -27,13 +40,11 @@ export default async function counting(message, redis) {
 
   if (isNaN(userNumber) || userNumber !== expected) {
     // ---- WRONG COUNT ----
-    // Delete message if possible
     if (message.deletable) await message.delete().catch(() => {});
 
     // Check for shield
     const shields = Number(await redis.get(`eco:${userId}:shield`) || 0);
     if (shields > 0) {
-      // Use shield – protect streak
       await redis.set(`eco:${userId}:shield`, shields - 1);
       const msg = await message.channel.send(
         `🛡️ **${message.author.username}** lost their streak, but a shield protected them! Remaining shields: **${shields - 1}**`
@@ -45,7 +56,7 @@ export default async function counting(message, redis) {
     // Reset streak, increment mistakes
     await redis.del(`counting:${guildId}:${userId}:streak`);
     await redis.zincrby(`counting:${guildId}:mistakes`, 1, userId);
-    await redis.set(nextKey, 1); // Reset count
+    await redis.set(nextKey, 1);
     await redis.del(`counting:${guildId}:last`);
 
     const embed = new EmbedBuilder()
@@ -58,7 +69,6 @@ export default async function counting(message, redis) {
   }
 
   // ---- CORRECT COUNT ----
-  // Increment count
   await redis.set(nextKey, expected + 1);
   await redis.set(`counting:${guildId}:last`, userId);
 
@@ -74,29 +84,24 @@ export default async function counting(message, redis) {
     await redis.set(bestKey, best);
   }
 
-  // Correct counts sorted set
   await redis.zincrby(`counting:${guildId}:correct`, 1, userId);
 
   // ---- Rewards (coins) ----
-  let coinsEarned = 1 + Math.floor(expected / 10); // base coins
-  // Double XP if active
+  let coinsEarned = 1 + Math.floor(expected / 10);
   const doubleActive = Number(await redis.get(`eco:${userId}:double`) || 0);
   if (doubleActive > 0) {
     coinsEarned *= 2;
     await redis.set(`eco:${userId}:double`, doubleActive - 1);
   }
-  // Premium double?
   const isPremium = await redis.get(`premium:user:${userId}`);
   if (isPremium) coinsEarned = Math.floor(coinsEarned * 1.5);
 
-  // Add coins
   const balance = Number(await redis.get(`eco:${userId}:money`) || 0);
   await redis.set(`eco:${userId}:money`, balance + coinsEarned);
 
-  // React with checkmark
   await message.react('✅').catch(() => {});
 
-  // ---- ACHIEVEMENTS & ACTIVITY (your requested block) ----
+  // ---- Achievements & Activity ----
   await grantAchievement(redis, userId, 'first_count');
 
   const profile = await redis.hgetall(`profile:${userId}`);
@@ -112,7 +117,7 @@ export default async function counting(message, redis) {
 
   await addActivity(redis, userId, `Counted to ${expected}`);
 
-  // ---- Post streak message on milestones ----
+  // ---- Streak milestones ----
   if (streak === 10 || streak === 25 || streak === 50 || streak === 100 || streak === 250) {
     const embed = new EmbedBuilder()
       .setColor('#57F287')
