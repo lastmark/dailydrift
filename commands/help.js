@@ -6,7 +6,7 @@ const {
   ComponentType
 } = require("discord.js");
 
-const e = require("../emojis.js");
+
 
 module.exports = {
   data: new SlashCommandBuilder()
