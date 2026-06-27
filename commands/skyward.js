@@ -1,15 +1,13 @@
-// commands/rocket.js – Private Rocket crash game (reliable, visual)
+// commands/rocket.js – Reaction‑based Rocket (no buttons)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   MessageFlags
 } = require("discord.js");
 
 const MAX_BET = 250_000;
-const SPEED = 0.1;               // multiplier = exp(SPEED * t)
+const SPEED = 0.1;                // multiplier = exp(SPEED * t)
+const CASHOUT_EMOJI = "🚀";      // react with this to cash out
 
 // ---------- Crash point distribution ----------
 function getCrashPoint() {
@@ -26,24 +24,23 @@ function multAt(elapsedSec) {
   return Math.exp(SPEED * elapsedSec);
 }
 
-// ---------- Rocket progress bar ----------
+// Rocket bar (same as before)
 function rocketBar(mult) {
-  const maxDisplay = 10.0;        // 10x = full bar
+  const maxDisplay = 10.0;
   const pos = Math.min(mult / maxDisplay, 1.0);
   const barLength = 20;
   const filled = Math.floor(pos * barLength);
-  const empty = barLength - filled - 1;   // -1 for the rocket
+  const empty = barLength - filled - 1;
   if (filled <= 0) return `🚀${'▬'.repeat(barLength - 1)}`;
   if (filled >= barLength) return `${'▬'.repeat(barLength - 1)}🚀`;
   return `${'▬'.repeat(filled - 1)}🚀${'▬'.repeat(empty)}`;
 }
 
-// ---------- Embed color based on multiplier ----------
 function colorForMultiplier(mult) {
-  if (mult < 1.5) return '#00FF88';   // green
-  if (mult < 2.5) return '#FFD700';   // yellow
-  if (mult < 5.0) return '#FF8800';   // orange
-  return '#FF0044';                    // red
+  if (mult < 1.5) return '#00FF88';
+  if (mult < 2.5) return '#FFD700';
+  if (mult < 5.0) return '#FF8800';
+  return '#FF0044';
 }
 
 module.exports = {
@@ -106,22 +103,21 @@ module.exports = {
     };
     await redis.set(`rocket:${userId}`, JSON.stringify(state));
 
-    // Initial embed
+    // Initial embed – tell user to react with 🚀
     const embed = new EmbedBuilder()
       .setColor('#00FF88')
       .setTitle('🚀 Rocket')
-      .setDescription(`Multiplier: **1.00×**\n${rocketBar(1.0)}\nBet: ${bet.toLocaleString()} coins\n\nPress **Cash Out** to secure your winnings!`)
+      .setDescription(
+        `Multiplier: **1.00×**\n` +
+        `${rocketBar(1.0)}\n` +
+        `Bet: ${bet.toLocaleString()} coins\n\n` +
+        `React with ${CASHOUT_EMOJI} to **Cash Out**!`
+      )
       .setFooter({ text: 'The longer you wait, the higher the risk...' });
 
-    const cashOutBtn = new ButtonBuilder()
-      .setCustomId("rocket_cashout")
-      .setLabel("Cash Out")
-      .setStyle(ButtonStyle.Success);
-
-    const row = new ActionRowBuilder().addComponents(cashOutBtn);
-
     await interaction.deferReply();
-    const message = await interaction.editReply({ embeds: [embed], components: [row] });
+    const message = await interaction.editReply({ embeds: [embed] });
+    await message.react(CASHOUT_EMOJI).catch(() => {});
 
     // ---------- Game loop (update embed every second) ----------
     const interval = setInterval(async () => {
@@ -148,53 +144,71 @@ module.exports = {
         const crashEmbed = EmbedBuilder.from(embed)
           .setColor('#ED4245')
           .setTitle('💥 Rocket Crashed!')
-          .setDescription(`Multiplier reached **${mult.toFixed(2)}×** but the rocket crashed!\nYou lost **${bet.toLocaleString()}** coins.`)
+          .setDescription(
+            `Multiplier reached **${mult.toFixed(2)}×** but the rocket crashed!\n` +
+            `You lost **${bet.toLocaleString()}** coins.`
+          )
           .setFooter({ text: 'Better luck next time!' });
 
-        await message.edit({ embeds: [crashEmbed], components: [] }).catch(() => {});
+        await message.edit({ embeds: [crashEmbed] }).catch(() => {});
+        await message.reactions.removeAll().catch(() => {});
         await redis.del(`rocket:${userId}`);
       } else {
         // Update embed
         const updatedEmbed = EmbedBuilder.from(embed)
           .setColor(colorForMultiplier(mult))
-          .setDescription(`Multiplier: **${mult.toFixed(2)}×**\n${rocketBar(mult)}\nBet: ${bet.toLocaleString()} coins\n\nPress **Cash Out** to secure your winnings!`);
-        await message.edit({ embeds: [updatedEmbed], components: [row] }).catch(() => {});
+          .setDescription(
+            `Multiplier: **${mult.toFixed(2)}×**\n` +
+            `${rocketBar(mult)}\n` +
+            `Bet: ${bet.toLocaleString()} coins\n\n` +
+            `React with ${CASHOUT_EMOJI} to **Cash Out**!`
+          );
+        await message.edit({ embeds: [updatedEmbed] }).catch(() => {});
       }
     }, 1000);
 
-    // ---------- Cash Out button collector ----------
-    const collector = message.createMessageComponentCollector({
-      filter: i => i.user.id === userId && i.customId === "rocket_cashout",
-      time: 600_000,
+    // ---------- Reaction collector for Cash Out ----------
+    const filter = (reaction, user) =>
+      reaction.emoji.name === CASHOUT_EMOJI && user.id === userId;
+
+    const collector = message.createReactionCollector({
+      filter,
+      time: 600_000,     // max 10 minutes (but game will crash earlier)
     });
 
-    collector.on("collect", async (btnInteraction) => {
+    collector.on("collect", async (reaction, user) => {
+      // Remove the user's reaction so they can't accidentally trigger twice
+      await reaction.users.remove(user).catch(() => {});
+
       const raw = await redis.get(`rocket:${userId}`);
       if (!raw) {
-        await btnInteraction.reply({ content: "❌ Game not found.", flags: MessageFlags.Ephemeral });
+        collector.stop();
         return;
       }
       const currentState = JSON.parse(raw);
-      if (currentState.status !== "playing") {
-        await btnInteraction.reply({ content: "❌ This round is already over.", flags: MessageFlags.Ephemeral });
-        return;
-      }
+      if (currentState.status !== "playing") return;
 
       const elapsed = (Date.now() - currentState.startTime) / 1000;
       const mult = multAt(elapsed);
 
       if (mult >= currentState.crashPoint) {
-        // Race condition: crashed just before click → treat as crash
+        // Crashed at the exact moment – treat as loss
         currentState.status = "crashed";
         await redis.set(`rocket:${userId}`, JSON.stringify(currentState));
         clearInterval(interval);
         collector.stop();
+
+        await message.edit({
+          content: "💥 The rocket crashed as you tried to cash out!",
+          embeds: [],
+          components: [],
+        }).catch(() => {});
+        await message.reactions.removeAll().catch(() => {});
         await redis.del(`rocket:${userId}`);
-        await btnInteraction.update({ content: "💥 Crashed! You lost.", embeds: [], components: [] }).catch(() => {});
         return;
       }
 
-      // Cash out
+      // Successful cash out
       currentState.status = "cashed_out";
       await redis.set(`rocket:${userId}`, JSON.stringify(currentState));
       clearInterval(interval);
@@ -207,14 +221,20 @@ module.exports = {
       const cashEmbed = new EmbedBuilder()
         .setColor('#57F287')
         .setTitle('💰 Cashed Out!')
-        .setDescription(`You cashed out at **${mult.toFixed(2)}×** and won **${payout.toLocaleString()}** coins!\nBet: ${bet.toLocaleString()} coins`)
+        .setDescription(
+          `You cashed out at **${mult.toFixed(2)}×** and won **${payout.toLocaleString()}** coins!\n` +
+          `Bet: ${bet.toLocaleString()} coins`
+        )
         .setFooter({ text: 'Well played!' });
 
-      await btnInteraction.update({ embeds: [cashEmbed], components: [] }).catch(() => {});
+      await message.edit({ embeds: [cashEmbed] }).catch(() => {});
+      await message.reactions.removeAll().catch(() => {});
       await redis.del(`rocket:${userId}`);
     });
 
-    collector.on("end", () => {
+    collector.on("end", (collected, reason) => {
+      // If the game is still running and the collector ends (timeout), force a crash?
+      // But the interval will handle it anyway. We'll just clear the interval.
       clearInterval(interval);
     });
   }
