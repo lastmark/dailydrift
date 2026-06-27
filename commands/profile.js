@@ -1,4 +1,4 @@
-// commands/profile.js – with premium visuals
+// commands/profile.js – with premium text badge & no recent activity
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
@@ -287,7 +287,7 @@ module.exports = {
     };
     const isBeta = async (id) => await redis.get(`beta:user:${id}`) === "true";
 
-    // ... (all other subcommands remain identical to the original until the VIEW section) ...
+    // ... [all other subcommands remain exactly the same as before] ...
 
     // ---- VIEW (default) ----
     if (sub === "view" || !sub) {
@@ -318,7 +318,6 @@ module.exports = {
       const status = await redis.get(`profile:${targetId}:status`) || "";
       const spouseId = await redis.get(`profile:${targetId}:marriedTo`);
       const favGame = await redis.get(`profile:${targetId}:favGame`) || "None";
-      const activityFeed = await redis.lrange(`profile:${targetId}:activityFeed`, 0, 9) || [];
       const embedBg = await redis.get(`profile:${targetId}:embedBg`) || null;
       const barStyle = await redis.get(`profile:${targetId}:barStyle`) || "default";
       const achievements = await redis.smembers(`profile:${targetId}:achievements`) || [];
@@ -328,7 +327,7 @@ module.exports = {
       const needed = Math.floor(100 * Math.pow(level, 1.6));
       const progress = Math.min(xp / needed, 1);
 
-      // ---- Build embed ----
+      // ---- Build embed (no recent activity) ----
       const embed = new EmbedBuilder()
         .setColor(embedBg || color)
         .setTitle(`${targetUser.username}'s Profile`)
@@ -344,9 +343,7 @@ module.exports = {
             (premium ? achievements : achievements.slice(0, 3)).map(id => {
               const ach = getAchievement(id);
               return ach ? `${ach.icon}` : id;
-            }).join(' ') || "None" : "None", inline: false },
-          { name: "📋 Recent Activity", value: activityFeed.length ? 
-            (premium ? activityFeed.slice(0, 10) : activityFeed.slice(0, 5)).join('\n') : "None", inline: false }
+            }).join(' ') : "None", inline: false }
         )
         .setImage("attachment://profile.png")
         .setFooter({ text: `Requested by ${interaction.user.username}` })
@@ -356,7 +353,7 @@ module.exports = {
       const canvas = createCanvas(900, 350);
       const ctx = canvas.getContext("2d");
 
-      // Background (same as before)
+      // Background
       let bgImage = null;
       if (customBg) {
         try { bgImage = await loadImage(customBg); } catch {}
@@ -430,22 +427,23 @@ module.exports = {
         ctx.textAlign = "left";
       }
 
-      // ---- Username + Premium Badge ----
+      // ---- Username + Premium Badge (text, no emoji) ----
       const nameColorHex = nameColor || "#FFFFFF";
       ctx.fillStyle = nameColorHex;
       ctx.font = getFont("bold", 32);
+      const nameWidth = ctx.measureText(targetUser.username).width;
       ctx.fillText(targetUser.username, 270, 100);
       if (premium) {
-        // Draw a golden crown/diamond next to name
+        // Draw a gold "PREMIUM" badge
         ctx.fillStyle = "#FFD700";
-        ctx.font = getFont("bold", 24);
-        ctx.fillText("💎", 270 + ctx.measureText(targetUser.username).width + 10, 100);
+        ctx.font = getFont("bold", 18);
+        ctx.fillText("PREMIUM", 270 + nameWidth + 15, 100);
       }
 
-      // ---- Title ----
+      // ---- Title (no emoji in canvas, just text) ----
       let title = "Member";
-      if (premium) title = "💎 Premium";
-      else if (beta) title = "🧪 Beta Tester";
+      if (premium) title = "PREMIUM";
+      else if (beta) title = "Beta Tester";
       ctx.fillStyle = color;
       ctx.font = getFont("bold", 18);
       ctx.fillText(title, 270, 140);
@@ -491,7 +489,7 @@ module.exports = {
         ctx.fillText(linkText, 270, 225);
       }
 
-      // XP Bar (unchanged)
+      // XP Bar
       const barX = 270, barY = 240, barWidth = 540, barHeight = 22;
       ctx.shadowBlur = 5;
       ctx.shadowColor = "rgba(0,0,0,0.2)";
@@ -555,7 +553,7 @@ module.exports = {
       ctx.font = getFont("normal", 12);
       ctx.fillText(`ID: ${targetUser.id.slice(0, 8)}...`, 20, 340);
       ctx.textAlign = "right";
-      ctx.fillText("Profile v3.0", 880, 340);
+      ctx.fillText("Profile v2.0", 880, 340);
 
       const buffer = canvas.toBuffer("image/png");
       embed.setImage("attachment://profile.png");
