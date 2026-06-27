@@ -1,4 +1,4 @@
-// commands/blackjack.js – Slash Blackjack (Redis, Buttons, Same Fair Odds as OwO)
+// commands/blackjack.js – Blackjack with custom card emojis (from cards.json)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -7,23 +7,35 @@ const {
   ButtonStyle,
   MessageFlags
 } = require("discord.js");
+const path = require("path");
+const fs = require("fs");
 
-const MAX_BET = 250_000;                // same cap as OwO
-const SUITS = ["♠", "♥", "♦", "♣"];
-const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+// Load card emoji mapping
+let cardEmojis = {};
+try {
+  const cardsPath = path.join(__dirname, "../cards.json");
+  if (fs.existsSync(cardsPath)) {
+    cardEmojis = JSON.parse(fs.readFileSync(cardsPath, "utf-8"));
+    console.log(`✅ Loaded ${Object.keys(cardEmojis).length} card emojis.`);
+  } else {
+    console.warn("⚠️ cards.json not found – will use text.");
+  }
+} catch (err) {
+  console.error("❌ Error loading cards.json:", err);
+}
 
-// ---------- Card/Hand helpers ----------
+const MAX_BET = 250_000;
+
+// Card value helpers (unchanged)
 function cardValue(cardNumber) {
-  // 1-52, Ace=1/14? We'll use rank 1(A)=1 or 11, 11-13=10
-  const rank = (cardNumber - 1) % 13; // 0=Ace, 10=Jack, 11=Queen, 12=King
+  const rank = (cardNumber - 1) % 13;
   if (rank === 0) return { soft: 11, hard: 1 };
   if (rank >= 9) return { soft: 10, hard: 10 };
   return { soft: rank + 1, hard: rank + 1 };
 }
 
 function bestHandValue(cards) {
-  let total = 0;
-  let aces = 0;
+  let total = 0, aces = 0;
   for (const card of cards) {
     const v = cardValue(card);
     total += v.hard;
@@ -34,15 +46,16 @@ function bestHandValue(cards) {
   return best;
 }
 
+// New cardToString – uses cards.json mapping
 function cardToString(cardNumber) {
-  const suitIdx = Math.floor((cardNumber - 1) / 13);
-  const rankIdx = (cardNumber - 1) % 13;
-  return `${RANKS[rankIdx]}${SUITS[suitIdx]}`;
+  return cardEmojis[cardNumber.toString()] || `[${cardNumber}]`; // fallback to number if missing
 }
 
 function handToString(cards, hideFirst = false) {
   if (!cards.length) return "No cards";
-  if (hideFirst) return `? | ${cards.slice(1).map(c => cardToString(c)).join(" ")}`;
+  if (hideFirst) {
+    return `? | ${cards.slice(1).map(c => cardToString(c)).join(" ")}`;
+  }
   return cards.map(c => cardToString(c)).join(" ");
 }
 
@@ -72,48 +85,35 @@ module.exports = {
     const bet = interaction.options.getInteger("bet");
 
     if (bet > MAX_BET) {
-      return interaction.reply({
-        content: `❌ Maximum bet is **${MAX_BET.toLocaleString()}** coins.`,
-        flags: MessageFlags.Ephemeral
-      });
+      return interaction.reply({ content: `❌ Max bet is **${MAX_BET.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
     }
 
-    // Check active game
     const active = await redis.get(`blackjack:${userId}`);
     if (active) {
-      return interaction.reply({
-        content: "❌ You already have an active blackjack game. Finish it first.",
-        flags: MessageFlags.Ephemeral
-      });
+      return interaction.reply({ content: "❌ You already have an active game.", flags: MessageFlags.Ephemeral });
     }
 
-    // Check & deduct balance
     const balanceKey = `eco:${userId}:money`;
     const currentBal = Number(await redis.get(balanceKey) || 0);
     if (currentBal < bet) {
-      return interaction.reply({
-        content: `❌ You need **${bet.toLocaleString()}** coins, but you only have **${currentBal.toLocaleString()}**.`,
-        flags: MessageFlags.Ephemeral
-      });
+      return interaction.reply({ content: `❌ You need **${bet.toLocaleString()}** coins.`, flags: MessageFlags.Ephemeral });
     }
     await redis.set(balanceKey, currentBal - bet);
 
-    // Initialise game state
     const deck = shuffleDeck();
     const playerCards = [deck.pop(), deck.pop()];
-    const dealerCards = [deck.pop(), deck.pop()]; // [0] is hidden
+    const dealerCards = [deck.pop(), deck.pop()];
 
     const gameState = {
       bet,
       deck,
       playerCards,
       dealerCards,
-      status: "playing",   // playing | win | loss | tie | bust
-      userId               // needed for timeout cleanup
+      status: "playing",
+      userId
     };
     await redis.set(`blackjack:${userId}`, JSON.stringify(gameState));
 
-    // Initial embed
     const embed = new EmbedBuilder()
       .setColor("#5865F2")
       .setTitle("🃏 Blackjack")
@@ -124,31 +124,29 @@ module.exports = {
       .setFooter({ text: `Bet: ${bet.toLocaleString()} coins | Hit or Stand?` });
 
     const buttons = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("bj_hit").setLabel("Hit").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("bj_stand").setLabel("Stand").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("blackjack_hit").setLabel("Hit").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("blackjack_stand").setLabel("Stand").setStyle(ButtonStyle.Danger),
     );
 
     await interaction.deferReply();
     const message = await interaction.editReply({ embeds: [embed], components: [buttons] });
 
-    // Collector
     const collector = message.createMessageComponentCollector({
-      filter: i => i.user.id === userId && (i.customId === "bj_hit" || i.customId === "bj_stand"),
+      filter: i => i.user.id === userId && (i.customId === "blackjack_hit" || i.customId === "blackjack_stand"),
       time: 60_000
     });
 
     collector.on("collect", async (btnInteraction) => {
-      // Re-read state from Redis to avoid stale closure
       const raw = await redis.get(`blackjack:${userId}`);
       if (!raw) {
-        await btnInteraction.update({ content: "⚠️ Game session expired.", embeds: [], components: [] });
+        await btnInteraction.update({ content: "⚠️ Game expired.", embeds: [], components: [] });
         collector.stop();
         return;
       }
       const state = JSON.parse(raw);
       if (state.status !== "playing") return;
 
-      if (btnInteraction.customId === "bj_hit") {
+      if (btnInteraction.customId === "blackjack_hit") {
         const card = state.deck.pop();
         state.playerCards.push(card);
         const pValue = bestHandValue(state.playerCards);
@@ -168,17 +166,15 @@ module.exports = {
             `**Dealer:** ${handToString(state.dealerCards, true)}`
           )
           .setFooter({ text: `Bet: ${bet.toLocaleString()} coins | Hit or Stand?` });
-
         await btnInteraction.update({ embeds: [updatedEmbed], components: [buttons] });
       }
-      else if (btnInteraction.customId === "bj_stand") {
+      else if (btnInteraction.customId === "blackjack_stand") {
         collector.stop();
         await dealerPlayAndEnd(btnInteraction, state, bet, balanceKey, redis, userId, "stand");
       }
     });
 
     collector.on("end", async (collected, reason) => {
-      // If game still active after timeout, force stand
       const raw = await redis.get(`blackjack:${userId}`);
       if (!raw) return;
       const state = JSON.parse(raw);
@@ -194,9 +190,8 @@ async function dealerPlayAndEnd(interactionOrMsg, state, bet, balanceKey, redis,
   const pValue = bestHandValue(state.playerCards);
   let dValue = bestHandValue(state.dealerCards);
 
-  // Reveal hidden card (all cards face up), draw until 17+
   while (dValue < 17) {
-    if (state.deck.length === 0) break;  // safety
+    if (state.deck.length === 0) break;
     const card = state.deck.pop();
     state.dealerCards.push(card);
     dValue = bestHandValue(state.dealerCards);
