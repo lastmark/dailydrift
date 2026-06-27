@@ -1,4 +1,4 @@
-// games/counting.js – ESM version with achievements, activity & anti‑double count
+// games/counting.js – ESM, coinless, with premium perks
 import { EmbedBuilder } from 'discord.js';
 import { grantAchievement } from '../utils/achievements.js';
 import { addActivity } from '../utils/activity.js';
@@ -15,19 +15,14 @@ export default async function counting(message, redis) {
   // ---- Prevent same user from counting twice in a row ----
   const lastCounter = await redis.get(`counting:${guildId}:last`);
   if (lastCounter === userId) {
-    // Delete the duplicate attempt
     if (message.deletable) await message.delete().catch(() => {});
-    // Send a quick warning that auto‑deletes after 3 seconds
-    const warnMsg = await message.channel.send(
-      `⚠️ ${message.author.username}, you can't count twice in a row!`
-    ).catch(() => {});
+    const warnMsg = await message.channel.send(`⚠️ ${message.author.username}, you can't count twice in a row!`).catch(() => {});
     if (warnMsg) setTimeout(() => warnMsg.delete().catch(() => {}), 3000);
-    return; // Stop processing – count is not reset
+    return;
   }
 
   let userNumber;
   try {
-    // Convert ^ to ** for exponent support
     const sanitized = rawContent.replace(/\^/g, '**');
     if (!/^[0-9+\-*/() ]+$/.test(sanitized)) {
       userNumber = NaN;
@@ -42,15 +37,27 @@ export default async function counting(message, redis) {
     // ---- WRONG COUNT ----
     if (message.deletable) await message.delete().catch(() => {});
 
-    // Check for shield
+    // Shield check
     const shields = Number(await redis.get(`eco:${userId}:shield`) || 0);
     if (shields > 0) {
       await redis.set(`eco:${userId}:shield`, shields - 1);
-      const msg = await message.channel.send(
-        `🛡️ **${message.author.username}** lost their streak, but a shield protected them! Remaining shields: **${shields - 1}**`
-      );
+      const msg = await message.channel.send(`🛡️ **${message.author.username}** lost their streak, but a shield protected them! Remaining shields: **${shields - 1}**`);
       setTimeout(() => msg.delete().catch(() => {}), 5000);
       return;
+    }
+
+    // ---- Premium Streak Freeze (once per day) ----
+    const isPremium = await redis.get(`premium:user:${userId}`);
+    if (isPremium) {
+      const freezeKey = `counting:freeze:${userId}`;
+      const lastFreeze = await redis.get(freezeKey);
+      if (!lastFreeze || (Date.now() - Number(lastFreeze) > 24 * 60 * 60 * 1000)) {
+        // Activate freeze
+        await redis.set(freezeKey, Date.now());
+        const msg = await message.channel.send(`❄️ **${message.author.username}**'s premium streak freeze saved their streak!`);
+        setTimeout(() => msg.delete().catch(() => {}), 5000);
+        return; // Don't reset streak
+      }
     }
 
     // Reset streak, increment mistakes
@@ -86,18 +93,19 @@ export default async function counting(message, redis) {
 
   await redis.zincrby(`counting:${guildId}:correct`, 1, userId);
 
-  // ---- Rewards (coins) ----
-  let coinsEarned = 1 + Math.floor(expected / 10);
-  const doubleActive = Number(await redis.get(`eco:${userId}:double`) || 0);
-  if (doubleActive > 0) {
-    coinsEarned *= 2;
-    await redis.set(`eco:${userId}:double`, doubleActive - 1);
-  }
+  // ---- Premium Shield Regeneration (1 shield per 24h, awarded on correct count) ----
   const isPremium = await redis.get(`premium:user:${userId}`);
-  if (isPremium) coinsEarned = Math.floor(coinsEarned * 1.5);
+  if (isPremium) {
+    const shieldRegenKey = `eco:${userId}:lastShieldRegen`;
+    const lastRegen = await redis.get(shieldRegenKey);
+    if (!lastRegen || (Date.now() - Number(lastRegen) > 24 * 60 * 60 * 1000)) {
+      await redis.set(shieldRegenKey, Date.now());
+      await redis.incr(`eco:${userId}:shield`);
+      // Notify user? Optional.
+    }
+  }
 
-  const balance = Number(await redis.get(`eco:${userId}:money`) || 0);
-  await redis.set(`eco:${userId}:money`, balance + coinsEarned);
+  // No coins rewarded – removed entirely.
 
   await message.react('✅').catch(() => {});
 
@@ -117,7 +125,7 @@ export default async function counting(message, redis) {
 
   await addActivity(redis, userId, `Counted to ${expected}`);
 
-  // ---- Streak milestones ----
+  // Streak milestones
   if (streak === 10 || streak === 25 || streak === 50 || streak === 100 || streak === 250) {
     const embed = new EmbedBuilder()
       .setColor('#57F287')
