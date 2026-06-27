@@ -1,4 +1,4 @@
-// commands/ticket.js – Ultimate Button-Based Ticket System
+// commands/ticket.js – Ultimate Button-Based Ticket System (with stale-channel fix)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -12,7 +12,6 @@ const {
 
 // ----------------------------------------------------------------------
 //  HELPER: createTicket
-//  Used by /ticket create AND the panel button handler in index.js
 // ----------------------------------------------------------------------
 async function createTicket(interaction, client, redis, userId, category = "support") {
   const guild = interaction.guild;
@@ -20,14 +19,23 @@ async function createTicket(interaction, client, redis, userId, category = "supp
   if (!member) throw new Error("Member not found.");
 
   const guildId = guild.id;
-
-  // Check if user already has an open ticket
   const openTicketKey = `ticket:open:${guildId}:${userId}`;
-  if (await redis.get(openTicketKey)) {
-    return interaction.reply({
-      content: "❌ You already have an open ticket.",
-      flags: MessageFlags.Ephemeral
-    });
+
+  // ---- Check if user already has an open ticket, but verify channel still exists ----
+  const existingChannelId = await redis.get(openTicketKey);
+  if (existingChannelId) {
+    const existingChannel = guild.channels.cache.get(existingChannelId);
+    if (existingChannel) {
+      // Channel still exists → really block
+      return interaction.reply({
+        content: "❌ You already have an open ticket.",
+        flags: MessageFlags.Ephemeral
+      });
+    } else {
+      // Channel was manually deleted → clean up stale keys
+      await redis.del(openTicketKey);
+      await redis.del(`ticket:${guildId}:${existingChannelId}`);
+    }
   }
 
   // Fetch settings
@@ -112,7 +120,7 @@ async function createTicket(interaction, client, redis, userId, category = "supp
   await redis.hset(`ticket:${guildId}:${ticketChannel.id}`, ticketData);
   await redis.set(openTicketKey, ticketChannel.id);
 
-  // Try to reply to the interaction that initiated creation
+  // Reply to interaction
   if (interaction.replied || interaction.deferred) {
     await interaction.followUp({
       content: `✅ Ticket created: ${ticketChannel}`,
@@ -261,8 +269,7 @@ module.exports = {
 
       await targetChannel.send({ embeds: [embed], components: [row] });
 
-      // Save the panel message ID for potential later use
-      // (We don't need it for button handling, but can be used to disable the panel etc.)
+      // Save the panel channel ID for potential later use
       await redis.set(`ticket:panel:${guildId}`, targetChannel.id);
 
       return interaction.reply({
@@ -455,7 +462,7 @@ module.exports = {
       await redis.hdel(ticketKey, "reason");
       await redis.set(`ticket:open:${guildId}:${ticketData.creator}`, channelId);
 
-      // Re-add permissions (the channel still exists, we just need to adjust)
+      // Re-add permissions
       const channel = interaction.guild.channels.cache.get(channelId);
       if (channel) {
         await channel.permissionOverwrites.edit(ticketData.creator, {
