@@ -105,7 +105,7 @@ module.exports = {
     await interaction.editReply({
       embeds: [
         baseEmbed()
-          .setDescription(`\`[ ${spin} │ ${spin} │ ${spin} ]\``)
+          .setDescription(`[ ${spin} │ ${spin} │ ${spin} ]`)
           .setFooter({ text: `Bet: ${bet.toLocaleString()} coins · Spinning...` })
       ]
     });
