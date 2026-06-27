@@ -1,4 +1,4 @@
-// commands/rocket.js – Public Rocket (clean channel, DM winners, live graph, up to 1000x)
+// commands/skyward.js – Public Rocket (clean channel, DM winners, live graph, up to 1000x)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -89,12 +89,12 @@ const gameLoops = new Map();
 
 // ---------- Main tick (runs every second) ----------
 async function tick(guildId, client, redis) {
-  const channelId = await redis.get(`rocket:channel:${guildId}`);
+  const channelId = await redis.get(`skyward:channel:${guildId}`);
   if (!channelId) return;
   const channel = client.channels.cache.get(channelId);
   if (!channel) return;
 
-  const roundKey = `rocket:round:${guildId}`;
+  const roundKey = `skyward:round:${guildId}`;
   const now = Date.now();
 
   let round = await redis.get(roundKey);
@@ -113,9 +113,9 @@ async function tick(guildId, client, redis) {
     await redis.set(roundKey, JSON.stringify(round));
     const embed = new EmbedBuilder()
       .setColor('#5865F2')
-      .setTitle('🚀 Rocket – New Round')
+      .setTitle('🚀 Skyward – New Round')
       .setDescription(
-        `Betting is open! Use \`/rocket join <amount>\`.\n` +
+        `Betting is open! Use \`/skyward join <amount>\`.\n` +
         `Ends <t:${Math.floor((now + BETTING_PHASE_SEC * 1000) / 1000)}:R>\n\n` +
         `Crash range: **1.00× – 1,000.00×**`
       );
@@ -144,7 +144,7 @@ async function tick(guildId, client, redis) {
       // Send flight embed
       const embed = new EmbedBuilder()
         .setColor('#00FF88')
-        .setTitle('🚀 Rocket – Live')
+        .setTitle('🚀 Skyward – Live')
         .setDescription(
           `Multiplier: **1.00×**\n${rocketBar(1.0)}\n` +
           `${round.players.length} player(s) in. React with ${CASHOUT_EMOJI} to cash out!`
@@ -174,15 +174,13 @@ async function tick(guildId, client, redis) {
 
         const elapsed = (Date.now() - state.startTime) / 1000;
         const mult = multAt(elapsed);
-        if (mult >= state.crashPoint) return; // crash already, ignore
+        if (mult >= state.crashPoint) return; // crash already
 
-        // Cash out
         player.cashedOut = true;
         player.payout = Math.floor(player.bet * mult);
         player.cashOutMultiplier = mult;
         await redis.set(roundKey, JSON.stringify(state));
 
-        // Pay
         const balanceKey = `eco:${user.id}:money`;
         const bal = Number(await redis.get(balanceKey) || 0);
         await redis.set(balanceKey, bal + player.payout);
@@ -209,7 +207,7 @@ async function tick(guildId, client, redis) {
     const mult = multAt(elapsed);
 
     if (mult >= round.crashPoint) {
-      // Crash! Delete flight message, then show result embed (which will be auto-deleted after cooldown? We'll just send a new result embed and delete the flight message)
+      // Crash! Delete flight message, then show result embed
       const flightMsg = await channel.messages.fetch(round.flightMessageId).catch(() => null);
       if (flightMsg) await flightMsg.delete().catch(() => {});
 
@@ -224,35 +222,52 @@ async function tick(guildId, client, redis) {
       }
       const embed = new EmbedBuilder()
         .setColor('#ED4245')
-        .setTitle('💥 Rocket Crashed!')
+        .setTitle('💥 Skyward Crashed!')
         .setDescription(`Crashed at **${mult.toFixed(2)}×**!\n\n**Results:**\n${results || 'No players'}`)
         .setFooter({ text: 'Next round starting soon...' });
 
       const resultMsg = await channel.send({ embeds: [embed] });
 
-      // Delete result message after a few seconds to keep channel clean
+      // Delete result message after cooldown to keep channel clean
       setTimeout(() => resultMsg.delete().catch(() => {}), COOLDOWN_SEC * 1000);
 
-      // End round and set cooldown
       await redis.del(roundKey);
-      await redis.set(`rocket:cooldown:${guildId}`, '1', 'EX', COOLDOWN_SEC);
+      await redis.set(`skyward:cooldown:${guildId}`, '1', 'EX', COOLDOWN_SEC);
     } else {
       // Update flight message
       const msg = await channel.messages.fetch(round.flightMessageId).catch(() => null);
       if (msg) {
-        round.points.push({ y: mult });
-        await redis.set(roundKey, JSON.stringify(round));
+        // ** FIX ** ensure embeds exist
+        if (msg.embeds && msg.embeds.length > 0) {
+          try {
+            round.points.push({ y: mult });
+            await redis.set(roundKey, JSON.stringify(round));
 
-        const embed = EmbedBuilder.from(msg.embeds[0])
-          .setColor(colorForMultiplier(mult))
-          .setDescription(
-            `Multiplier: **${mult.toFixed(2)}×**\n${rocketBar(mult)}\n` +
-            `${round.players.length} player(s) in. React with ${CASHOUT_EMOJI} to cash out!`
-          );
+            const embed = EmbedBuilder.from(msg.embeds[0])
+              .setColor(colorForMultiplier(mult))
+              .setDescription(
+                `Multiplier: **${mult.toFixed(2)}×**\n${rocketBar(mult)}\n` +
+                `${round.players.length} player(s) in. React with ${CASHOUT_EMOJI} to cash out!`
+              );
 
-        const graphBuf = drawGraph(round.points, mult);
-        const attachment = new AttachmentBuilder(graphBuf, { name: 'graph.png' });
-        await msg.edit({ embeds: [embed], files: [attachment] }).catch(() => {});
+            const graphBuf = drawGraph(round.points, mult);
+            const attachment = new AttachmentBuilder(graphBuf, { name: 'graph.png' });
+            await msg.edit({ embeds: [embed], files: [attachment] }).catch(() => {});
+          } catch (err) {
+            console.error('Failed to update flight message:', err);
+          }
+        } else {
+          // flight message lost its embeds (deleted externally) – end round gracefully
+          console.error('Flight message has no embeds, ending round.');
+          const embed = new EmbedBuilder()
+            .setColor('#ED4245')
+            .setTitle('💥 Skyward Crashed!')
+            .setDescription('The round ended unexpectedly.')
+            .setFooter({ text: 'Next round starting soon...' });
+          await channel.send({ embeds: [embed] });
+          await redis.del(roundKey);
+          await redis.set(`skyward:cooldown:${guildId}`, '1', 'EX', COOLDOWN_SEC);
+        }
       }
     }
   }
@@ -264,11 +279,11 @@ async function tick(guildId, client, redis) {
 module.exports = {
   category: "Games",
   data: new SlashCommandBuilder()
-    .setName("rocket")
-    .setDescription("Public Rocket game")
+    .setName("skyward")
+    .setDescription("Public Skyward game")
     .addSubcommand(sub =>
       sub.setName("setchannel")
-        .setDescription("(Admin) Set the Rocket game channel")
+        .setDescription("(Admin) Set the Skyward game channel")
         .addChannelOption(opt =>
           opt.setName("channel")
             .setDescription("Channel for rounds")
@@ -294,7 +309,7 @@ module.exports = {
         return interaction.reply({ content: "❌ Admin only.", flags: MessageFlags.Ephemeral });
 
       const channel = interaction.options.getChannel("channel");
-      await redis.set(`rocket:channel:${guildId}`, channel.id);
+      await redis.set(`skyward:channel:${guildId}`, channel.id);
 
       // Stop any existing loop
       if (gameLoops.has(guildId)) {
@@ -307,25 +322,25 @@ module.exports = {
       gameLoops.set(guildId, interval);
 
       // Wipe old round data
-      await redis.del(`rocket:round:${guildId}`);
-      await redis.del(`rocket:cooldown:${guildId}`);
+      await redis.del(`skyward:round:${guildId}`);
+      await redis.del(`skyward:cooldown:${guildId}`);
 
       return interaction.reply({
-        content: `✅ Rocket channel set to ${channel}. Rounds will start automatically.`,
+        content: `✅ Skyward channel set to ${channel}. Rounds will start automatically.`,
         flags: MessageFlags.Ephemeral
       });
     }
 
     if (sub === "join") {
-      const channelId = await redis.get(`rocket:channel:${guildId}`);
+      const channelId = await redis.get(`skyward:channel:${guildId}`);
       if (!channelId)
-        return interaction.reply({ content: "❌ Rocket channel not set.", flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: "❌ Skyward channel not set.", flags: MessageFlags.Ephemeral });
 
       // Cooldown check
-      if (await redis.get(`rocket:cooldown:${guildId}`))
+      if (await redis.get(`skyward:cooldown:${guildId}`))
         return interaction.reply({ content: "⏳ Round just ended. Next round soon.", flags: MessageFlags.Ephemeral });
 
-      const raw = await redis.get(`rocket:round:${guildId}`);
+      const raw = await redis.get(`skyward:round:${guildId}`);
       if (!raw)
         return interaction.reply({ content: "❌ No active round. Wait for betting to open.", flags: MessageFlags.Ephemeral });
 
@@ -354,7 +369,7 @@ module.exports = {
 
       await redis.set(balanceKey, bal - bet);
       round.players.push({ userId, bet, cashedOut: false });
-      await redis.set(`rocket:round:${guildId}`, JSON.stringify(round));
+      await redis.set(`skyward:round:${guildId}`, JSON.stringify(round));
 
       return interaction.reply({
         content: `✅ Joined with **${bet.toLocaleString()}** coins. React with 🚀 on the flight message to cash out.`,
