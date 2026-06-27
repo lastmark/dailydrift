@@ -1,4 +1,4 @@
-// commands/rocket.js – Public Rocket (realistic crash curve, live graph, DM winners)
+// commands/rocket.js – Public Rocket (stylish, auto-pause when idle)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -9,34 +9,36 @@ const {
 const { createCanvas } = require("canvas");
 
 const MAX_BET = 250_000;
-const BETTING_PHASE_SEC = 15;
-const COOLDOWN_SEC = 8;
+const BETTING_PHASE_SEC = 12;
+const COOLDOWN_SEC = 6;
+
 const CASHOUT_EMOJI = "🚀";
 
-// ---------- Realistic crash point distribution (safe, fair) ----------
+// ---------- Crash point ----------
 function getCrashPoint() {
-  const min = 1.20;      // never below 1.20x
-  const max = 100.00;    // cap at 100x (bot-safe)
+  const min = 1.20;
+  const max = 100.00;
   const r = Math.random();
-  // Exponential curve: low r → near min, high r → climbs fast
-  const crash = min / (1 - r);
-  return Math.min(max, crash);
+  return Math.min(max, min / (1 - r));
 }
 
 function multAt(elapsedSec) {
-  return Math.exp(0.1 * elapsedSec);   // smooth exponential rise
+  return Math.exp(0.1 * elapsedSec);
 }
 
-// Rocket bar (scaled to 100x because max is 100)
-function rocketBar(mult) {
-  const maxDisplay = 100.0;   // full bar at 100x
-  const pos = Math.min(mult / maxDisplay, 1.0);
-  const barLen = 20;
-  const filled = Math.floor(pos * barLen);
-  const empty = barLen - filled - 1;
-  if (filled <= 0) return `🚀${'▬'.repeat(barLen - 1)}`;
-  if (filled >= barLen) return `${'▬'.repeat(barLen - 1)}🚀`;
-  return `${'▬'.repeat(filled - 1)}🚀${'▬'.repeat(empty)}`;
+// ---------- Visuals ----------
+function stylishBar(mult) {
+  const maxDisplay = 50.0;
+  const clamped = Math.min(mult, maxDisplay);
+  const ratio = clamped / maxDisplay;
+  const totalBlocks = 16;
+  const filled = Math.floor(ratio * totalBlocks);
+  const empty = totalBlocks - filled;
+  let bar = '';
+  if (filled > 0) bar += '🟩'.repeat(filled);
+  bar += '🚀';
+  if (empty > 1) bar += '⬛'.repeat(empty - 1);
+  return bar;
 }
 
 function colorForMultiplier(mult) {
@@ -46,52 +48,62 @@ function colorForMultiplier(mult) {
   return '#FF0044';
 }
 
-// ---------- Live graph (canvas) ----------
 function drawGraph(points, currentMult) {
-  const W = 400, H = 200;
+  const W = 400, H = 120;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
-
   ctx.fillStyle = '#1a1a2e';
   ctx.fillRect(0, 0, W, H);
-
   if (points.length < 2) {
     ctx.fillStyle = '#FFFFFF';
     ctx.font = 'bold 16px sans-serif';
-    ctx.fillText(`${currentMult.toFixed(2)}×`, 10, 30);
+    ctx.fillText(`${currentMult.toFixed(2)}×`, 10, 25);
     return canvas.toBuffer('image/png');
   }
-
   const maxY = Math.max(currentMult, ...points.map(p => p.y), 2);
   const xScale = (W - 40) / (points.length - 1);
-  const yScale = (H - 40) / maxY;
-
+  const yScale = (H - 30) / maxY;
+  const baseY = H - 20;
+  const gradient = ctx.createLinearGradient(0, 0, 0, H);
+  gradient.addColorStop(0, 'rgba(255, 215, 0, 0.4)');
+  gradient.addColorStop(1, 'rgba(255, 0, 68, 0.1)');
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.moveTo(20, baseY);
+  for (let i = 0; i < points.length; i++) {
+    ctx.lineTo(20 + i * xScale, baseY - points[i].y * yScale);
+  }
+  ctx.lineTo(20 + (points.length - 1) * xScale, baseY);
+  ctx.closePath();
+  ctx.fill();
   ctx.beginPath();
   ctx.strokeStyle = '#FFD700';
   ctx.lineWidth = 2;
-  ctx.moveTo(20, H - 20 - points[0].y * yScale);
+  ctx.moveTo(20, baseY - points[0].y * yScale);
   for (let i = 1; i < points.length; i++) {
-    ctx.lineTo(20 + i * xScale, H - 20 - points[i].y * yScale);
+    ctx.lineTo(20 + i * xScale, baseY - points[i].y * yScale);
   }
   ctx.stroke();
-
   const last = points[points.length - 1];
   ctx.fillStyle = '#FF0044';
   ctx.beginPath();
-  ctx.arc(20 + (points.length - 1) * xScale, H - 20 - last.y * yScale, 4, 0, Math.PI * 2);
+  ctx.arc(20 + (points.length - 1) * xScale, baseY - last.y * yScale, 4, 0, Math.PI * 2);
   ctx.fill();
-
   ctx.fillStyle = '#FFFFFF';
   ctx.font = 'bold 14px sans-serif';
   ctx.fillText(`${currentMult.toFixed(2)}×`, 10, 20);
-
   return canvas.toBuffer('image/png');
 }
 
-// ---------- Store game intervals per guild ----------
-const gameLoops = new Map();
+// ---------- Round counter ----------
+async function getNextRoundNumber(redis, guildId) {
+  return await redis.incr(`rocket:roundCounter:${guildId}`);
+}
 
-// ---------- Main tick (runs every second) ----------
+// ---------- Store game loops per guild ----------
+const gameLoops = new Map();   // guildId → interval
+
+// ---------- Core tick ----------
 async function tick(guildId, client, redis) {
   const channelId = await redis.get(`rocket:channel:${guildId}`);
   if (!channelId) return;
@@ -104,54 +116,65 @@ async function tick(guildId, client, redis) {
   let round = await redis.get(roundKey);
   if (!round) {
     // Start new betting phase
+    const roundNum = await getNextRoundNumber(redis, guildId);
     round = {
       phase: 'betting',
       bettingStart: now,
       crashPoint: getCrashPoint(),
       players: [],
-      flightMessageId: null,
-      bettingMessageId: null,
-      startTime: null,
-      points: []
+      messages: [],
+      roundNumber: roundNum,
     };
     await redis.set(roundKey, JSON.stringify(round));
+
     const embed = new EmbedBuilder()
       .setColor('#5865F2')
-      .setTitle('🚀 Rocket – New Round')
+      .setTitle(`🚀 Rocket – Round #${roundNum}`)
       .setDescription(
-        `Betting is open! Use \`/rocket join <amount>\`.\n` +
+        `**Betting is open!**\nUse \`/rocket join <amount>\`\n` +
         `Ends <t:${Math.floor((now + BETTING_PHASE_SEC * 1000) / 1000)}:R>\n\n` +
-        `Crash range: **1.20× – 100.00×** (fair curve)`
-      );
+        `Crash range: **1.20× – 100.00×**`
+      )
+      .setFooter({ text: 'Place your bets…' });
+
     const msg = await channel.send({ embeds: [embed] });
-    round.bettingMessageId = msg.id;
+    round.messages.push(msg.id);
     await redis.set(roundKey, JSON.stringify(round));
     return;
   }
 
   round = JSON.parse(round);
 
+  // Betting → Flight (or pause if no players)
   if (round.phase === 'betting') {
     if (now - round.bettingStart >= BETTING_PHASE_SEC * 1000) {
+      if (round.players.length === 0) {
+        // No one joined → delete messages, stop loop
+        await cleanChannel(channel, round.messages);
+        await redis.del(roundKey);
+        stopGameLoop(guildId);
+        return;
+      }
+
       // Start flight
       round.phase = 'flight';
       round.startTime = now;
       round.points = [{ y: 1.0 }];
       await redis.set(roundKey, JSON.stringify(round));
 
-      // Delete betting message
-      if (round.bettingMessageId) {
-        const betMsg = await channel.messages.fetch(round.bettingMessageId).catch(() => null);
-        if (betMsg) await betMsg.delete().catch(() => {});
-      }
+      await cleanChannel(channel, round.messages);
+      round.messages = [];
 
-      // Send flight embed
+      const totalPot = round.players.reduce((sum, p) => sum + p.bet, 0);
+
       const embed = new EmbedBuilder()
         .setColor('#00FF88')
         .setTitle('🚀 Rocket – Live')
         .setDescription(
-          `Multiplier: **1.00×**\n${rocketBar(1.0)}\n` +
-          `${round.players.length} player(s) in. React with ${CASHOUT_EMOJI} to cash out!`
+          `**Multiplier:** 1.00×\n` +
+          `${stylishBar(1.0)}\n` +
+          `👥 **Players:** ${round.players.length} | 💰 **Pot:** ${totalPot.toLocaleString()} coins\n\n` +
+          `React with ${CASHOUT_EMOJI} to **Cash Out**!`
         )
         .setImage('attachment://graph.png');
 
@@ -160,6 +183,7 @@ async function tick(guildId, client, redis) {
       const msg = await channel.send({ embeds: [embed], files: [attachment] });
       await msg.react(CASHOUT_EMOJI).catch(() => {});
       round.flightMessageId = msg.id;
+      round.messages.push(msg.id);
       await redis.set(roundKey, JSON.stringify(round));
 
       // Reaction collector
@@ -168,7 +192,6 @@ async function tick(guildId, client, redis) {
       const collector = msg.createReactionCollector({ filter, time: 600_000 });
       collector.on('collect', async (reaction, user) => {
         await reaction.users.remove(user).catch(() => {});
-
         const raw = await redis.get(roundKey);
         if (!raw) return;
         const state = JSON.parse(raw);
@@ -178,9 +201,8 @@ async function tick(guildId, client, redis) {
 
         const elapsed = (Date.now() - state.startTime) / 1000;
         const mult = multAt(elapsed);
-        if (mult >= state.crashPoint) return; // crash already
+        if (mult >= state.crashPoint) return;
 
-        // Cash out
         player.cashedOut = true;
         player.payout = Math.floor(player.bet * mult);
         player.cashOutMultiplier = mult;
@@ -190,7 +212,7 @@ async function tick(guildId, client, redis) {
         const bal = Number(await redis.get(balanceKey) || 0);
         await redis.set(balanceKey, bal + player.payout);
 
-        // DM the winner
+        // DM
         try {
           const userObj = await client.users.fetch(user.id);
           const dmEmbed = new EmbedBuilder()
@@ -201,20 +223,19 @@ async function tick(guildId, client, redis) {
               `Bet: ${player.bet.toLocaleString()} coins`
             );
           await userObj.send({ embeds: [dmEmbed] });
-        } catch (e) {
-          // DM closed, ignore
-        }
+        } catch (e) {}
       });
     }
+    return;
   }
-  else if (round.phase === 'flight') {
+
+  // Flight → Crash / update
+  if (round.phase === 'flight') {
     const elapsed = (now - round.startTime) / 1000;
     const mult = multAt(elapsed);
 
     if (mult >= round.crashPoint) {
-      // Crash! Delete flight message, show result
-      const flightMsg = await channel.messages.fetch(round.flightMessageId).catch(() => null);
-      if (flightMsg) await flightMsg.delete().catch(() => {});
+      await cleanChannel(channel, round.messages);
 
       let results = '';
       for (const p of round.players) {
@@ -224,57 +245,74 @@ async function tick(guildId, client, redis) {
           results += `<@${p.userId}> – **Crashed** (lost ${p.bet.toLocaleString()} coins)\n`;
         }
       }
+
       const embed = new EmbedBuilder()
         .setColor('#ED4245')
-        .setTitle('💥 Rocket Crashed!')
+        .setTitle(`💥 Rocket Crashed! (Round #${round.roundNumber})`)
         .setDescription(`Crashed at **${mult.toFixed(2)}×**!\n\n**Results:**\n${results || 'No players'}`)
-        .setFooter({ text: 'Next round starting soon...' });
+        .setFooter({ text: 'Next round starting soon…' });
 
-      const resultMsg = await channel.send({ embeds: [embed] });
-      setTimeout(() => resultMsg.delete().catch(() => {}), COOLDOWN_SEC * 1000);
+      const msg = await channel.send({ embeds: [embed] });
+      setTimeout(() => msg.delete().catch(() => {}), COOLDOWN_SEC * 1000);
 
       await redis.del(roundKey);
       await redis.set(`rocket:cooldown:${guildId}`, '1', 'EX', COOLDOWN_SEC);
-    } else {
-      // Update flight message
-      const msg = await channel.messages.fetch(round.flightMessageId).catch(() => null);
-      if (msg) {
-        // Safety: ensure message still has embeds
-        if (msg.embeds && msg.embeds.length > 0) {
-          try {
-            round.points.push({ y: mult });
-            await redis.set(roundKey, JSON.stringify(round));
+      return;
+    }
 
-            const embed = EmbedBuilder.from(msg.embeds[0])
-              .setColor(colorForMultiplier(mult))
-              .setDescription(
-                `Multiplier: **${mult.toFixed(2)}×**\n${rocketBar(mult)}\n` +
-                `${round.players.length} player(s) in. React with ${CASHOUT_EMOJI} to cash out!`
-              );
+    // Update flight message
+    const msg = await channel.messages.fetch(round.flightMessageId).catch(() => null);
+    if (!msg || !msg.embeds?.length) {
+      await redis.del(roundKey);
+      return;
+    }
 
-            const graphBuf = drawGraph(round.points, mult);
-            const attachment = new AttachmentBuilder(graphBuf, { name: 'graph.png' });
-            await msg.edit({ embeds: [embed], files: [attachment] }).catch(() => {});
-          } catch (err) {
-            console.error('Failed to update flight message:', err);
-          }
-        } else {
-          // Message lost embeds (deleted externally) → end round gracefully
-          const embed = new EmbedBuilder()
-            .setColor('#ED4245')
-            .setTitle('💥 Rocket Crashed!')
-            .setDescription('The round ended unexpectedly.')
-            .setFooter({ text: 'Next round starting soon...' });
-          await channel.send({ embeds: [embed] });
-          await redis.del(roundKey);
-          await redis.set(`rocket:cooldown:${guildId}`, '1', 'EX', COOLDOWN_SEC);
-        }
-      }
+    try {
+      round.points.push({ y: mult });
+      await redis.set(roundKey, JSON.stringify(round));
+
+      const totalPot = round.players.reduce((sum, p) => sum + p.bet, 0);
+      const embed = EmbedBuilder.from(msg.embeds[0])
+        .setColor(colorForMultiplier(mult))
+        .setDescription(
+          `**Multiplier:** ${mult.toFixed(2)}×\n` +
+          `${stylishBar(mult)}\n` +
+          `👥 **Players:** ${round.players.length} | 💰 **Pot:** ${totalPot.toLocaleString()} coins\n\n` +
+          `React with ${CASHOUT_EMOJI} to **Cash Out**!`
+        );
+
+      const graphBuf = drawGraph(round.points, mult);
+      const attachment = new AttachmentBuilder(graphBuf, { name: 'graph.png' });
+      await msg.edit({ embeds: [embed], files: [attachment] }).catch(() => {});
+    } catch (err) {
+      console.error('Rocket update error:', err);
+      await redis.del(roundKey);
     }
   }
 }
 
-// =============================================================================
+// ---------- Helpers ----------
+async function cleanChannel(channel, messageIds) {
+  for (const id of messageIds) {
+    const msg = await channel.messages.fetch(id).catch(() => null);
+    if (msg) await msg.delete().catch(() => {});
+  }
+}
+
+function startGameLoop(guildId, client, redis, channelId) {
+  if (gameLoops.has(guildId)) return;
+  const interval = setInterval(() => tick(guildId, client, redis), 1000);
+  gameLoops.set(guildId, interval);
+}
+
+function stopGameLoop(guildId) {
+  if (gameLoops.has(guildId)) {
+    clearInterval(gameLoops.get(guildId));
+    gameLoops.delete(guildId);
+  }
+}
+
+// ---------- Command ----------
 module.exports = {
   category: "Games",
   data: new SlashCommandBuilder()
@@ -310,17 +348,9 @@ module.exports = {
       const channel = interaction.options.getChannel("channel");
       await redis.set(`rocket:channel:${guildId}`, channel.id);
 
-      // Stop any existing loop
-      if (gameLoops.has(guildId)) {
-        clearInterval(gameLoops.get(guildId));
-        gameLoops.delete(guildId);
-      }
+      stopGameLoop(guildId);
+      startGameLoop(guildId, client, redis, channel.id);
 
-      // Start fresh interval
-      const interval = setInterval(() => tick(guildId, client, redis), 1000);
-      gameLoops.set(guildId, interval);
-
-      // Wipe old round data
       await redis.del(`rocket:round:${guildId}`);
       await redis.del(`rocket:cooldown:${guildId}`);
 
@@ -335,13 +365,46 @@ module.exports = {
       if (!channelId)
         return interaction.reply({ content: "❌ Rocket channel not set.", flags: MessageFlags.Ephemeral });
 
-      // Cooldown check
+      // If game loop is stopped (paused), resume it
+      if (!gameLoops.has(guildId)) {
+        startGameLoop(guildId, client, redis, channelId);
+      }
+
+      // Cooldown after crash
       if (await redis.get(`rocket:cooldown:${guildId}`))
         return interaction.reply({ content: "⏳ Round just ended. Next round soon.", flags: MessageFlags.Ephemeral });
 
-      const raw = await redis.get(`rocket:round:${guildId}`);
-      if (!raw)
-        return interaction.reply({ content: "❌ No active round. Wait for betting to open.", flags: MessageFlags.Ephemeral });
+      // If no active round, wait a moment for the tick to create one (or create manually)
+      let raw = await redis.get(`rocket:round:${guildId}`);
+      if (!raw) {
+        // Manually create a fresh round right now (so the player can join immediately)
+        const roundNum = await getNextRoundNumber(redis, guildId);
+        const newRound = {
+          phase: 'betting',
+          bettingStart: Date.now(),
+          crashPoint: getCrashPoint(),
+          players: [],
+          messages: [],
+          roundNumber: roundNum,
+        };
+        // Send betting message
+        const channel = client.channels.cache.get(channelId);
+        if (channel) {
+          const embed = new EmbedBuilder()
+            .setColor('#5865F2')
+            .setTitle(`🚀 Rocket – Round #${roundNum}`)
+            .setDescription(
+              `**Betting is open!**\nUse \`/rocket join <amount>\`\n` +
+              `Ends <t:${Math.floor((Date.now() + BETTING_PHASE_SEC * 1000) / 1000)}:R>\n\n` +
+              `Crash range: **1.20× – 100.00×**`
+            )
+            .setFooter({ text: 'Place your bets…' });
+          const msg = await channel.send({ embeds: [embed] });
+          newRound.messages.push(msg.id);
+        }
+        await redis.set(`rocket:round:${guildId}`, JSON.stringify(newRound));
+        raw = JSON.stringify(newRound);
+      }
 
       const round = JSON.parse(raw);
       if (round.phase !== 'betting')
