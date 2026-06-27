@@ -1,5 +1,4 @@
 const { Events, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
-const e = require("../emojis.js");
 
 module.exports = {
   name: Events.MessageCreate,
