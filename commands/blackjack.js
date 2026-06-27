@@ -1,4 +1,4 @@
-// commands/blackjack.js – Reaction-based Blackjack (OwO style, with custom cards)
+// commands/blackjack.js – Reaction-based, "all" bet, dealer visible value
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -7,25 +7,21 @@ const {
 const path = require("path");
 const fs = require("fs");
 
-// Load card emojis from cards.json
+// Load card emojis
 let cardEmojis = {};
 try {
   const cardsPath = path.join(__dirname, "../cards.json");
   if (fs.existsSync(cardsPath)) {
     cardEmojis = JSON.parse(fs.readFileSync(cardsPath, "utf-8"));
-    console.log(`✅ Loaded ${Object.keys(cardEmojis).length} card emojis.`);
-  } else {
-    console.warn("⚠️ cards.json not found – using text.");
   }
 } catch (err) {
-  console.error("❌ Error loading cards.json:", err);
+  console.error("Error loading cards.json:", err);
 }
 
 const MAX_BET = 250_000;
 const HIT_EMOJI = "👊";
 const STAND_EMOJI = "🛑";
 
-// ---------- Card helpers ----------
 function cardValue(cardNumber) {
   const rank = (cardNumber - 1) % 13;
   if (rank === 0) return { soft: 11, hard: 1 };
@@ -66,54 +62,64 @@ function shuffleDeck() {
   return deck;
 }
 
-// ---------- Main command ----------
 module.exports = {
   category: "Games",
   data: new SlashCommandBuilder()
     .setName("blackjack")
     .setDescription("Play blackjack against the dealer")
-    .addIntegerOption(opt =>
+    .addStringOption(opt =>
       opt.setName("bet")
-        .setDescription("Amount to bet (max 250,000)")
+        .setDescription("Amount or 'all' (max 250,000)")
         .setRequired(true)
-        .setMinValue(1)
     ),
 
   async execute(interaction, client, redis) {
     const userId = interaction.user.id;
-    const bet = interaction.options.getInteger("bet");
+    const betRaw = interaction.options.getString("bet").toLowerCase();
+    let bet;
 
-    if (bet > MAX_BET) {
-      return interaction.reply({
-        content: `❌ Maximum bet is **${MAX_BET.toLocaleString()}** coins.`,
-        flags: MessageFlags.Ephemeral
-      });
+    const balanceKey = `eco:${userId}:money`;
+    const currentBal = Number(await redis.get(balanceKey) || 0);
+
+    if (betRaw === "all") {
+      bet = Math.min(currentBal, MAX_BET);
+      if (bet <= 0) {
+        return interaction.reply({
+          content: "❌ You have no coins to bet.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+    } else {
+      bet = parseInt(betRaw);
+      if (isNaN(bet) || bet < 1) {
+        return interaction.reply({
+          content: "❌ Please enter a valid number or 'all'.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+      if (bet > MAX_BET) bet = MAX_BET;
+      if (currentBal < bet) {
+        return interaction.reply({
+          content: `❌ You need **${bet.toLocaleString()}** coins, but you only have **${currentBal.toLocaleString()}**.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
     }
 
     // Check active game
     const active = await redis.get(`blackjack:${userId}`);
     if (active) {
       return interaction.reply({
-        content: "❌ You already have an active blackjack game. Finish it or use `$cleargame @you` to force‑close.",
+        content: "❌ You already have an active game. Wait for it to expire or use `$cleargame @you`.",
         flags: MessageFlags.Ephemeral
       });
     }
 
-    // Check & deduct balance
-    const balanceKey = `eco:${userId}:money`;
-    const currentBal = Number(await redis.get(balanceKey) || 0);
-    if (currentBal < bet) {
-      return interaction.reply({
-        content: `❌ You need **${bet.toLocaleString()}** coins, but you only have **${currentBal.toLocaleString()}**.`,
-        flags: MessageFlags.Ephemeral
-      });
-    }
     await redis.set(balanceKey, currentBal - bet);
 
-    // Initialise game
     const deck = shuffleDeck();
     const playerCards = [deck.pop(), deck.pop()];
-    const dealerCards = [deck.pop(), deck.pop()];
+    const dealerCards = [deck.pop(), deck.pop()]; // first hidden
 
     const gameState = {
       bet,
@@ -125,13 +131,15 @@ module.exports = {
     };
     await redis.set(`blackjack:${userId}`, JSON.stringify(gameState));
 
-    // Build embed
+    const pValue = bestHandValue(playerCards);
+    const dealerVisibleValue = bestHandValue(dealerCards.slice(1)); // only visible card(s)
+
     const embed = new EmbedBuilder()
       .setColor("#5865F2")
       .setTitle("🃏 Blackjack")
       .setDescription(
-        `**Your hand:** ${handToString(playerCards)}  (${bestHandValue(playerCards)})\n` +
-        `**Dealer:** ${handToString(dealerCards, true)}\n\n` +
+        `**Your hand:** ${handToString(playerCards)}  (${pValue})\n` +
+        `**Dealer:** ${handToString(dealerCards, true)}  (shows ${dealerVisibleValue})\n\n` +
         `React with ${HIT_EMOJI} to **Hit** or ${STAND_EMOJI} to **Stand**`
       )
       .setFooter({ text: `Bet: ${bet.toLocaleString()} coins | Game expires in 60s` });
@@ -139,38 +147,29 @@ module.exports = {
     await interaction.deferReply();
     const message = await interaction.editReply({ embeds: [embed] });
 
-    // Add reactions
     await message.react(HIT_EMOJI).catch(() => {});
     await message.react(STAND_EMOJI).catch(() => {});
 
-    // Reaction collector
     const filter = (reaction, user) =>
       (reaction.emoji.name === HIT_EMOJI || reaction.emoji.name === STAND_EMOJI) &&
       user.id === userId;
 
-    const collector = message.createReactionCollector({
-      filter,
-      time: 60_000
-    });
+    const collector = message.createReactionCollector({ filter, time: 60_000 });
 
     collector.on("collect", async (reaction, user) => {
-      // Remove the user's reaction to allow re‑click
       await reaction.users.remove(user).catch(() => {});
 
       const raw = await redis.get(`blackjack:${userId}`);
-      if (!raw) {
-        collector.stop();
-        return;
-      }
+      if (!raw) { collector.stop(); return; }
       const state = JSON.parse(raw);
       if (state.status !== "playing") return;
 
       if (reaction.emoji.name === HIT_EMOJI) {
         const card = state.deck.pop();
         state.playerCards.push(card);
-        const pValue = bestHandValue(state.playerCards);
+        const newPValue = bestHandValue(state.playerCards);
 
-        if (pValue > 21) {
+        if (newPValue > 21) {
           state.status = "bust";
           await redis.set(`blackjack:${userId}`, JSON.stringify(state));
           await endGame(message, state, "loss", bet, balanceKey, redis, userId);
@@ -181,8 +180,8 @@ module.exports = {
         await redis.set(`blackjack:${userId}`, JSON.stringify(state));
         const updatedEmbed = EmbedBuilder.from(message.embeds[0])
           .setDescription(
-            `**Your hand:** ${handToString(state.playerCards)}  (${pValue})\n` +
-            `**Dealer:** ${handToString(state.dealerCards, true)}\n\n` +
+            `**Your hand:** ${handToString(state.playerCards)}  (${newPValue})\n` +
+            `**Dealer:** ${handToString(state.dealerCards, true)}  (shows ${dealerVisibleValue})\n\n` +
             `React with ${HIT_EMOJI} to **Hit** or ${STAND_EMOJI} to **Stand**`
           )
           .setFooter({ text: `Bet: ${bet.toLocaleString()} coins | Game expires in 60s` });
@@ -195,29 +194,25 @@ module.exports = {
     });
 
     collector.on("end", async (collected, reason) => {
-      // If the game is still active after timeout, force stand
       const raw = await redis.get(`blackjack:${userId}`);
       if (!raw) return;
       const state = JSON.parse(raw);
       if (state.status === "playing") {
         await dealerPlayAndEnd(message, state, bet, balanceKey, redis, userId, "timeout");
       }
-      // Remove reactions
       await message.reactions.removeAll().catch(() => {});
     });
   }
 };
 
-// ---------- Dealer logic & payout ----------
+// Dealer logic + payout
 async function dealerPlayAndEnd(message, state, bet, balanceKey, redis, userId, reason) {
   const pValue = bestHandValue(state.playerCards);
   let dValue = bestHandValue(state.dealerCards);
 
-  // Reveal hidden card, draw until 17+
-  while (dValue < 17) {
-    if (state.deck.length === 0) break;
-    const card = state.deck.pop();
-    state.dealerCards.push(card);
+  // Reveal hidden card and draw until 17+
+  while (dValue < 17 && state.deck.length) {
+    state.dealerCards.push(state.deck.pop());
     dValue = bestHandValue(state.dealerCards);
   }
 
@@ -263,6 +258,5 @@ async function endGame(message, state, outcome, bet, balanceKey, redis, userId) 
   await message.edit({ embeds: [embed] });
   await message.reactions.removeAll().catch(() => {});
 
-  // Clean up Redis
   await redis.del(`blackjack:${userId}`);
 }
