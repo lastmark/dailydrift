@@ -17,6 +17,7 @@
     "canvas": "^2.11.2",
   "gif-encoder-2": "^1.0.0",
   "gif-frames": "^1.0.1",
+    "omggif": "^1.0.10",
       "ioredis": "^5.3.2",
     "discord.js": "^14.14.1",
     "redis": "^4.6.10",
