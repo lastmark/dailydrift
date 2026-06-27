@@ -4,7 +4,7 @@ const GIFEncoder = require("gif-encoder-2");
 const gifFrames = require("gif-frames");
 const path = require("path");
 const fs = require("fs");
-const { formatNumber } = require("./utils.js");
+const { formatNumber } = require("../utils.js");
 
 // ---------- FONT SETUP (mirror profile.js) ----------
 const fontPath = path.join(__dirname, "../font.ttf");
