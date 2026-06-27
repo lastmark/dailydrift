@@ -10,7 +10,7 @@ const SYMBOLS = ["🍎", "🍊", "🍋", "🍇", "🍒", "🍓"];
 
 // 🔥 Replace with your animated spinner emoji (e.g. "<a:slot_spin:123456789>")
 // If you don't have one, leave "🔄" – it still looks clean.
-const SLOT_SPIN_EMOJI = "🔄";
+const SLOT_SPIN_EMOJI = "<a:slot:1520527576186097845>";
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
