@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
-const e = require("../emojis");
 
 module.exports = {
   category: "Server Management",
