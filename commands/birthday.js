@@ -6,7 +6,6 @@ const {
   MessageFlags
 } = require("discord.js");
 
-const e = require("../emojis.js");
 
 module.exports = {
   category: "Events",
