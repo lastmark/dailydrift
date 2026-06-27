@@ -1,4 +1,4 @@
-// index.js – Full Main Bot (with ticket reaction panel)
+// index.js – Full Main Bot (with button‑based ticket panel)
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
 const redis = require("./redis");
@@ -151,7 +151,30 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // ---- Ticket button handler ----
+    // ---- NEW: Open Ticket button from panel ----
+    if (interaction.customId === "ticket_create_panel") {
+      // Replicate checks for button (slash checks don't cover this)
+      const accepted = await redis.get(`terms:accepted:${interaction.user.id}`);
+      if (accepted !== TERMS_VERSION) {
+        return interaction.reply({ content: "📜 You must accept the Terms of Service first.", flags: MessageFlags.Ephemeral });
+      }
+      const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
+      if (blacklist) {
+        const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
+        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      }
+      const maintenanceKey = `maintenance:${interaction.guild.id}`;
+      if (await redis.get(maintenanceKey) === "true") {
+        return interaction.reply({ content: "🔧 The bot is under maintenance.", flags: MessageFlags.Ephemeral });
+      }
+
+      // Create the ticket (import fresh or use the already required one)
+      const { createTicket } = require("./commands/ticket.js");
+      await createTicket(interaction, client, redis, interaction.user.id, "support");
+      return;
+    }
+
+    // ---- Ticket button handler (claim, add user, close) ----
     if (interaction.customId.startsWith("ticket_")) {
       const [action, channelId] = interaction.customId.split(':');
       const channel = interaction.guild.channels.cache.get(channelId);
@@ -159,11 +182,11 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ content: "❌ Ticket channel not found.", flags: MessageFlags.Ephemeral });
       }
 
-      const ticketData = await redis.get(`ticket:${interaction.guild.id}:${channelId}`);
-      if (!ticketData) {
+      const ticketData = await redis.hgetall(`ticket:${interaction.guild.id}:${channelId}`);
+      if (!ticketData || !ticketData.creator) {
         return interaction.reply({ content: "❌ Invalid ticket.", flags: MessageFlags.Ephemeral });
       }
-      const data = JSON.parse(ticketData);
+      const data = ticketData; // hgetall returns a plain object, no JSON.parse needed
 
       // ---- Claim ----
       if (action === "ticket_claim") {
@@ -174,7 +197,7 @@ client.on("interactionCreate", async (interaction) => {
         if (supportRoleId && !interaction.member.roles.cache.has(supportRoleId)) {
           return interaction.reply({ content: "❌ You don't have permission to claim.", flags: MessageFlags.Ephemeral });
         }
-        await redis.hset(`ticket:${interaction.guild.id}:${channelId}`, { ...data, claimedBy: interaction.user.id });
+        await redis.hset(`ticket:${interaction.guild.id}:${channelId}`, "claimedBy", interaction.user.id);
         await channel.send(`✅ ${interaction.user} has claimed this ticket.`);
         return interaction.reply({ content: "✅ Ticket claimed!", flags: MessageFlags.Ephemeral });
       }
@@ -195,7 +218,7 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
 
-      // ---- Fallback ----
+      // Fallback
       return interaction.reply({ content: "❌ Unknown ticket action.", flags: MessageFlags.Ephemeral });
     }
 
@@ -306,7 +329,7 @@ client.on("messageCreate", async (message) => {
         return;
       }
 
-      // ✅ FIX: dynamic import instead of require()
+      // Dynamic import instead of require()
       const countingModule = await import("./games/counting.js");
       const runCountingGame = countingModule.default || countingModule;
 
@@ -391,55 +414,7 @@ client.on("guildMemberAdd", async (member) => {
   channel.send({ files: [{ attachment: img, name: "welcome.png" }] });
 });
 
-// ==========================================
-// 🎫 TICKET PANEL REACTION HANDLER
-// ==========================================
-client.on("messageReactionAdd", async (reaction, user) => {
-  if (user.bot) return;
-  if (reaction.partial) await reaction.fetch();
-  if (reaction.message.partial) await reaction.message.fetch();
-
-  const emoji = reaction.emoji.name;
-  if (emoji !== "🎫") return;
-
-  const guildId = reaction.message.guild.id;
-  const panelMessageId = await redis.get(`ticket:panel:${guildId}`);
-  if (!panelMessageId || reaction.message.id !== panelMessageId) return;
-
-  // Check if user already has an open ticket
-  const existingKey = `ticket:open:${guildId}:${user.id}`;
-  if (await redis.get(existingKey)) {
-    await reaction.users.remove(user.id);
-    try {
-      await user.send("❌ You already have an open ticket. Please close it first.");
-    } catch {}
-    return;
-  }
-
-  // Create ticket
-  const guild = reaction.message.guild;
-  const member = await guild.members.fetch(user.id);
-
-  // Create a fake interaction for the createTicket helper
-  const fakeInteraction = {
-    guild,
-    member,
-    user,
-    channel: reaction.message.channel,
-    reply: async (data) => {
-      try { await user.send(data.content); } catch {}
-    },
-    deferReply: async () => {},
-    editReply: async () => {},
-    followUp: async () => {},
-  };
-
-  const category = "support"; // default category
-  await createTicket(fakeInteraction, client, redis, user.id, category);
-
-  // Remove the reaction
-  await reaction.users.remove(user.id);
-});
+// (Old reaction-based ticket panel handler removed – we now use buttons)
 
 // ==========================================
 // 🚀 READY EVENT
