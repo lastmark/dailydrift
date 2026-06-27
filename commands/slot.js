@@ -115,7 +115,7 @@ module.exports = {
     await interaction.editReply({
       embeds: [
         baseEmbed()
-          .setDescription(`\`[ ${symbols[0]} │ ${spin} │ ${spin} ]\``)
+          .setDescription(`[ ${symbols[0]} │ ${spin} │ ${spin} ]`)
           .setFooter({ text: `Bet: ${bet.toLocaleString()} coins · Spinning...` })
       ]
     });
@@ -125,7 +125,7 @@ module.exports = {
     await interaction.editReply({
       embeds: [
         baseEmbed()
-          .setDescription(`\`[ ${symbols[0]} │ ${spin} │ ${symbols[2]} ]\``)
+          .setDescription(`[ ${symbols[0]} │ ${spin} │ ${symbols[2]} ]`)
           .setFooter({ text: `Bet: ${bet.toLocaleString()} coins · Almost there...` })
       ]
     });
