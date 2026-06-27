@@ -1,4 +1,49 @@
-async execute(interaction, client, redis) {
+// commands/slots.js – Best Style Slots (safe execution, animated spinner)
+const {
+  SlashCommandBuilder,
+  EmbedBuilder,
+  MessageFlags
+} = require("discord.js");
+
+const MAX_BET = 250_000;
+const SYMBOLS = ["🍎", "🍊", "🍋", "🍇", "🍒", "🍓"];
+const SLOT_SPIN_EMOJI = "<a:slot:1520527576186097845>";
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function getOutcome(bet) {
+  const r = Math.random() * 100;
+  if (r <= 20) {
+    return { multiplier: 1, symbols: [SYMBOLS[0], SYMBOLS[0], SYMBOLS[0]], winText: "Even money! You get your bet back." };
+  } else if (r <= 40) {
+    return { multiplier: 2, symbols: [SYMBOLS[1], SYMBOLS[1], SYMBOLS[1]], winText: "Double up!" };
+  } else if (r <= 45) {
+    return { multiplier: 3, symbols: [SYMBOLS[2], SYMBOLS[2], SYMBOLS[2]], winText: "Triple win!" };
+  } else if (r <= 47.5) {
+    return { multiplier: 4, symbols: [SYMBOLS[3], SYMBOLS[3], SYMBOLS[3]], winText: "Big win! 4x!" };
+  } else if (r <= 48.5) {
+    return { multiplier: 10, symbols: [SYMBOLS[4], SYMBOLS[5], SYMBOLS[4]], winText: "JACKPOT! 10x!" };
+  } else {
+    const a = Math.floor(Math.random() * SYMBOLS.length);
+    let b = Math.floor(Math.random() * SYMBOLS.length);
+    if (b === a) b = (a + Math.ceil(Math.random() * (SYMBOLS.length - 2))) % SYMBOLS.length;
+    let c = Math.floor(Math.random() * SYMBOLS.length);
+    if (c === a) c = (a + Math.ceil(Math.random() * (SYMBOLS.length - 2))) % SYMBOLS.length;
+    return { multiplier: 0, symbols: [SYMBOLS[a], SYMBOLS[b], SYMBOLS[c]], winText: "No luck..." };
+  }
+}
+
+module.exports = {
+  category: "Games",
+  data: new SlashCommandBuilder()
+    .setName("slots")
+    .setDescription("Spin the slot machine!")
+    .addStringOption(opt =>
+      opt.setName("bet")
+        .setDescription("Amount to bet, or 'all' (max 250,000)")
+        .setRequired(true)
+    ),
+
+  async execute(interaction, client, redis) {
     const userId = interaction.user.id;
     const betRaw = interaction.options.getString("bet").toLowerCase();
     let bet;
@@ -6,7 +51,6 @@ async execute(interaction, client, redis) {
     const balanceKey = `eco:${userId}:money`;
     const currentBal = Number(await redis.get(balanceKey) || 0);
 
-    // ---- Parse bet (unchanged) ----
     if (betRaw === "all") {
       bet = Math.min(currentBal, MAX_BET);
       if (bet <= 0) {
@@ -27,7 +71,6 @@ async execute(interaction, client, redis) {
       });
     }
 
-    // ---- Lock (unchanged) ----
     const lockKey = `slots:lock:${userId}`;
     if (await redis.get(lockKey)) {
       return interaction.reply({ content: "⏳ You already have a spin in progress.", flags: MessageFlags.Ephemeral });
@@ -38,7 +81,6 @@ async execute(interaction, client, redis) {
     const { multiplier, symbols, winText } = getOutcome(bet);
     const payout = bet * multiplier;
 
-    // ---- Defer the reply FIRST ----
     try {
       await interaction.deferReply();
 
@@ -48,7 +90,6 @@ async execute(interaction, client, redis) {
         .setTitle("🎰 SLOTS")
         .setFooter({ text: `Bet: ${bet.toLocaleString()} coins` });
 
-      // Frame 1
       await interaction.editReply({
         embeds: [
           baseEmbed()
@@ -58,7 +99,6 @@ async execute(interaction, client, redis) {
       }).catch(() => {});
       await sleep(1000);
 
-      // Frame 2
       await interaction.editReply({
         embeds: [
           baseEmbed()
@@ -68,7 +108,6 @@ async execute(interaction, client, redis) {
       }).catch(() => {});
       await sleep(700);
 
-      // Frame 3
       await interaction.editReply({
         embeds: [
           baseEmbed()
@@ -78,7 +117,6 @@ async execute(interaction, client, redis) {
       }).catch(() => {});
       await sleep(1000);
 
-      // Final frame
       let resultColor, resultText;
       if (multiplier === 0) {
         resultColor = "#ED4245";
@@ -101,24 +139,21 @@ async execute(interaction, client, redis) {
         ]
       }).catch(() => {});
 
-      // Pay out
       if (payout > 0) {
         const newBal = Number(await redis.get(balanceKey) || 0) + payout;
         await redis.set(balanceKey, newBal);
       }
     } catch (err) {
       console.error("Slots error:", err);
-      // If we never replied, send a follow-up
       try {
         if (interaction.deferred) {
           await interaction.editReply({ content: "❌ An error occurred during the spin." });
         } else {
           await interaction.followUp({ content: "❌ An error occurred during the spin." });
         }
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
     } finally {
       await redis.del(lockKey);
     }
   }
+};
