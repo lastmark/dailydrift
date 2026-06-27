@@ -1,4 +1,4 @@
-// commands/profile.js – Full (with animated GIF backgrounds for premium)
+// commands/profile.js – Full Profile Command (with animated GIF support for premium)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
@@ -659,18 +659,20 @@ module.exports = {
         .setFooter({ text: `Requested by ${interaction.user.username}` })
         .setTimestamp();
 
-      // ── Decide between animated GIF or static PNG ──
+      // ---- Decide between animated GIF or static PNG ----
       let profileBuffer;
       let attachmentName = "profile.png";
 
-      if (premium && customBg && customBg.toLowerCase().endsWith(".gif")) {
+      // Robust GIF check – ignores query parameters
+      const isGif = customBg && customBg.toLowerCase().split('?')[0].endsWith('.gif');
+      if (premium && customBg && isGif) {
         try {
           const profileData = {
             avatarUrl: targetUser.displayAvatarURL({ extension: "png", size: 256 }),
             username: targetUser.username,
             color,
             theme,
-            premium: true,
+            premium,           // use the actual variable (not hardcoded true)
             beta,
             bio,
             status,
@@ -691,7 +693,7 @@ module.exports = {
           attachmentName = "profile.gif";
         } catch (err) {
           console.error("Animated profile generation failed, falling back to static:", err);
-          profileBuffer = null;  // will use static fallback
+          profileBuffer = null;  // fall back to static
         }
       }
 
@@ -899,7 +901,7 @@ module.exports = {
         ctx.font = getFont("normal", 12);
         ctx.fillText(`ID: ${targetId.slice(0, 8)}...`, 20, 340);
         ctx.textAlign = "right";
-        ctx.fillText("Profile v2.0", 880, 340);
+        ctx.fillText("Profile v3.0", 880, 340);
 
         profileBuffer = canvas.toBuffer("image/png");
       }
