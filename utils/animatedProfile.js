@@ -1,10 +1,10 @@
-// utils/animatedProfile.js – Fixed: awaits frame.getBuffer()
+// utils/animatedProfile.js – Fixed: uses canvas output (works with any gif-frames version)
 const { createCanvas, loadImage, registerFont } = require("canvas");
 const GIFEncoder = require("gif-encoder-2");
 const gifFrames = require("gif-frames");
 const path = require("path");
 const fs = require("fs");
-const { formatNumber } = require("../utils.js");   // ✅ correct path
+const { formatNumber } = require("../utils.js");
 
 // ---------- FONT SETUP ----------
 const fontPath = path.join(__dirname, "../font.ttf");
@@ -50,20 +50,14 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 async function generateAnimatedProfile(gifUrl, data) {
   const W = 900, H = 350;
 
-  // Extract all frames from the GIF
-  const frameData = await gifFrames({ url: gifUrl, frames: "all", outputType: "png" });
+  // Extract frames using canvas output (works with every gif-frames version)
+  const frameData = await gifFrames({ url: gifUrl, frames: "all", outputType: "canvas" });
   const frames = [];
   for (const frame of frameData) {
-    // ✅ FIX: await the promise
-    let imgBuffer;
-    try {
-      imgBuffer = await frame.getBuffer();
-    } catch (e) {
-      console.error("Failed to get frame buffer:", e);
-      continue;
-    }
+    const frameCanvas = frame.getImage();   // native Canvas object
+    const buffer = frameCanvas.toBuffer("image/png");
     const delay = frame.frameInfo.delay * 10; // ms
-    frames.push({ buffer: imgBuffer, delay });
+    frames.push({ buffer, delay });
     if (frames.length >= 50) break; // safety cap
   }
   if (frames.length === 0) throw new Error("No frames found in GIF");
