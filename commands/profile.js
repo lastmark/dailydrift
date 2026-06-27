@@ -1,9 +1,10 @@
-// commands/profile.js – with premium text badge & no recent activity
+// commands/profile.js – Full (with animated GIF backgrounds for premium)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
 const fs = require("fs");
 const { formatNumber } = require("../utils.js");
+const { generateAnimatedProfile } = require("../utils/animatedProfile.js");
 
 // ---------- FONT SETUP ----------
 const fontPath = path.join(__dirname, "../font.ttf");
@@ -58,7 +59,7 @@ const ACHIEVEMENTS = {
 
 function getAchievement(id) { return ACHIEVEMENTS[id]; }
 
-// ---------- Helpers (lowercase Redis) ----------
+// ---------- Helpers (local to profile command) ----------
 async function addActivity(redis, userId, activity) {
   try {
     const key = `profile:${userId}:activityFeed`;
@@ -267,12 +268,13 @@ module.exports = {
     ),
 
   async execute(interaction, client, redis) {
+    // ---- PUBLIC REPLY – no ephemeral flag ----
     await interaction.deferReply();
 
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
 
-    // ---- Helpers ----
+    // ---- Helpers (lowercase Redis) ----
     const getBalance = async (id) => Number(await redis.get(`eco:${id}:money`) || 0);
     const addBalance = async (id, amt) => await redis.incrby(`eco:${id}:money`, amt);
     const takeBalance = async (id, amt) => {
@@ -287,7 +289,315 @@ module.exports = {
     };
     const isBeta = async (id) => await redis.get(`beta:user:${id}`) === "true";
 
-    // ... [all other subcommands remain exactly the same as before] ...
+    // ---- SETBIO ----
+    if (sub === "setbio") {
+      const text = interaction.options.getString("text");
+      await redis.hset(`profile:${userId}`, "bio", text);
+      await addActivity(redis, userId, "Updated bio");
+      return interaction.editReply({ content: "✅ Bio updated.", flags: MessageFlags.Ephemeral });
+    }
+
+    // ---- SETCOLOR ----
+    if (sub === "setcolor") {
+      let color = interaction.options.getString("color");
+      if (!color.startsWith("#")) color = `#${color}`;
+      if (!/^#[0-9A-F]{6}$/i.test(color)) {
+        return interaction.editReply({ content: "❌ Invalid hex color.", flags: MessageFlags.Ephemeral });
+      }
+      await redis.hset(`profile:${userId}`, "color", color);
+      await addActivity(redis, userId, "Updated profile color");
+      return interaction.editReply({ content: "✅ Color updated.", flags: MessageFlags.Ephemeral });
+    }
+
+    // ---- UPLOAD (premium) ----
+    if (sub === "upload") {
+      const premium = await isPremium(userId);
+      if (!premium) {
+        return interaction.editReply({ content: "❌ Premium only.", flags: MessageFlags.Ephemeral });
+      }
+      const attachment = interaction.options.getAttachment("image");
+      if (!attachment.contentType?.startsWith("image/")) {
+        return interaction.editReply({ content: "❌ Invalid image.", flags: MessageFlags.Ephemeral });
+      }
+      await redis.hset(`profile:${userId}`, "custom_bg", attachment.url);
+      await addActivity(redis, userId, "Uploaded custom background");
+      return interaction.editReply({ content: "✅ Background uploaded.", flags: MessageFlags.Ephemeral });
+    }
+
+    // ---- RESET ----
+    if (sub === "reset") {
+      await interaction.editReply({ content: "⚠️ Type `confirm` to reset your profile.", flags: MessageFlags.Ephemeral });
+      const collected = await interaction.channel.awaitMessages({
+        filter: m => m.author.id === userId && m.content.toLowerCase() === "confirm",
+        max: 1,
+        time: 30000,
+        errors: ['time']
+      }).catch(() => null);
+      if (!collected) {
+        return interaction.editReply({ content: "❌ Reset cancelled." });
+      }
+      await redis.del(`profile:${userId}`);
+      await redis.del(`profile:${userId}:theme`);
+      await redis.del(`profile:${userId}:nameColor`);
+      await redis.del(`profile:${userId}:socialLinks`);
+      await redis.del(`profile:${userId}:status`);
+      await redis.del(`profile:${userId}:statusTimestamp`);
+      await redis.del(`profile:${userId}:marriedTo`);
+      await redis.del(`profile:${userId}:friends`);
+      await redis.del(`profile:${userId}:reputation`);
+      await redis.del(`profile:${userId}:favGame`);
+      await redis.del(`profile:${userId}:activityFeed`);
+      await redis.del(`profile:${userId}:embedBg`);
+      await redis.del(`profile:${userId}:barStyle`);
+      await redis.del(`profile:${userId}:achievements`);
+      await redis.del(`profile:${userId}:friendRequests`);
+      await interaction.editReply({ content: "✅ Profile reset." });
+      return;
+    }
+
+    // ---- SETSTATUS (with timestamp for auto-clear) ----
+    if (sub === "setstatus") {
+      const status = interaction.options.getString("status");
+      await redis.set(`profile:${userId}:status`, status);
+      await redis.set(`profile:${userId}:statusTimestamp`, Date.now());
+      await addActivity(redis, userId, `Set status: "${status}"`);
+      return interaction.editReply({ content: "✅ Status set (auto‑clears after 24h).", flags: MessageFlags.Ephemeral });
+    }
+
+    // ---- SETTHEME (buy with coins) ----
+    if (sub === "settheme") {
+      const theme = interaction.options.getString("theme");
+      const price = 500;
+      const bal = await getBalance(userId);
+      if (bal < price) {
+        return interaction.editReply({ content: `❌ You need ${price} coins. You have ${bal}.`, flags: MessageFlags.Ephemeral });
+      }
+      await takeBalance(userId, price);
+      await redis.set(`profile:${userId}:theme`, theme);
+      await addActivity(redis, userId, `Unlocked theme: ${theme}`);
+      return interaction.editReply({ content: `✅ Theme set to ${theme}. (${price} coins spent)`, flags: MessageFlags.Ephemeral });
+    }
+
+    // ---- SETBAR (buy with coins) ----
+    if (sub === "setbar") {
+      const style = interaction.options.getString("style");
+      const price = 300;
+      const bal = await getBalance(userId);
+      if (bal < price) {
+        return interaction.editReply({ content: `❌ You need ${price} coins. You have ${bal}.`, flags: MessageFlags.Ephemeral });
+      }
+      await takeBalance(userId, price);
+      await redis.set(`profile:${userId}:barStyle`, style);
+      await addActivity(redis, userId, `Unlocked bar style: ${style}`);
+      return interaction.editReply({ content: `✅ Bar style set to ${style}. (${price} coins spent)`, flags: MessageFlags.Ephemeral });
+    }
+
+    // ---- SETEMBEDBG (premium) ----
+    if (sub === "setembedbg") {
+      const premium = await isPremium(userId);
+      if (!premium) {
+        return interaction.editReply({ content: "❌ Premium only.", flags: MessageFlags.Ephemeral });
+      }
+      let color = interaction.options.getString("color");
+      if (!color.startsWith("#")) color = `#${color}`;
+      if (!/^#[0-9A-F]{6}$/i.test(color)) {
+        return interaction.editReply({ content: "❌ Invalid hex color.", flags: MessageFlags.Ephemeral });
+      }
+      await redis.set(`profile:${userId}:embedBg`, color);
+      await addActivity(redis, userId, "Updated embed background");
+      return interaction.editReply({ content: "✅ Embed background updated.", flags: MessageFlags.Ephemeral });
+    }
+
+    // ---- LINK (add/remove social link) ----
+    if (sub === "link") {
+      const platform = interaction.options.getString("platform");
+      const url = interaction.options.getString("url");
+      const remove = interaction.options.getBoolean("remove") || false;
+      const key = `profile:${userId}:socialLinks`;
+      let links = await redis.get(key);
+      links = links ? JSON.parse(links) : [];
+      if (remove) {
+        links = links.filter(l => l.platform !== platform);
+        await redis.set(key, JSON.stringify(links));
+        await addActivity(redis, userId, `Removed ${platform} link`);
+        return interaction.editReply({ content: `✅ Removed ${platform} link.`, flags: MessageFlags.Ephemeral });
+      } else {
+        const premium = await isPremium(userId);
+        if (!premium && links.length >= 1) {
+          return interaction.editReply({ content: "❌ Premium needed for more than 1 link.", flags: MessageFlags.Ephemeral });
+        }
+        links.push({ platform, url });
+        await redis.set(key, JSON.stringify(links));
+        await addActivity(redis, userId, `Added ${platform} link`);
+        return interaction.editReply({ content: `✅ Added ${platform} link.`, flags: MessageFlags.Ephemeral });
+      }
+    }
+
+    // ---- MARRY ----
+    if (sub === "marry") {
+      const targetUser = interaction.options.getUser("user");
+      if (targetUser.id === userId) {
+        return interaction.editReply({ content: "❌ You can't marry yourself.", flags: MessageFlags.Ephemeral });
+      }
+      const currentSpouse = await redis.get(`profile:${userId}:marriedTo`);
+      if (currentSpouse) {
+        return interaction.editReply({ content: `❌ You are already married to <@${currentSpouse}>.`, flags: MessageFlags.Ephemeral });
+      }
+      const targetSpouse = await redis.get(`profile:${targetUser.id}:marriedTo`);
+      if (targetSpouse) {
+        return interaction.editReply({ content: `❌ ${targetUser.username} is already married.`, flags: MessageFlags.Ephemeral });
+      }
+      await interaction.editReply({
+        content: `💍 <@${targetUser.id}>, do you accept ${interaction.user.username}'s marriage proposal? React with ✅ within 30 seconds.`,
+        fetchReply: true
+      });
+      const msg = await interaction.fetchReply();
+      await msg.react('✅');
+      const filter = (reaction, user) => reaction.emoji.name === "✅" && user.id === targetUser.id;
+      try {
+        const collected = await msg.awaitReactions({ filter, max: 1, time: 30000 });
+        if (collected.size > 0) {
+          await redis.set(`profile:${userId}:marriedTo`, targetUser.id);
+          await redis.set(`profile:${targetUser.id}:marriedTo`, userId);
+          await addActivity(redis, userId, `Married ${targetUser.username}`);
+          await addActivity(redis, targetUser.id, `Married ${interaction.user.username}`);
+          await grantAchievement(redis, userId, 'married');
+          await interaction.editReply({ content: `💍 Congratulations! You are now married to ${targetUser.username}!` });
+        } else {
+          await interaction.editReply({ content: "❌ Proposal declined." });
+        }
+      } catch {
+        await interaction.editReply({ content: "❌ Proposal timed out." });
+      }
+      return;
+    }
+
+    // ---- DIVORCE ----
+    if (sub === "divorce") {
+      const spouseId = await redis.get(`profile:${userId}:marriedTo`);
+      if (!spouseId) {
+        return interaction.editReply({ content: "❌ You are not married.", flags: MessageFlags.Ephemeral });
+      }
+      await redis.del(`profile:${userId}:marriedTo`);
+      await redis.del(`profile:${spouseId}:marriedTo`);
+      await addActivity(redis, userId, `Divorced`);
+      await addActivity(redis, spouseId, `Divorced`);
+      return interaction.editReply({ content: "💔 You are now divorced.", flags: MessageFlags.Ephemeral });
+    }
+
+    // ---- FRIEND REQUESTS & LIST ----
+    if (sub === "friend") {
+      const action = interaction.options.getString("action");
+      const targetUser = interaction.options.getUser("user");
+
+      if (action === "list") {
+        const friends = await redis.smembers(`profile:${userId}:friends`);
+        if (!friends.length) {
+          return interaction.editReply({ content: "📭 You have no friends yet.", flags: MessageFlags.Ephemeral });
+        }
+        const friendNames = await Promise.all(friends.map(async id => {
+          const user = await client.users.fetch(id).catch(() => null);
+          return user ? user.username : "Unknown User";
+        }));
+        const embed = new EmbedBuilder()
+          .setColor("#57F287")
+          .setTitle(`👥 ${interaction.user.username}'s Friends`)
+          .setDescription(friendNames.map((name, i) => `${i+1}. ${name}`).join('\n'))
+          .setTimestamp();
+        return interaction.editReply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      }
+
+      if (!targetUser) {
+        return interaction.editReply({ content: "❌ Please specify a user for this action.", flags: MessageFlags.Ephemeral });
+      }
+      const targetId = targetUser.id;
+
+      if (targetId === userId) {
+        return interaction.editReply({ content: "❌ You can't friend yourself.", flags: MessageFlags.Ephemeral });
+      }
+
+      if (action === "request") {
+        const friends = await redis.smembers(`profile:${userId}:friends`);
+        if (friends.includes(targetId)) {
+          return interaction.editReply({ content: "❌ You are already friends.", flags: MessageFlags.Ephemeral });
+        }
+        const existing = await redis.sismember(`profile:${userId}:friendRequests`, targetId);
+        if (existing) {
+          return interaction.editReply({ content: "❌ Friend request already sent.", flags: MessageFlags.Ephemeral });
+        }
+        await redis.sadd(`profile:${userId}:friendRequests`, targetId);
+        await redis.sadd(`profile:${targetId}:friendRequestsIncoming`, userId);
+        return interaction.editReply({ content: `✅ Friend request sent to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+      }
+
+      if (action === "accept") {
+        const incoming = await redis.sismember(`profile:${userId}:friendRequestsIncoming`, targetId);
+        if (!incoming) {
+          return interaction.editReply({ content: `❌ No friend request from ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+        }
+        await redis.sadd(`profile:${userId}:friends`, targetId);
+        await redis.sadd(`profile:${targetId}:friends`, userId);
+        await redis.srem(`profile:${userId}:friendRequestsIncoming`, targetId);
+        await redis.srem(`profile:${targetId}:friendRequests`, userId);
+        await addActivity(redis, userId, `Became friends with ${targetUser.username}`);
+        await addActivity(redis, targetId, `Became friends with ${interaction.user.username}`);
+        await grantAchievement(redis, userId, 'friend');
+        await grantAchievement(redis, targetId, 'friend');
+        return interaction.editReply({ content: `✅ You are now friends with ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+      }
+
+      if (action === "deny") {
+        const incoming = await redis.sismember(`profile:${userId}:friendRequestsIncoming`, targetId);
+        if (!incoming) {
+          return interaction.editReply({ content: `❌ No friend request from ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+        }
+        await redis.srem(`profile:${userId}:friendRequestsIncoming`, targetId);
+        await redis.srem(`profile:${targetId}:friendRequests`, userId);
+        return interaction.editReply({ content: `✅ Friend request from ${targetUser.username} denied.`, flags: MessageFlags.Ephemeral });
+      }
+    }
+
+    // ---- GIVEKARMA (reputation) ----
+    if (sub === "givekarma") {
+      const targetUser = interaction.options.getUser("user");
+      const targetId = targetUser.id;
+      if (targetId === userId) {
+        return interaction.editReply({ content: "❌ You can't give reputation to yourself.", flags: MessageFlags.Ephemeral });
+      }
+      const cooldownKey = `profile:${userId}:lastRepGiven`;
+      const last = await redis.get(cooldownKey);
+      if (last && (Date.now() - Number(last) < 24 * 60 * 60 * 1000)) {
+        const remaining = Math.ceil((24 * 60 * 60 * 1000 - (Date.now() - Number(last))) / 60000);
+        return interaction.editReply({ content: `⏳ You can give reputation again in ${remaining} minutes.`, flags: MessageFlags.Ephemeral });
+      }
+      await redis.incrby(`profile:${targetId}:reputation`, 1);
+      await redis.set(cooldownKey, Date.now());
+      await addActivity(redis, targetId, `Received reputation from ${interaction.user.username}`);
+      await addActivity(redis, userId, `Gave reputation to ${targetUser.username}`);
+      return interaction.editReply({ content: `✅ Gave 1 reputation to ${targetUser.username}.`, flags: MessageFlags.Ephemeral });
+    }
+
+    // ---- SETFAVGAME ----
+    if (sub === "setfavgame") {
+      const game = interaction.options.getString("game");
+      await redis.set(`profile:${userId}:favGame`, game);
+      await addActivity(redis, userId, `Set favorite game: ${game}`);
+      return interaction.editReply({ content: `✅ Favorite game set to ${game}.`, flags: MessageFlags.Ephemeral });
+    }
+
+    // ---- ACHIEVEMENTS ----
+    if (sub === "achievements") {
+      const achSet = await redis.smembers(`profile:${userId}:achievements`);
+      const embed = new EmbedBuilder()
+        .setColor("#FFD700")
+        .setTitle(`${interaction.user.username}'s Achievements`)
+        .setDescription(achSet.length ? achSet.map(id => {
+          const ach = getAchievement(id);
+          return ach ? `${ach.icon} **${ach.name}** - ${ach.desc}` : id;
+        }).join('\n') : "No achievements yet.")
+        .setTimestamp();
+      return interaction.editReply({ embeds: [embed] });
+    }
 
     // ---- VIEW (default) ----
     if (sub === "view" || !sub) {
@@ -349,218 +659,256 @@ module.exports = {
         .setFooter({ text: `Requested by ${interaction.user.username}` })
         .setTimestamp();
 
-      // ---- Generate canvas image ----
-      const canvas = createCanvas(900, 350);
-      const ctx = canvas.getContext("2d");
+      // ── Decide between animated GIF or static PNG ──
+      let profileBuffer;
+      let attachmentName = "profile.png";
 
-      // Background
-      let bgImage = null;
-      if (customBg) {
-        try { bgImage = await loadImage(customBg); } catch {}
-      }
-      if (!bgImage && bg) {
-        const shopData = await redis.hgetall(`shop:bg:${bg}`);
-        if (shopData?.url) {
-          try { bgImage = await loadImage(shopData.url); } catch {}
+      if (premium && customBg && customBg.toLowerCase().endsWith(".gif")) {
+        try {
+          const profileData = {
+            avatarUrl: targetUser.displayAvatarURL({ extension: "png", size: 256 }),
+            username: targetUser.username,
+            color,
+            theme,
+            premium: true,
+            beta,
+            bio,
+            status,
+            balance,
+            reputation,
+            level,
+            xp,
+            needed,
+            progress,
+            barStyle,
+            links,
+            nameColor,
+            favGame,
+            embedBg,
+            userId: targetId,
+          };
+          profileBuffer = await generateAnimatedProfile(customBg, profileData);
+          attachmentName = "profile.gif";
+        } catch (err) {
+          console.error("Animated profile generation failed, falling back to static:", err);
+          profileBuffer = null;  // will use static fallback
         }
       }
-      if (bgImage) {
-        ctx.drawImage(bgImage, 0, 0, 900, 350);
-      } else {
-        let gradColors;
-        switch (theme) {
-          case "neon":
-            gradColors = ["#FF00FF33", "#00FFFF33"];
-            break;
-          case "space":
-            gradColors = ["#00003333", "#33006633"];
-            break;
-          case "nature":
-            gradColors = ["#00FF0033", "#00660033"];
-            break;
-          case "retro":
-            gradColors = ["#FF6B6B33", "#FFD93D33"];
-            break;
-          default:
-            gradColors = [color + "33", "#2C3E50"];
+
+      if (!profileBuffer) {
+        // ===== Static PNG generation (original, but without recent activity) =====
+        const canvas = createCanvas(900, 350);
+        const ctx = canvas.getContext("2d");
+
+        // Background
+        let bgImage = null;
+        if (customBg) {
+          try { bgImage = await loadImage(customBg); } catch {}
         }
-        const gradient = ctx.createLinearGradient(0, 0, 900, 350);
-        gradient.addColorStop(0, gradColors[0]);
-        gradient.addColorStop(1, gradColors[1]);
-        ctx.fillStyle = gradient;
+        if (!bgImage && bg) {
+          const shopData = await redis.hgetall(`shop:bg:${bg}`);
+          if (shopData?.url) {
+            try { bgImage = await loadImage(shopData.url); } catch {}
+          }
+        }
+        if (bgImage) {
+          ctx.drawImage(bgImage, 0, 0, 900, 350);
+        } else {
+          let gradColors;
+          switch (theme) {
+            case "neon":
+              gradColors = ["#FF00FF33", "#00FFFF33"];
+              break;
+            case "space":
+              gradColors = ["#00003333", "#33006633"];
+              break;
+            case "nature":
+              gradColors = ["#00FF0033", "#00660033"];
+              break;
+            case "retro":
+              gradColors = ["#FF6B6B33", "#FFD93D33"];
+              break;
+            default:
+              gradColors = [color + "33", "#2C3E50"];
+          }
+          const gradient = ctx.createLinearGradient(0, 0, 900, 350);
+          gradient.addColorStop(0, gradColors[0]);
+          gradient.addColorStop(1, gradColors[1]);
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, 900, 350);
+        }
+
+        // Overlay
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
         ctx.fillRect(0, 0, 900, 350);
-      }
+        ctx.fillStyle = "rgba(255,255,255,0.05)";
+        ctx.fillRect(0, 0, 900, 350);
 
-      // Overlay
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.fillRect(0, 0, 900, 350);
-      ctx.fillStyle = "rgba(255,255,255,0.05)";
-      ctx.fillRect(0, 0, 900, 350);
+        // Avatar
+        const avatar = await loadImage(targetUser.displayAvatarURL({ extension: "png", size: 256 }));
+        ctx.shadowColor = "rgba(0,0,0,0.5)";
+        ctx.shadowBlur = 20;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(130, 145, 80, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(avatar, 45, 65, 170, 170);
+        ctx.restore();
 
-      // Avatar
-      const avatar = await loadImage(targetUser.displayAvatarURL({ extension: "png", size: 256 }));
-      ctx.shadowColor = "rgba(0,0,0,0.5)";
-      ctx.shadowBlur = 20;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(130, 145, 80, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(avatar, 45, 65, 170, 170);
-      ctx.restore();
+        // Avatar ring
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 30;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(130, 145, 85, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
 
-      // Avatar ring
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 30;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(130, 145, 85, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-
-      // Status below profile picture
-      if (status) {
-        ctx.fillStyle = "rgba(255,255,255,0.6)";
-        ctx.font = getFont("italic", 14);
-        ctx.textAlign = "center";
-        ctx.fillText(`"${status}"`, 130, 250);
-        ctx.textAlign = "left";
-      }
-
-      // ---- Username + Premium Badge (text, no emoji) ----
-      const nameColorHex = nameColor || "#FFFFFF";
-      ctx.fillStyle = nameColorHex;
-      ctx.font = getFont("bold", 32);
-      const nameWidth = ctx.measureText(targetUser.username).width;
-      ctx.fillText(targetUser.username, 270, 100);
-      if (premium) {
-        // Draw a gold "PREMIUM" badge
-        ctx.fillStyle = "#FFD700";
-        ctx.font = getFont("bold", 18);
-        ctx.fillText("PREMIUM", 270 + nameWidth + 15, 100);
-      }
-
-      // ---- Title (no emoji in canvas, just text) ----
-      let title = "Member";
-      if (premium) title = "PREMIUM";
-      else if (beta) title = "Beta Tester";
-      ctx.fillStyle = color;
-      ctx.font = getFont("bold", 18);
-      ctx.fillText(title, 270, 140);
-
-      // Bio
-      ctx.fillStyle = "rgba(255,255,255,0.8)";
-      ctx.font = getFont("normal", 16);
-      let displayBio = bio;
-      if (displayBio.length > 60) displayBio = displayBio.substring(0, 57) + "...";
-      ctx.fillText(displayBio, 270, 175);
-
-      // Stats with spacing
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.font = getFont("bold", 16);
-      let xPos = 270;
-      const stats = [
-        { label: "Coins:", value: formatNumber(balance) },
-        { label: "Reputation:", value: formatNumber(reputation) },
-        { label: "Level:", value: level }
-      ];
-      stats.forEach((stat, index) => {
-        if (index > 0) {
-          ctx.fillStyle = "rgba(255,255,255,0.2)";
-          ctx.font = getFont("normal", 16);
-          ctx.fillText("|", xPos + 20, 205);
-          xPos += 40;
+        // Status below picture
+        if (status) {
+          ctx.fillStyle = "rgba(255,255,255,0.6)";
+          ctx.font = getFont("italic", 14);
+          ctx.textAlign = "center";
+          ctx.fillText(`"${status}"`, 130, 250);
+          ctx.textAlign = "left";
         }
+
+        // Username + Premium badge (text)
+        const nameColorHex = nameColor || "#FFFFFF";
+        ctx.fillStyle = nameColorHex;
+        ctx.font = getFont("bold", 32);
+        const nameWidth = ctx.measureText(targetUser.username).width;
+        ctx.fillText(targetUser.username, 270, 100);
+        if (premium) {
+          ctx.fillStyle = "#FFD700";
+          ctx.font = getFont("bold", 18);
+          ctx.fillText("PREMIUM", 270 + nameWidth + 15, 100);
+        }
+
+        // Title
+        let title = "Member";
+        if (premium) title = "PREMIUM";
+        else if (beta) title = "Beta Tester";
+        ctx.fillStyle = color;
+        ctx.font = getFont("bold", 18);
+        ctx.fillText(title, 270, 140);
+
+        // Bio
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.font = getFont("normal", 16);
+        let displayBio = bio;
+        if (displayBio.length > 60) displayBio = displayBio.substring(0, 57) + "...";
+        ctx.fillText(displayBio, 270, 175);
+
+        // Stats (coins, reputation, level) with spacing
         ctx.fillStyle = "rgba(255,255,255,0.9)";
         ctx.font = getFont("bold", 16);
-        ctx.fillText(stat.label, xPos, 205);
-        xPos += 100;
-        ctx.font = getFont("normal", 16);
+        let xPos = 270;
+        const stats = [
+          { label: "Coins:", value: formatNumber(balance) },
+          { label: "Reputation:", value: formatNumber(reputation) },
+          { label: "Level:", value: level }
+        ];
+        stats.forEach((stat, index) => {
+          if (index > 0) {
+            ctx.fillStyle = "rgba(255,255,255,0.2)";
+            ctx.font = getFont("normal", 16);
+            ctx.fillText("|", xPos + 20, 205);
+            xPos += 40;
+          }
+          ctx.fillStyle = "rgba(255,255,255,0.9)";
+          ctx.font = getFont("bold", 16);
+          ctx.fillText(stat.label, xPos, 205);
+          xPos += 100;
+          ctx.font = getFont("normal", 16);
+          ctx.fillStyle = color;
+          ctx.fillText(stat.value, xPos, 205);
+          xPos += 100;
+        });
+
+        // Social Links
+        if (links.length) {
+          const linkText = links.map(l => `${l.platform}: ${l.url}`).join('  •  ');
+          ctx.fillStyle = "rgba(255,255,255,0.5)";
+          ctx.font = getFont("normal", 12);
+          ctx.fillText(linkText, 270, 225);
+        }
+
+        // XP Bar
+        const barX = 270, barY = 240, barWidth = 540, barHeight = 22;
+        ctx.shadowBlur = 5;
+        ctx.shadowColor = "rgba(0,0,0,0.2)";
+        ctx.fillStyle = "rgba(255,255,255,0.15)";
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, barWidth, barHeight, 11);
+        ctx.fill();
+
+        let barGradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
+        if (barStyle === "neon") {
+          barGradient.addColorStop(0, "#00FFAA");
+          barGradient.addColorStop(1, "#00AAFF");
+        } else if (barStyle === "retro") {
+          barGradient.addColorStop(0, "#FF6B6B");
+          barGradient.addColorStop(1, "#FFD93D");
+        } else if (barStyle === "minimal") {
+          barGradient.addColorStop(0, "#FFFFFF");
+          barGradient.addColorStop(1, "#AAAAAA");
+        } else {
+          barGradient.addColorStop(0, color);
+          barGradient.addColorStop(1, "#FF6B6B");
+        }
+        ctx.fillStyle = barGradient;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = color;
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, barWidth * progress, barHeight, 11);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = getFont("bold", 14);
+        ctx.textAlign = "center";
+        ctx.fillText(`${formatNumber(xp)}/${formatNumber(needed)} XP`, barX + barWidth / 2, barY + 17);
+
+        // Level badge
+        ctx.textAlign = "center";
+        const levelX = 780, levelY = 80;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = "rgba(0,0,0,0.3)";
+        ctx.fillStyle = "rgba(255,255,255,0.1)";
+        ctx.beginPath();
+        ctx.arc(levelX, levelY, 50, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(levelX, levelY, 50, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = getFont("bold", 18);
+        ctx.fillText("LEVEL", levelX, levelY - 12);
         ctx.fillStyle = color;
-        ctx.fillText(stat.value, xPos, 205);
-        xPos += 100;
-      });
+        ctx.font = getFont("bold", 28);
+        ctx.fillText(level, levelX, levelY + 22);
 
-      // Social Links
-      if (links.length) {
-        const linkText = links.map(l => `${l.platform}: ${l.url}`).join('  •  ');
-        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        // Footer
+        ctx.textAlign = "left";
+        ctx.fillStyle = "rgba(255,255,255,0.2)";
         ctx.font = getFont("normal", 12);
-        ctx.fillText(linkText, 270, 225);
+        ctx.fillText(`ID: ${targetId.slice(0, 8)}...`, 20, 340);
+        ctx.textAlign = "right";
+        ctx.fillText("Profile v2.0", 880, 340);
+
+        profileBuffer = canvas.toBuffer("image/png");
       }
 
-      // XP Bar
-      const barX = 270, barY = 240, barWidth = 540, barHeight = 22;
-      ctx.shadowBlur = 5;
-      ctx.shadowColor = "rgba(0,0,0,0.2)";
-      ctx.fillStyle = "rgba(255,255,255,0.15)";
-      ctx.beginPath();
-      ctx.roundRect(barX, barY, barWidth, barHeight, 11);
-      ctx.fill();
-
-      let barGradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
-      if (barStyle === "neon") {
-        barGradient.addColorStop(0, "#00FFAA");
-        barGradient.addColorStop(1, "#00AAFF");
-      } else if (barStyle === "retro") {
-        barGradient.addColorStop(0, "#FF6B6B");
-        barGradient.addColorStop(1, "#FFD93D");
-      } else if (barStyle === "minimal") {
-        barGradient.addColorStop(0, "#FFFFFF");
-        barGradient.addColorStop(1, "#AAAAAA");
-      } else {
-        barGradient.addColorStop(0, color);
-        barGradient.addColorStop(1, "#FF6B6B");
-      }
-      ctx.fillStyle = barGradient;
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = color;
-      ctx.beginPath();
-      ctx.roundRect(barX, barY, barWidth * progress, barHeight, 11);
-      ctx.fill();
-
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = getFont("bold", 14);
-      ctx.textAlign = "center";
-      ctx.fillText(`${formatNumber(xp)}/${formatNumber(needed)} XP`, barX + barWidth / 2, barY + 17);
-
-      // Level badge
-      ctx.textAlign = "center";
-      const levelX = 780, levelY = 80;
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = "rgba(0,0,0,0.3)";
-      ctx.fillStyle = "rgba(255,255,255,0.1)";
-      ctx.beginPath();
-      ctx.arc(levelX, levelY, 50, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(levelX, levelY, 50, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = getFont("bold", 18);
-      ctx.fillText("LEVEL", levelX, levelY - 12);
-      ctx.fillStyle = color;
-      ctx.font = getFont("bold", 28);
-      ctx.fillText(level, levelX, levelY + 22);
-
-      // Footer
-      ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(255,255,255,0.2)";
-      ctx.font = getFont("normal", 12);
-      ctx.fillText(`ID: ${targetUser.id.slice(0, 8)}...`, 20, 340);
-      ctx.textAlign = "right";
-      ctx.fillText("Profile v2.0", 880, 340);
-
-      const buffer = canvas.toBuffer("image/png");
-      embed.setImage("attachment://profile.png");
+      embed.setImage(`attachment://${attachmentName}`);
 
       return interaction.editReply({
         embeds: [embed],
-        files: [new AttachmentBuilder(buffer, { name: "profile.png" })]
+        files: [new AttachmentBuilder(profileBuffer, { name: attachmentName })]
       });
     }
   }
