@@ -1,7 +1,7 @@
-// utils/animatedProfile.js – Fixed: uses canvas output (works with any gif-frames version)
+// utils/animatedProfile.js – Reliable animated GIF generation (omggif)
 const { createCanvas, loadImage, registerFont } = require("canvas");
 const GIFEncoder = require("gif-encoder-2");
-const gifFrames = require("gif-frames");
+const omggif = require("omggif");
 const path = require("path");
 const fs = require("fs");
 const { formatNumber } = require("../utils.js");
@@ -50,24 +50,44 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 async function generateAnimatedProfile(gifUrl, data) {
   const W = 900, H = 350;
 
-  // Extract frames using canvas output (works with every gif-frames version)
-  const frameData = await gifFrames({ url: gifUrl, frames: "all", outputType: "canvas" });
-  const frames = [];
-  for (const frame of frameData) {
-    const frameCanvas = frame.getImage();   // native Canvas object
-    const buffer = frameCanvas.toBuffer("image/png");
-    const delay = frame.frameInfo.delay * 10; // ms
-    frames.push({ buffer, delay });
-    if (frames.length >= 50) break; // safety cap
-  }
-  if (frames.length === 0) throw new Error("No frames found in GIF");
+  // 1️⃣ Fetch the GIF as a buffer
+  const response = await fetch(gifUrl);
+  if (!response.ok) throw new Error(`Failed to fetch GIF: ${response.status}`);
+  const gifBuffer = Buffer.from(await response.arrayBuffer());
 
-  // Preload the avatar once
+  // 2️⃣ Parse frames with omggif
+  const reader = new omggif.GifReader(gifBuffer);
+  const frameCount = reader.numFrames();
+  if (frameCount === 0) throw new Error("GIF has no frames.");
+
+  // 3️⃣ Extract each frame into a { buffer, delay } object
+  const frames = [];
+  for (let i = 0; i < Math.min(frameCount, 50); i++) {
+    const info = reader.frameInfo(i);
+    // Create a canvas for this frame
+    const frameCanvas = createCanvas(W, H);
+    const ctx = frameCanvas.getContext("2d");
+
+    // Draw the decoded frame onto the canvas
+    const imageData = ctx.createImageData(reader.width, reader.height);
+    reader.decodeAndBlitFrameRGBA(i, imageData.data);
+    // Put the frame at (0,0) – we assume the GIF is 900x350 or we’ll scale it later
+    // For simplicity, we draw the frame into a temporary canvas and then scale it to WxH
+    const tempCanvas = createCanvas(reader.width, reader.height);
+    const tempCtx = tempCanvas.getContext("2d");
+    tempCtx.putImageData(imageData, 0, 0);
+    // Scale to profile size
+    ctx.drawImage(tempCanvas, 0, 0, W, H);
+
+    const delay = info.delay ? info.delay * 10 : 100; // ms
+    frames.push({ buffer: frameCanvas.toBuffer("image/png"), delay });
+  }
+
+  // 4️⃣ Preload avatar
   const avatarImg = await loadImage(data.avatarUrl);
 
-  // ── Draw overlay function (EXACT copy of static profile UI) ──
+  // ── Profile overlay drawing function (identical to your static profile) ──
   async function drawProfileOverlay(ctx) {
-    // Overlay background
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = "rgba(255,255,255,0.05)";
@@ -83,7 +103,6 @@ async function generateAnimatedProfile(gifUrl, data) {
     ctx.drawImage(avatarImg, 45, 65, 170, 170);
     ctx.restore();
 
-    // Avatar ring
     ctx.shadowColor = data.color;
     ctx.shadowBlur = 30;
     ctx.strokeStyle = data.color;
@@ -93,7 +112,6 @@ async function generateAnimatedProfile(gifUrl, data) {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // Status
     if (data.status) {
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.font = getFont("italic", 14);
@@ -102,7 +120,6 @@ async function generateAnimatedProfile(gifUrl, data) {
       ctx.textAlign = "left";
     }
 
-    // Username + Premium badge
     const nameColorHex = data.nameColor || "#FFFFFF";
     ctx.fillStyle = nameColorHex;
     ctx.font = getFont("bold", 32);
@@ -114,7 +131,6 @@ async function generateAnimatedProfile(gifUrl, data) {
       ctx.fillText("PREMIUM", 270 + nameWidth + 15, 100);
     }
 
-    // Title
     let title = "Member";
     if (data.premium) title = "PREMIUM";
     else if (data.beta) title = "Beta Tester";
@@ -122,14 +138,12 @@ async function generateAnimatedProfile(gifUrl, data) {
     ctx.font = getFont("bold", 18);
     ctx.fillText(title, 270, 140);
 
-    // Bio
     ctx.fillStyle = "rgba(255,255,255,0.8)";
     ctx.font = getFont("normal", 16);
     let displayBio = data.bio;
     if (displayBio.length > 60) displayBio = displayBio.substring(0, 57) + "...";
     ctx.fillText(displayBio, 270, 175);
 
-    // Stats
     ctx.fillStyle = "rgba(255,255,255,0.9)";
     ctx.font = getFont("bold", 16);
     let xPos = 270;
@@ -155,7 +169,6 @@ async function generateAnimatedProfile(gifUrl, data) {
       xPos += 100;
     });
 
-    // Social Links
     if (data.links && data.links.length) {
       const linkText = data.links.map(l => `${l.platform}: ${l.url}`).join('  •  ');
       ctx.fillStyle = "rgba(255,255,255,0.5)";
@@ -163,7 +176,6 @@ async function generateAnimatedProfile(gifUrl, data) {
       ctx.fillText(linkText, 270, 225);
     }
 
-    // XP Bar
     const barX = 270, barY = 240, barWidth = 540, barHeight = 22;
     ctx.shadowBlur = 5;
     ctx.shadowColor = "rgba(0,0,0,0.2)";
@@ -200,7 +212,6 @@ async function generateAnimatedProfile(gifUrl, data) {
     ctx.textAlign = "center";
     ctx.fillText(`${formatNumber(data.xp)}/${formatNumber(data.needed)} XP`, barX + barWidth / 2, barY + 17);
 
-    // Level badge
     ctx.textAlign = "center";
     const levelX = 780, levelY = 80;
     ctx.shadowBlur = 20;
@@ -222,7 +233,6 @@ async function generateAnimatedProfile(gifUrl, data) {
     ctx.font = getFont("bold", 28);
     ctx.fillText(data.level, levelX, levelY + 22);
 
-    // Footer
     ctx.textAlign = "left";
     ctx.fillStyle = "rgba(255,255,255,0.2)";
     ctx.font = getFont("normal", 12);
@@ -231,31 +241,31 @@ async function generateAnimatedProfile(gifUrl, data) {
     ctx.fillText("Profile v2.0", 880, 340);
   }
 
-  // ── Build the GIF ──
+  // 5️⃣ Encode the final GIF
   const encoder = new GIFEncoder(W, H, "neuquant", true);
   encoder.start();
-  encoder.setRepeat(0);   // loop forever
+  encoder.setRepeat(0);
   encoder.setQuality(10);
 
   for (const frame of frames) {
     const frameCanvas = createCanvas(W, H);
     const ctx = frameCanvas.getContext("2d");
 
-    // Draw the background GIF frame
+    // Draw the background frame
     const bgImg = await loadImage(frame.buffer);
     ctx.drawImage(bgImg, 0, 0, W, H);
 
-    // Draw the profile overlay
+    // Overlay the profile UI
     await drawProfileOverlay(ctx);
 
-    encoder.setDelay(frame.delay || 100);
+    encoder.setDelay(frame.delay);
     encoder.addFrame(ctx);
   }
 
   encoder.finish();
-  const gifBuffer = encoder.out.getData();
-  console.log(`✅ Animated profile GIF generated: ${frames.length} frames, ${gifBuffer.length} bytes`);
-  return gifBuffer;
+  const outBuffer = encoder.out.getData();
+  console.log(`✅ Animated profile GIF generated: ${frames.length} frames, ${outBuffer.length} bytes`);
+  return outBuffer;
 }
 
 module.exports = { generateAnimatedProfile };
