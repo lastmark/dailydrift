@@ -160,17 +160,50 @@ module.exports = {
           const W = 64, H = 64, DELAY = 80, CYCLES = 3;
           const encoder = new GIFEncoder(W, H, "neuquant", true);
           encoder.start(); encoder.setRepeat(0); encoder.setDelay(DELAY); encoder.setQuality(10);
-          const canvas = createCanvas(W, H); const ctx = canvas.getContext("2d");
+          const canvas = createCanvas(W, H);
+          const ctx = canvas.getContext("2d");
+
+          // Simple rocket shape (triangle body + fins + window)
+          function drawRocket(ctx, dy) {
+            ctx.fillStyle = "#1a1a2e";
+            ctx.fillRect(0, 0, W, H);
+            // Rocket body (white triangle)
+            ctx.fillStyle = "#FFFFFF";
+            ctx.beginPath();
+            ctx.moveTo(W/2, 10 + dy);
+            ctx.lineTo(W/2 + 12, 50 + dy);
+            ctx.lineTo(W/2 - 12, 50 + dy);
+            ctx.closePath();
+            ctx.fill();
+            // Fins (red triangles)
+            ctx.fillStyle = "#FF4444";
+            ctx.beginPath();
+            ctx.moveTo(W/2 - 12, 50 + dy);
+            ctx.lineTo(W/2 - 20, 58 + dy);
+            ctx.lineTo(W/2 - 8, 54 + dy);
+            ctx.closePath();
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(W/2 + 12, 50 + dy);
+            ctx.lineTo(W/2 + 20, 58 + dy);
+            ctx.lineTo(W/2 + 8, 54 + dy);
+            ctx.closePath();
+            ctx.fill();
+            // Window (blue circle)
+            ctx.fillStyle = "#00AAFF";
+            ctx.beginPath();
+            ctx.arc(W/2, 30 + dy, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
           const positions = [0, -2, -4, -2, 0, 2, 4, 2];
           for (let c = 0; c < CYCLES; c++) {
             for (const dy of positions) {
-              ctx.fillStyle = "#1a1a2e"; ctx.fillRect(0, 0, W, H);
-              ctx.font = "40px 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif";
-              ctx.textAlign = "center";
-              ctx.fillText("🚀", W/2, H/2+12+dy);
+              drawRocket(ctx, dy);
               encoder.addFrame(ctx);
             }
           }
+
           encoder.finish();
           const buffer = encoder.out.getData();
           await message.author.send({
@@ -180,7 +213,7 @@ module.exports = {
           await message.reply("📬 Rocket GIF sent to your DMs!");
         } catch (err) {
           console.error(err);
-          await message.reply(`❌ Failed to create rocket GIF: ${err.message}`);
+          await message.reply(`❌ Failed: ${err.message}`);
         }
         return;
       }
