@@ -1,576 +1,311 @@
-// index.js – Full Main Bot (with button‑based ticket panel)
-const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
-const { token, TERMS_VERSION } = require("./config");
-const redis = require("./redis");
-const fs = require("fs");
-const path = require("path");
-const { checkBlacklist, buildBlacklistEmbed } = require("./blacklist.js");
-const setupLogger = require("./logger.js");
-const { createTicket } = require("./commands/ticket.js");
+// commands/mines.js – Mines game (full reveal on end)
+const {
+  SlashCommandBuilder,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  MessageFlags
+} = require("discord.js");
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildPresences
-  ],
-  partials: [
-    Partials.Message,
-    Partials.Channel,
-    Partials.Reaction,
-    Partials.GuildMember
-  ]
-});
+const MAX_BET = 250_000;
+const MULTIPLIERS = [1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.0, 10.0];
+const GRID_SIZE = 9;   // 3×3
 
-setupLogger(client, redis);
-client.commands = new Collection();
+module.exports = {
+  category: "Games",
+  data: new SlashCommandBuilder()
+    .setName("mines")
+    .setDescription("Play Mines – pick tiles and cash out before hitting the bomb!")
+    .addStringOption(opt =>
+      opt.setName("bet")
+        .setDescription("Amount to bet, or 'all' (max 250,000)")
+        .setRequired(true)
+    ),
 
-// ---- Global message cache to prevent duplicate processing ----
-const processedMessages = new Set();
+  async execute(interaction, client, redis) {
+    const userId = interaction.user.id;
+    const betRaw = interaction.options.getString("bet").toLowerCase();
+    let bet;
 
-// ==========================================
-// 📂 EVENT LOADER
-// ==========================================
-const eventsPath = path.join(__dirname, "events");
-if (fs.existsSync(eventsPath)) {
-  const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith(".js"));
-  for (const file of eventFiles) {
-    const filePath = path.join(eventsPath, file);
-    const event = require(filePath);
-    if (event && event.name) {
-      if (event.once) {
-        client.once(event.name, (...args) => event.execute(...args, client, redis));
-      } else {
-        client.on(event.name, (...args) => event.execute(...args, client, redis));
+    const balanceKey = `eco:${userId}:money`;
+    const currentBal = Number(await redis.get(balanceKey) || 0);
+
+    // ---- Parse bet ----
+    if (betRaw === "all") {
+      bet = Math.min(currentBal, MAX_BET);
+      if (bet <= 0) {
+        return interaction.reply({ content: "❌ You have no coins.", flags: MessageFlags.Ephemeral });
       }
-      console.log(`✅ Loaded Event: ${file}`);
-    }
-  }
-}
-
-// ==========================================
-// 🛡️ COMMAND LOADER
-// ==========================================
-const commandsPath = path.join(__dirname, "commands");
-if (fs.existsSync(commandsPath)) {
-  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
-  for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const cmd = require(filePath);
-    if (cmd && cmd.data && cmd.data.name) {
-      client.commands.set(cmd.data.name, cmd);
-      console.log(`✅ Loaded Command: ${cmd.data.name}`);
     } else {
-      console.log(`❌ [SKIPPED] The file "${file}" is missing valid exports or a data property.`);
-    }
-  }
-}
-
-// ==========================================
-// 🏎️ INTERACTION HANDLER
-// ==========================================
-client.on("interactionCreate", async (interaction) => {
-  if (interaction.isChatInputCommand()) {
-    const cmd = client.commands.get(interaction.commandName);
-    if (!cmd) return;
-
-    console.log(`[SLASH] ${interaction.commandName} by ${interaction.user.tag}`);
-
-    // ---- TERMS CHECK (skip for /terms command) ----
-    if (interaction.commandName !== "terms") {
-      const accepted = await redis.get(`terms:accepted:${interaction.user.id}`);
-      if (accepted !== TERMS_VERSION) {
-        const embed = new EmbedBuilder()
-          .setColor("#ED4245")
-          .setTitle("📜 Terms of Service Required")
-          .setDescription("You must accept the Terms of Service before using this bot.")
-          .addFields({ 
-            name: "Next Steps", 
-            value: "Please run `/terms` to view and accept the Terms of Service." 
-          })
-          .setTimestamp();
-        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      bet = parseInt(betRaw);
+      if (isNaN(bet) || bet < 1) {
+        return interaction.reply({ content: "❌ Please enter a number or 'all'.", flags: MessageFlags.Ephemeral });
       }
+      if (bet > MAX_BET) bet = MAX_BET;
     }
 
-    // ---- BLACKLIST CHECK ----
-    const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
-    if (blacklist) {
-      const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-    }
-
-    // ---- MAINTENANCE CHECK ----
-    const maintenanceKey = `maintenance:${interaction.guild.id}`;
-    if (await redis.get(maintenanceKey) === "true") {
+    if (currentBal < bet) {
       return interaction.reply({
-        content: "🔧 The bot is currently under maintenance. Please try again later.",
+        content: `❌ You need **${bet.toLocaleString()}** coins, but you have **${currentBal.toLocaleString()}**.`,
         flags: MessageFlags.Ephemeral
       });
     }
 
-    try {
-      await cmd.execute(interaction, client, redis);
-    } catch (err) {
-      console.error(err);
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: "❌ An error occurred executing this command." });
-      } else {
-        await interaction.reply({ content: "❌ An error occurred executing this command.", flags: MessageFlags.Ephemeral });
-      }
-    }
-    return;
-  }
-
-  // ---- Buttons ----
-  if (interaction.isButton()) {
-    // ---- Terms of Service button handler ----
-    if (interaction.customId === "terms_accept") {
-      const userId = interaction.user.id;
-      await redis.set(`terms:accepted:${userId}`, TERMS_VERSION);
-      await interaction.update({
-        content: "✅ You have accepted the Terms of Service. You may now use all features.",
-        embeds: [],
-        components: []
+    // Check active game
+    if (await redis.get(`mines:${userId}`)) {
+      return interaction.reply({
+        content: "❌ You already have an active Mines game. Finish it first.",
+        flags: MessageFlags.Ephemeral
       });
-      return;
     }
 
-    if (interaction.customId === "terms_deny") {
-      const userId = interaction.user.id;
-      await redis.del(`terms:accepted:${userId}`);
-      await interaction.update({
-        content: "❌ You have denied the Terms of Service. You cannot use this bot until you accept.",
-        embeds: [],
-        components: []
-      });
-      return;
+    // Deduct bet
+    await redis.set(balanceKey, currentBal - bet);
+
+    // Generate mine position (1‑based, 1‑9)
+    const minePos = Math.floor(Math.random() * GRID_SIZE) + 1;
+
+    const gameState = {
+      bet,
+      minePos,
+      picked: [],       // numbers already picked safely
+      status: "playing",
+    };
+    await redis.set(`mines:${userId}`, JSON.stringify(gameState));
+
+    // Build embed
+    const embed = new EmbedBuilder()
+      .setColor("#5865F2")
+      .setTitle("💣 Mines")
+      .setDescription(
+        `Bet: **${bet.toLocaleString()}** coins\n` +
+        `Pick a tile (1‑9). One is a **bomb**!\n` +
+        `Current multiplier: **1.00×**`
+      )
+      .setFooter({ text: "Choose wisely…" });
+
+    // Build buttons (3×3 grid + cashout)
+    const tileButtons = [];
+    for (let i = 1; i <= GRID_SIZE; i++) {
+      tileButtons.push(
+        new ButtonBuilder()
+          .setCustomId(`mines_tile_${i}`)
+          .setLabel(`${i}`)
+          .setStyle(ButtonStyle.Primary)
+      );
     }
+    const cashOutBtn = new ButtonBuilder()
+      .setCustomId("mines_cashout")
+      .setLabel("Cash Out")
+      .setStyle(ButtonStyle.Success);
 
-    // ---- NEW: Open Ticket button from panel ----
-    if (interaction.customId === "ticket_create_panel") {
-      // Replicate checks for button (slash checks don't cover this)
-      const accepted = await redis.get(`terms:accepted:${interaction.user.id}`);
-      if (accepted !== TERMS_VERSION) {
-        return interaction.reply({ content: "📜 You must accept the Terms of Service first.", flags: MessageFlags.Ephemeral });
-      }
-      const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
-      if (blacklist) {
-        const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
-        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-      }
-      const maintenanceKey = `maintenance:${interaction.guild.id}`;
-      if (await redis.get(maintenanceKey) === "true") {
-        return interaction.reply({ content: "🔧 The bot is under maintenance.", flags: MessageFlags.Ephemeral });
-      }
-
-      // Create the ticket (import fresh or use the already required one)
-      const { createTicket } = require("./commands/ticket.js");
-      await createTicket(interaction, client, redis, interaction.user.id, "support");
-      return;
+    const rows = [];
+    for (let r = 0; r < 3; r++) {
+      rows.push(new ActionRowBuilder().addComponents(tileButtons.slice(r * 3, r * 3 + 3)));
     }
+    rows.push(new ActionRowBuilder().addComponents(cashOutBtn));
 
-    // ---- Ticket button handler (claim, add user, close) ----
-    if (interaction.customId.startsWith("ticket_")) {
-      const [action, channelId] = interaction.customId.split(':');
-      const channel = interaction.guild.channels.cache.get(channelId);
-      if (!channel) {
-        return interaction.reply({ content: "❌ Ticket channel not found.", flags: MessageFlags.Ephemeral });
-      }
+    await interaction.deferReply();
+    const message = await interaction.editReply({ embeds: [embed], components: rows });
 
-      const ticketData = await redis.hgetall(`ticket:${interaction.guild.id}:${channelId}`);
-      if (!ticketData || !ticketData.creator) {
-        return interaction.reply({ content: "❌ Invalid ticket.", flags: MessageFlags.Ephemeral });
-      }
-      const data = ticketData; // hgetall returns a plain object, no JSON.parse needed
+    // Collector
+    const collector = message.createMessageComponentCollector({
+      filter: i => i.user.id === userId && (i.customId.startsWith("mines_tile_") || i.customId === "mines_cashout"),
+      time: 300_000,
+    });
 
-      // ---- Claim ----
-      if (action === "ticket_claim") {
-        if (data.claimedBy) {
-          return interaction.reply({ content: `❌ Already claimed by <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
+    // Helper to generate the revealed grid after game ends
+    const revealGrid = (minePos, picked) => {
+      const buttons = [];
+      for (let i = 1; i <= GRID_SIZE; i++) {
+        let label, style;
+        if (i === minePos) {
+          label = "💣";
+          style = ButtonStyle.Danger;
+        } else if (picked.includes(i)) {
+          label = "✓";
+          style = ButtonStyle.Success;
+        } else {
+          label = "○";
+          style = ButtonStyle.Secondary;
         }
-        const supportRoleId = await redis.get(`ticket:settings:${interaction.guild.id}:support_role`);
-        if (supportRoleId && !interaction.member.roles.cache.has(supportRoleId)) {
-          return interaction.reply({ content: "❌ You don't have permission to claim.", flags: MessageFlags.Ephemeral });
+        buttons.push(
+          new ButtonBuilder()
+            .setCustomId(`mines_tile_${i}`)
+            .setLabel(label)
+            .setStyle(style)
+            .setDisabled(true)
+        );
+      }
+      // Cash out button disabled, unchanged label
+      const cashOutDisabled = new ButtonBuilder()
+        .setCustomId("mines_cashout")
+        .setLabel("Cash Out")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true);
+
+      const resultRows = [];
+      for (let r = 0; r < 3; r++) {
+        resultRows.push(new ActionRowBuilder().addComponents(buttons.slice(r * 3, r * 3 + 3)));
+      }
+      resultRows.push(new ActionRowBuilder().addComponents(cashOutDisabled));
+      return resultRows;
+    };
+
+    collector.on("collect", async (btnInteraction) => {
+      if (btnInteraction.user.id !== userId) {
+        return btnInteraction.reply({ content: "❌ This is not your game.", flags: MessageFlags.Ephemeral });
+      }
+
+      const raw = await redis.get(`mines:${userId}`);
+      if (!raw) {
+        await btnInteraction.update({ content: "⚠️ Game session expired.", embeds: [], components: [] });
+        collector.stop();
+        return;
+      }
+      const state = JSON.parse(raw);
+      if (state.status !== "playing") return;
+
+      // ---- Cash out ----
+      if (btnInteraction.customId === "mines_cashout") {
+        const numPicked = state.picked.length;
+        if (numPicked === 0) {
+          return btnInteraction.reply({ content: "❌ Pick at least one tile before cashing out.", flags: MessageFlags.Ephemeral });
         }
-        await redis.hset(`ticket:${interaction.guild.id}:${channelId}`, "claimedBy", interaction.user.id);
-        await channel.send(`✅ ${interaction.user} has claimed this ticket.`);
-        return interaction.reply({ content: "✅ Ticket claimed!", flags: MessageFlags.Ephemeral });
-      }
+        const multiplier = MULTIPLIERS[numPicked - 1];
+        const payout = Math.floor(bet * multiplier);
 
-      // ---- Add User (prompt) ----
-      if (action === "ticket_add_user") {
-        return interaction.reply({
-          content: "Use `/ticket add @user` to add someone.",
-          flags: MessageFlags.Ephemeral
-        });
-      }
+        state.status = "cashed_out";
+        await redis.set(`mines:${userId}`, JSON.stringify(state));
+        collector.stop();
 
-      // ---- Close (prompt) ----
-      if (action === "ticket_close") {
-        return interaction.reply({
-          content: "Use `/ticket close` in the ticket channel.",
-          flags: MessageFlags.Ephemeral
-        });
-      }
+        const newBal = Number(await redis.get(balanceKey) || 0) + payout;
+        await redis.set(balanceKey, newBal);
 
-      // Fallback
-      return interaction.reply({ content: "❌ Unknown ticket action.", flags: MessageFlags.Ephemeral });
-    }
+        const revealedRows = revealGrid(state.minePos, state.picked);
 
-    // ---- Blackjack buttons (ignored, handled in games command) ----
-    if (interaction.customId.startsWith('blackjack_')) return;
-
-    // ---- Counting shop buttons ----
-    const { customId, user } = interaction;
-    if (customId.startsWith('counting_buy_')) {
-      try {
-        const item = customId.split('_')[2];
-        const userId = user.id;
-        const prices = { shield: 200, double: 500 };
-        const price = prices[item];
-        if (!price) return interaction.reply({ content: "❌ Invalid item.", flags: MessageFlags.Ephemeral });
-
-        const balanceKey = `eco:${userId}:money`;
-        let coins = Number(await redis.get(balanceKey) || 0);
-        if (coins < price) {
-          return interaction.reply({
-            embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`❌ You need **${price}** coins but only have **${coins}**.`)],
-            flags: MessageFlags.Ephemeral
-          });
-        }
-
-        await redis.set(balanceKey, coins - price);
-        if (item === 'shield') await redis.incr(`eco:${userId}:shield`);
-        else if (item === 'double') await redis.set(`eco:${userId}:double`, 5);
-
-        const itemNames = { shield: "🛡️ Shield", double: "⚡ Double XP (5 uses)" };
-        const embed = new EmbedBuilder()
+        const embed = EmbedBuilder.from(message.embeds[0])
           .setColor("#57F287")
-          .setTitle("✅ Purchase Successful!")
-          .setDescription(`You bought **${itemNames[item]}** for **${price}** coins!`)
-          .addFields({ name: "💰 New Balance", value: `${await redis.get(balanceKey) || 0} coins`, inline: true })
-          .setTimestamp();
+          .setTitle("💰 Cashed Out!")
+          .setDescription(
+            `You cashed out after **${numPicked}** safe pick(s).\n` +
+            `Multiplier: **${multiplier.toFixed(2)}×**\n` +
+            `You won **${payout.toLocaleString()}** coins!\n` +
+            `Bet: ${bet.toLocaleString()} coins`
+          )
+          .setFooter({ text: "Well played!" });
 
-        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-      } catch (err) {
-        console.error("Button handler error:", err);
-        if (!interaction.replied) {
-          await interaction.reply({ content: "❌ Error handling button.", flags: MessageFlags.Ephemeral });
-        }
-      }
-    }
-if (interaction.customId.startsWith('mines_')) return;
-    if (!interaction.replied) {
-      await interaction.reply({ content: "❌ This button is not supported.", flags: MessageFlags.Ephemeral });
-    }
-    return;
-  }
-
-  // ---- Modal Submits ----
-  if (interaction.isModalSubmit()) {
-    if (interaction.customId.startsWith("embed_modal:")) {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      try {
-        const targetChannelId = interaction.customId.split(":")[1];
-        const targetChannel = await interaction.guild.channels.fetch(targetChannelId);
-        if (!targetChannel) {
-          return await interaction.editReply({ content: "❌ Could not find or access that destination channel." });
-        }
-
-        const title = interaction.fields.getTextInputValue("embed_title");
-        const description = interaction.fields.getTextInputValue("embed_description");
-        let colorInput = interaction.fields.getTextInputValue("embed_color") || "#2B2D31";
-        const footerText = interaction.fields.getTextInputValue("embed_footer") || null;
-
-        if (!colorInput.startsWith("#")) colorInput = `#${colorInput}`;
-        if (!/^#[0-9A-F]{6}$/i.test(colorInput)) colorInput = "#2B2D31";
-
-        const customEmbed = new EmbedBuilder()
-          .setTitle(title)
-          .setDescription(description)
-          .setColor(colorInput);
-        if (footerText) customEmbed.setFooter({ text: footerText });
-
-        await targetChannel.send({ embeds: [customEmbed] });
-        await interaction.editReply({ content: `✅ Success! Your custom embed has been published to ${targetChannel}.` });
-      } catch (error) {
-        console.error("Failed to construct or broadcast modal embed:", error);
-        await interaction.editReply({ content: "❌ Failed to send embed. Ensure I have permissions to view/send messages in that channel." });
-      }
-    }
-    return;
-  }
-});
-
-// ==========================================
-// 💬 MESSAGE LISTENER (Counting & Prefix Commands)
-// ==========================================
-client.on("messageCreate", async (message) => {
-  if (!message.guild || message.author.bot) return;
-
-  // Prevent duplicate processing of the same message
-  if (processedMessages.has(message.id)) return;
-  processedMessages.add(message.id);
-  setTimeout(() => processedMessages.delete(message.id), 5000);
-
-  // ---- Counting game ----
-  try {
-    const countingChannelId = await redis.get(`counting:${message.guild.id}:channel`);
-    if (countingChannelId && message.channel.id === countingChannelId) {
-      const pureContent = message.content.replace(/\s+/g, "");
-      const isValidMathOrNumber = /^[0-9+\-*/^()]+$/.test(pureContent);
-      if (!isValidMathOrNumber) {
-        if (message.deletable) await message.delete().catch((err) => console.error("Failed to delete chat text:", err));
+        await btnInteraction.update({ embeds: [embed], components: revealedRows });
+        await redis.del(`mines:${userId}`);
         return;
       }
 
-      // Dynamic import instead of require()
-      const countingModule = await import("./games/counting.js");
-      const runCountingGame = countingModule.default || countingModule;
+      // ---- Tile pick ----
+      const tileNum = parseInt(btnInteraction.customId.split("_")[2]);
+      if (isNaN(tileNum) || tileNum < 1 || tileNum > GRID_SIZE) return;
 
-      await runCountingGame(message, redis);
-      return; // Stop processing – don't treat as prefix command
-    }
-  } catch (error) {
-    console.error("Counting game error:", error);
-  }
-
-  // ---- Prefix Commands ----
-  if (!message.content.startsWith("!") && !message.content.startsWith("?")) return;
-
-  const args = message.content.slice(1).trim().split(/ +/);
-  const cmd = args.shift().toLowerCase();
-
-  // ---- TERMS CHECK (only for prefix commands) ----
-  if (cmd !== "terms") {
-    const accepted = await redis.get(`terms:accepted:${message.author.id}`);
-    if (accepted !== TERMS_VERSION) {
-      return message.reply("📜 You must accept the Terms of Service first. Run `!terms` to view and accept.");
-    }
-  }
-
-  // ---- BLACKLIST CHECK ----
-  const blacklist = await checkBlacklist(redis, message.author.id, message.guild.id);
-  if (blacklist) {
-    const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
-    await message.reply({ embeds: [embed] });
-    await message.delete().catch(() => {});
-    return;
-  }
-
-  // ---- MAINTENANCE CHECK ----
-  const maintenanceKey = `maintenance:${message.guild.id}`;
-  if (await redis.get(maintenanceKey) === "true") {
-    await message.reply("🔧 The bot is currently under maintenance. Please try again later.");
-    return;
-  }
-
-  // ---- Public prefix commands ----
-  // (Your existing public commands: shop, buy, shields, countingstats, etc.)
-  // Include the full logic from your original messageCreate here.
-  // For brevity, I'm showing a placeholder. Replace with your actual public command logic.
-  if (cmd === "shop") {
-    // ... shop logic
-  } else if (cmd === "buy") {
-    // ... buy logic
-  } else if (cmd === "shields") {
-    // ... shields logic
-  } else if (cmd === "countingstats") {
-    // ... countingstats logic
-  }
-
-  // ---- Dev commands (only you) ----
-  if (message.author.id === "1303357369622990889") {
-    // Your existing dev commands (addcoins, removecoins, etc.)
-    // Include them here.
-    if (cmd === "addcoins") {
-      // ... addcoins logic
-    } else if (cmd === "removecoins") {
-      // ... removecoins logic
-    }
-    // ... other dev commands
-  }
-
-  // If no command matched, do nothing.
-});
-
-// ==========================================
-// 🖼️ WELCOME / LEAVE CARDS
-// ==========================================
-const { welcomeCard } = require("./canvas/welcome");
-const { leaveCard } = require("./canvas/leave");
-
-client.on("guildMemberAdd", async (member) => {
-  const channelId = await redis.get(`welcome:${member.guild.id}`);
-  if (!channelId) return;
-  const channel = member.guild.channels.cache.get(channelId);
-  if (!channel) return;
-  const img = await welcomeCard(member.user, member.guild);
-  channel.send({ files: [{ attachment: img, name: "welcome.png" }] });
-});
-
-// (Old reaction-based ticket panel handler removed – we now use buttons)
-
-// ==========================================
-// 🚀 READY EVENT
-// ==========================================
-client.once("ready", async () => {
-  console.log(`${client.user.tag} online`);
-
-  const { ActivityType } = require("discord.js");
-  client.user.setActivity("/help", { type: ActivityType.Playing });
-  client.user.setStatus("online");
-
-  // ---- HEARTBEAT (for helper bot) ----
-  await redis.set('bot:heartbeat', Date.now());
-  setInterval(async () => {
-    await redis.set('bot:heartbeat', Date.now());
-  }, 60000);
-
-  // ---- REAL‑TIME STATS UPDATER ----
-  async function updateStats(guild) {
-    const guildId = guild.id;
-    const isPremium = await redis.get(`premium:guild:${guildId}`) !== null;
-
-    // Total Members (free)
-    const totalChannelId = await redis.get(`stats:channel:total:${guildId}`);
-    if (totalChannelId) {
-      const channel = guild.channels.cache.get(totalChannelId);
-      if (channel) {
-        const count = guild.memberCount;
-        const baseName = await redis.get(`stats:baseName:total:${guildId}`) || "👥 ┃ Members";
-        const newName = `${baseName} • ${count}`;
-        if (channel.name !== newName) await channel.setName(newName).catch(() => {});
+      if (state.picked.includes(tileNum)) {
+        return btnInteraction.reply({ content: "❌ This tile is already revealed.", flags: MessageFlags.Ephemeral });
       }
-    }
 
-    // Online Users (free)
-    const onlineChannelId = await redis.get(`stats:channel:online:${guildId}`);
-    if (onlineChannelId) {
-      const channel = guild.channels.cache.get(onlineChannelId);
-      if (channel) {
-        const onlineCount = guild.members.cache.filter(m => m.presence && ["online", "idle", "dnd"].includes(m.presence.status)).size;
-        const baseName = await redis.get(`stats:baseName:online:${guildId}`) || "🟢 ┃ Online";
-        const newName = `${baseName} • ${onlineCount}`;
-        if (channel.name !== newName) await channel.setName(newName).catch(() => {});
+      // Bomb!
+      if (tileNum === state.minePos) {
+        state.status = "bust";
+        await redis.set(`mines:${userId}`, JSON.stringify(state));
+        collector.stop();
+
+        const revealedRows = revealGrid(state.minePos, state.picked);
+
+        const embed = EmbedBuilder.from(message.embeds[0])
+          .setColor("#ED4245")
+          .setTitle("💥 Busted!")
+          .setDescription(
+            `You hit the **bomb** on tile ${tileNum}!\n` +
+            `You lost **${bet.toLocaleString()}** coins.`
+          )
+          .setFooter({ text: "Better luck next time!" });
+
+        await btnInteraction.update({ embeds: [embed], components: revealedRows });
+        await redis.del(`mines:${userId}`);
+        return;
       }
-    }
 
-    // Voice Activity (premium only)
-    if (isPremium) {
-      const voiceChannelId = await redis.get(`stats:channel:voice:${guildId}`);
-      if (voiceChannelId) {
-        const channel = guild.channels.cache.get(voiceChannelId);
-        if (channel) {
-          const voiceCount = guild.members.cache.filter(m => m.voice.channel).size;
-          const baseName = await redis.get(`stats:baseName:voice:${guildId}`) || "🎙️ ┃ Voice";
-          const newName = `${baseName} • ${voiceCount}`;
-          if (channel.name !== newName) await channel.setName(newName).catch(() => {});
+      // Safe tile
+      state.picked.push(tileNum);
+      await redis.set(`mines:${userId}`, JSON.stringify(state));
+
+      const numPicked = state.picked.length;
+      const currentMult = MULTIPLIERS[numPicked - 1];
+      const maxMult = MULTIPLIERS[MULTIPLIERS.length - 1];
+
+      // Update buttons for current play (hide picked tiles with ✓)
+      const updatedRows = rows.map(row =>
+        new ActionRowBuilder().addComponents(
+          row.components.map(btn => {
+            const b = ButtonBuilder.from(btn);
+            const btnNum = parseInt(btn.data.custom_id?.split("_")[2]);
+            if (state.picked.includes(btnNum)) {
+              b.setLabel("✓").setStyle(ButtonStyle.Success).setDisabled(true);
+            }
+            return b;
+          })
+        )
+      );
+
+      const embed = EmbedBuilder.from(message.embeds[0])
+        .setColor("#FFD700")
+        .setDescription(
+          `Bet: **${bet.toLocaleString()}** coins\n` +
+          `Safe tiles picked: **${numPicked}**\n` +
+          `Current multiplier: **${currentMult.toFixed(2)}×**\n` +
+          `Max possible: **${maxMult}×**\n\n` +
+          `Choose another tile or **Cash Out**!`
+        )
+        .setFooter({ text: "The bomb is still hidden…" });
+
+      await btnInteraction.update({ embeds: [embed], components: updatedRows });
+    });
+
+    collector.on("end", async () => {
+      const raw = await redis.get(`mines:${userId}`);
+      if (!raw) return;
+      const state = JSON.parse(raw);
+      if (state.status === "playing") {
+        const numPicked = state.picked.length;
+        if (numPicked === 0) {
+          // No picks – lose bet
+          state.status = "bust";
+          await redis.set(`mines:${userId}`, JSON.stringify(state));
+          try {
+            const revealedRows = revealGrid(state.minePos, state.picked);
+            const embed = new EmbedBuilder()
+              .setColor("#ED4245")
+              .setTitle("⏰ Game Expired")
+              .setDescription("You didn't pick any tile – you lost your bet.")
+              .setFooter({ text: "Next time be faster!" });
+            await message.edit({ embeds: [embed], components: revealedRows });
+          } catch (e) {}
+        } else {
+          // Auto‑cashout with current multiplier
+          const multiplier = MULTIPLIERS[numPicked - 1];
+          const payout = Math.floor(bet * multiplier);
+          const newBal = Number(await redis.get(balanceKey) || 0) + payout;
+          await redis.set(balanceKey, newBal);
+          state.status = "cashed_out";
+          await redis.set(`mines:${userId}`, JSON.stringify(state));
+          try {
+            const revealedRows = revealGrid(state.minePos, state.picked);
+            const embed = new EmbedBuilder()
+              .setColor("#57F287")
+              .setTitle("⏰ Time’s up – Auto‑Cashed Out!")
+              .setDescription(`You received **${payout.toLocaleString()}** coins.`)
+              .setFooter({ text: "Game timed out." });
+            await message.edit({ embeds: [embed], components: revealedRows });
+          } catch (e) {}
         }
+        await redis.del(`mines:${userId}`);
       }
-
-      // Joined Today (premium only)
-      const joinedChannelId = await redis.get(`stats:channel:joined:${guildId}`);
-      if (joinedChannelId) {
-        const channel = guild.channels.cache.get(joinedChannelId);
-        if (channel) {
-          const now = new Date();
-          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          const joinedCount = guild.members.cache.filter(m => m.joinedAt && m.joinedAt >= today).size;
-          const baseName = await redis.get(`stats:baseName:joined:${guildId}`) || "📅 ┃ Joined Today";
-          const newName = `${baseName} • ${joinedCount}`;
-          if (channel.name !== newName) await channel.setName(newName).catch(() => {});
-        }
-      }
-    }
+    });
   }
-
-  // ---- STATS UPDATER INTERVAL (every 30s) ----
-  setInterval(async () => {
-    for (const guild of client.guilds.cache.values()) {
-      await updateStats(guild);
-    }
-  }, 30000);
-
-  // ---- TRIGGER STATS ON EVENTS ----
-  client.on("guildMemberAdd", async (member) => {
-    await updateStats(member.guild);
-  });
-  client.on("guildMemberRemove", async (member) => {
-    await updateStats(member.guild);
-  });
-  client.on("presenceUpdate", async (oldPresence, newPresence) => {
-    if (newPresence.guild) await updateStats(newPresence.guild);
-  });
-  client.on("voiceStateUpdate", async (oldState, newState) => {
-    const guild = newState.guild;
-    const isPremium = await redis.get(`premium:guild:${guild.id}`) !== null;
-    if (isPremium) await updateStats(guild);
-  });
-
-  // ---- BIRTHDAY CRON ----
-  setInterval(async () => {
-    const now = new Date();
-    if (now.getHours() === 0 && now.getMinutes() === 0) {
-      const todayStr = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      console.log(`🎂 [BIRTHDAY CRON] Running for date: ${todayStr}...`);
-      const userIds = await redis.smembers(`birthdays:date:${todayStr}`);
-      if (!userIds || userIds.length === 0) return;
-      for (const guild of client.guilds.cache.values()) {
-        try {
-          const channelId = await redis.get(`birthday_channel:${guild.id}`);
-          if (!channelId) continue;
-          const channel = await guild.channels.fetch(channelId).catch(() => null);
-          if (!channel) continue;
-          const birthdayMembersInGuild = [];
-          for (const id of userIds) {
-            const hasMember = await guild.members.fetch(id).catch(() => null);
-            if (hasMember) birthdayMembersInGuild.push(id);
-          }
-          if (birthdayMembersInGuild.length > 0) {
-            const mentions = birthdayMembersInGuild.map(id => `<@${id}>`).join(", ");
-            const bdayEmbed = new EmbedBuilder()
-              .setColor("#FF69B4")
-              .setTitle("🎉 Happy Birthday! 🎉")
-              .setDescription(`✨ Today we celebrate the wonderful day of birth for our amazing members:\n\n${mentions}\n\nDrop some love in the chat and wish them a legendary day! 🎂🎈`)
-              .setThumbnail(client.user.displayAvatarURL())
-              .setTimestamp();
-            await channel.send({ content: mentions, embeds: [bdayEmbed] }).catch(() => null);
-          }
-        } catch (guildError) {
-          console.error(`Error processing birthday cycle for guild ${guild.id}:`, guildError);
-        }
-      }
-    }
-  }, 60000);
-
-  // ---- DEPLOY SLASH COMMANDS ----
-  const commands = [];
-  for (const [name, cmd] of client.commands) {
-    try {
-      commands.push(cmd.data.toJSON());
-    } catch (err) {
-      console.error(`❌ Broken data conversion structure: ${name}`);
-      console.error(err);
-    }
-  }
-  try {
-    const { REST, Routes } = require("discord.js");
-    const rest = new REST({ version: "10" }).setToken(token);
-    console.log(`Syncing ${commands.length} application slash entries...`);
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands }
-    );
-    console.log(`Successfully deployed application command nodes globally!`);
-  } catch (err) {
-    console.error("REST Command Deployment Error:", err);
-  }
-});
-
-client.login(token);
+};
