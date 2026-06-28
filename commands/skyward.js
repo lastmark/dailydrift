@@ -14,7 +14,7 @@ const UPDATE_INTERVAL_MS = 2000;   // 2 sec update – smooth & safe
 
 // 🔥 Optional: replace with your custom animated rocket emoji (e.g., "<a:rocket_fly:123456789>")
 // If you don't have one, leave "🚀" – the moving bar in the text will still look great.
-const ROCKET_FLY_EMOJI = "<a:rocket_fly:1520624811108339883>";
+const ROCKET_FLY_EMOJI = "https://i.imgur.com/rfuGhbw.gif";
 
 // ---------- Crash point ----------
 function getCrashPoint() {
