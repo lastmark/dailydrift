@@ -264,7 +264,7 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
     }
-
+if (interaction.customId.startsWith('mines_')) return;
     if (!interaction.replied) {
       await interaction.reply({ content: "❌ This button is not supported.", flags: MessageFlags.Ephemeral });
     }
