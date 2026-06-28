@@ -58,7 +58,7 @@ module.exports = {
     // ==========================================
     // ⚠️ COUNTING GAME IS NOW HANDLED IN index.js
     // ==========================================
-if (cmd === "createrocketspin") {
+if (cmd === "!createrocketspin") {
       const { createCanvas } = require("canvas");
       const GIFEncoder = require("gif-encoder-2");
       const fs = require("fs");
