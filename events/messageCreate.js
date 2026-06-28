@@ -58,48 +58,7 @@ module.exports = {
     // ==========================================
     // ⚠️ COUNTING GAME IS NOW HANDLED IN index.js
     // ==========================================
-if (cmd === "!createrocketspin") {
-      const { createCanvas } = require("canvas");
-      const GIFEncoder = require("gif-encoder-2");
-      const fs = require("fs");
 
-      const W = 64, H = 64, DELAY = 80, CYCLES = 3;
-      try {
-        const encoder = new GIFEncoder(W, H, "neuquant", true);
-        encoder.start();
-        encoder.setRepeat(0);
-        encoder.setDelay(DELAY);
-        encoder.setQuality(10);
-
-        const canvas = createCanvas(W, H);
-        const ctx = canvas.getContext("2d");
-
-        const positions = [0, -2, -4, -2, 0, 2, 4, 2];
-        for (let cycle = 0; cycle < CYCLES; cycle++) {
-          for (const dy of positions) {
-            ctx.fillStyle = "#1a1a2e";
-            ctx.fillRect(0, 0, W, H);
-            ctx.font = "40px 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText("🚀", W / 2, H / 2 + 12 + dy);
-            encoder.addFrame(ctx);
-          }
-        }
-
-        encoder.finish();
-        const buffer = encoder.out.getData();
-
-        await message.author.send({
-          content: "✅ Here is your animated rocket GIF. Upload it as an emoji named `rocket_fly`.",
-          files: [{ attachment: buffer, name: "rocket_fly.gif" }]
-        });
-        await message.reply("📬 Rocket GIF sent to your DMs!");
-      } catch (err) {
-        console.error(err);
-        await message.reply(`❌ Failed to create rocket GIF: ${err.message}`);
-      }
-      return;
-    }
     // ==========================================
     // 💬 PREFIX COMMANDS
     // ==========================================
@@ -191,6 +150,39 @@ if (cmd === "!createrocketspin") {
           )
           .setTimestamp();
         return message.reply({ embeds: [embed] });
+      }
+
+      // ---- 🚀 CREATE ANIMATED ROCKET GIF (for custom emoji) ----
+      if (cmd === "createrocketspin") {
+        const { createCanvas } = require("canvas");
+        const GIFEncoder = require("gif-encoder-2");
+        try {
+          const W = 64, H = 64, DELAY = 80, CYCLES = 3;
+          const encoder = new GIFEncoder(W, H, "neuquant", true);
+          encoder.start(); encoder.setRepeat(0); encoder.setDelay(DELAY); encoder.setQuality(10);
+          const canvas = createCanvas(W, H); const ctx = canvas.getContext("2d");
+          const positions = [0, -2, -4, -2, 0, 2, 4, 2];
+          for (let c = 0; c < CYCLES; c++) {
+            for (const dy of positions) {
+              ctx.fillStyle = "#1a1a2e"; ctx.fillRect(0, 0, W, H);
+              ctx.font = "40px 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif";
+              ctx.textAlign = "center";
+              ctx.fillText("🚀", W/2, H/2+12+dy);
+              encoder.addFrame(ctx);
+            }
+          }
+          encoder.finish();
+          const buffer = encoder.out.getData();
+          await message.author.send({
+            content: "✅ Here is your animated rocket GIF. Upload it as an emoji named `rocket_fly`.",
+            files: [{ attachment: buffer, name: "rocket_fly.gif" }]
+          });
+          await message.reply("📬 Rocket GIF sent to your DMs!");
+        } catch (err) {
+          console.error(err);
+          await message.reply(`❌ Failed to create rocket GIF: ${err.message}`);
+        }
+        return;
       }
 
       // If command not recognized, ignore
