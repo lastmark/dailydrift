@@ -57,7 +57,6 @@ module.exports = {
 
     // ==========================================
     // ⚠️ COUNTING GAME IS NOW HANDLED IN index.js
-    //    (removed from here to avoid double processing)
     // ==========================================
 
     // ==========================================
@@ -160,17 +159,14 @@ module.exports = {
     // ==========================================
     // 💎 XP / LEVEL SYSTEM (non-command messages)
     // ==========================================
-  // ---- XP / LEVEL SYSTEM (non-command messages) ----
     const cooldownKey = `xp:cd:${userId}`;
     const isUserPremium = await redis.get(`premium:user:${userId}`);
-    // Premium users have 30s cooldown instead of 60s
     const cooldownSeconds = isUserPremium ? 30 : 60;
     if (await redis.get(cooldownKey)) return;
     await redis.setex(cooldownKey, cooldownSeconds, "1");
 
     let xpGain = Math.floor(Math.random() * 11) + 15; // 15–25 XP
-    if (isUserPremium) xpGain = Math.floor(xpGain * 2); // permanent 2x XP
-    if (isPremium) xpGain = Math.floor(xpGain * 1.8); // existing premium (guild?) stack? We'll use isUserPremium only for user premium; keep the old guild premium check if you still want that. Here we use user premium.
+    if (isUserPremium) xpGain = Math.floor(xpGain * 2); // permanent 2x XP for user premium
 
     const profileKey = `profile:${userId}`;
     let xp = Number(await redis.hget(profileKey, "xp") || 0);
