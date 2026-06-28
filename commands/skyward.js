@@ -1,4 +1,4 @@
-// commands/rocket.js – Smooth Rocket (1.5s update, fast graph, glow effect)
+// commands/rocket.js – Super‑smooth Rocket (plane animation, 600ms updates)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -6,15 +6,15 @@ const {
   MessageFlags,
   PermissionFlagsBits
 } = require("discord.js");
-const { createCanvas } = require("canvas");
+const { createCanvas, loadImage } = require("canvas");
 
 const MAX_BET = 250_000;
 const BETTING_PHASE_SEC = 12;
 const COOLDOWN_SEC = 6;
 const CASHOUT_EMOJI = "🚀";
-const UPDATE_INTERVAL_MS = 1500;  // 1.5 seconds for smoother feel
+const UPDATE_INTERVAL_MS = 600;   // smooth 1.6 FPS, no rate‑limit issues
 
-// Crash point
+// ---------- Crash point ----------
 function getCrashPoint() {
   const min = 1.20;
   const max = 100.00;
@@ -25,7 +25,7 @@ function multAt(elapsedSec) {
   return Math.exp(0.1 * elapsedSec);
 }
 
-// Rocket bar
+// ---------- Stylish bar ----------
 function stylishBar(mult) {
   const maxDisp = 50.0;
   const clamped = Math.min(mult, maxDisp);
@@ -47,39 +47,39 @@ function colorForMultiplier(mult) {
   return '#FF0044';
 }
 
-// Fast, smooth graph – only last 30 points
+// ---------- Smooth graph with flying plane ----------
 function drawGraph(points, currentMult) {
   const W = 400, H = 120;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
+
+  // Dark background
   ctx.fillStyle = '#0f0f1a';
   ctx.fillRect(0, 0, W, H);
 
-  // Only keep recent points for speed
-  const recent = points.slice(-30);
-  if (recent.length < 2) {
+  if (points.length < 2) {
     ctx.fillStyle = '#FFFFFF';
     ctx.font = 'bold 16px sans-serif';
     ctx.fillText(`${currentMult.toFixed(2)}×`, 10, 25);
     return canvas.toBuffer('image/png');
   }
 
-  const maxY = Math.max(currentMult, ...recent.map(p => p.y), 2);
-  const xScale = (W - 40) / (recent.length - 1);
+  const maxY = Math.max(currentMult, ...points.map(p => p.y), 2);
+  const xScale = (W - 40) / (points.length - 1);
   const yScale = (H - 30) / maxY;
   const baseY = H - 20;
 
-  // Gradient fill
+  // Gradient fill under the curve
   const gradient = ctx.createLinearGradient(0, 0, 0, H);
   gradient.addColorStop(0, 'rgba(0, 255, 136, 0.25)');
   gradient.addColorStop(1, 'rgba(255, 0, 68, 0.05)');
   ctx.fillStyle = gradient;
   ctx.beginPath();
   ctx.moveTo(20, baseY);
-  for (let i = 0; i < recent.length; i++) {
-    ctx.lineTo(20 + i * xScale, baseY - recent[i].y * yScale);
+  for (let i = 0; i < points.length; i++) {
+    ctx.lineTo(20 + i * xScale, baseY - points[i].y * yScale);
   }
-  ctx.lineTo(20 + (recent.length - 1) * xScale, baseY);
+  ctx.lineTo(20 + (points.length - 1) * xScale, baseY);
   ctx.closePath();
   ctx.fill();
 
@@ -89,30 +89,35 @@ function drawGraph(points, currentMult) {
   ctx.lineWidth = 2.5;
   ctx.shadowColor = '#FFD700';
   ctx.shadowBlur = 6;
-  ctx.moveTo(20, baseY - recent[0].y * yScale);
-  for (let i = 1; i < recent.length; i++) {
-    ctx.lineTo(20 + i * xScale, baseY - recent[i].y * yScale);
+  ctx.moveTo(20, baseY - points[0].y * yScale);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(20 + i * xScale, baseY - points[i].y * yScale);
   }
   ctx.stroke();
   ctx.shadowColor = 'transparent';
   ctx.shadowBlur = 0;
 
-  // Current point
-  const last = recent[recent.length - 1];
-  ctx.fillStyle = '#FF0044';
-  ctx.beginPath();
-  ctx.arc(20 + (recent.length - 1) * xScale, baseY - last.y * yScale, 5, 0, Math.PI * 2);
-  ctx.fill();
+  // Flying plane at the current point
+  const last = points[points.length - 1];
+  const planeX = 20 + (points.length - 1) * xScale;
+  const planeY = baseY - last.y * yScale;
 
-  ctx.fillStyle = '#FFFFFF';
+  // Draw plane emoji
+  ctx.font = '22px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('🚀', planeX, planeY - 12);  // shift up to centre
+
+  // Multiplier text
   ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#FFFFFF';
   ctx.fillText(`${currentMult.toFixed(2)}×`, 10, 20);
 
   return canvas.toBuffer('image/png');
 }
 
 // ---------- Game state ----------
-const gameLoops = new Map(); // guildId → interval
+const gameLoops = new Map();
 
 async function cleanChannel(channel, ids) {
   for (const id of ids) {
@@ -121,7 +126,14 @@ async function cleanChannel(channel, ids) {
   }
 }
 
-// Main tick (for betting phase only)
+function stopLoop(guildId) {
+  if (gameLoops.has(guildId)) {
+    clearInterval(gameLoops.get(guildId));
+    gameLoops.delete(guildId);
+  }
+}
+
+// ---------- Betting tick ----------
 async function tick(guildId, client, redis) {
   const channelId = await redis.get(`rocket:channel:${guildId}`);
   if (!channelId) return;
@@ -131,8 +143,8 @@ async function tick(guildId, client, redis) {
   const roundKey = `rocket:round:${guildId}`;
   const now = Date.now();
   let round = await redis.get(roundKey);
+
   if (!round) {
-    // Start betting
     const rNum = await redis.incr(`rocket:roundCounter:${guildId}`);
     round = {
       phase: 'betting', bettingStart: now, crashPoint: getCrashPoint(),
@@ -149,11 +161,11 @@ async function tick(guildId, client, redis) {
     await redis.set(roundKey, JSON.stringify(round));
     return;
   }
+
   round = JSON.parse(round);
   if (round.phase === 'betting') {
     if (now - round.bettingStart >= BETTING_PHASE_SEC * 1000) {
       if (round.players.length === 0) {
-        // Pause
         await cleanChannel(channel, round.messages);
         await redis.del(roundKey);
         stopLoop(guildId);
@@ -179,6 +191,7 @@ async function tick(guildId, client, redis) {
       round.flightMessageId = msg.id;
       round.messages.push(msg.id);
       await redis.set(roundKey, JSON.stringify(round));
+
       // Reaction collector
       const filter = (reaction, user) => reaction.emoji.name === CASHOUT_EMOJI && !user.bot;
       const collector = msg.createReactionCollector({ filter, time: 600_000 });
@@ -205,7 +218,8 @@ async function tick(guildId, client, redis) {
           await u.send({ embeds: [new EmbedBuilder().setColor('#57F287').setTitle('💰 Cashed Out!').setDescription(`You cashed out at **${mult.toFixed(2)}×** and won **${player.payout.toLocaleString()}** coins!\nBet: ${player.bet.toLocaleString()} coins`)] });
         } catch (e) {}
       });
-      // Flight update interval (smooth)
+
+      // Smooth flight update loop (600ms)
       const flightInterval = setInterval(async () => {
         const raw = await redis.get(roundKey);
         if (!raw) { clearInterval(flightInterval); return; }
@@ -247,14 +261,7 @@ async function tick(guildId, client, redis) {
   }
 }
 
-function stopLoop(guildId) {
-  if (gameLoops.has(guildId)) {
-    clearInterval(gameLoops.get(guildId));
-    gameLoops.delete(guildId);
-  }
-}
-
-// Command definition
+// ---------- Command definition ----------
 module.exports = {
   category: "Games",
   data: new SlashCommandBuilder()
@@ -299,7 +306,6 @@ module.exports = {
         return interaction.reply({ content: "⏳ Round just ended. Next round soon.", flags: MessageFlags.Ephemeral });
       const raw = await redis.get(`rocket:round:${guildId}`);
       if (!raw) {
-        // Create fresh betting round
         const rNum = await redis.incr(`rocket:roundCounter:${guildId}`);
         const newRound = {
           phase: 'betting', bettingStart: Date.now(), crashPoint: getCrashPoint(),
