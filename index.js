@@ -1,4 +1,4 @@
-// commands/mines.js – Mines game (full reveal on end)
+// commands/mines.js – Mines game (full reveal on end, corrected)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -138,7 +138,7 @@ module.exports = {
             .setDisabled(true)
         );
       }
-      // Cash out button disabled, unchanged label
+      // Cash out button disabled
       const cashOutDisabled = new ButtonBuilder()
         .setCustomId("mines_cashout")
         .setLabel("Cash Out")
