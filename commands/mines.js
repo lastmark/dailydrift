@@ -1,6 +1,9 @@
-// commands/mines.js – Native Components V2 Layout matching OwO perfectly
+// commands/mines.js – Clean Markdown Layout (Matches image_2.png)
 const {
   SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   MessageFlags
 } = require("discord.js");
 
@@ -10,14 +13,11 @@ const MIN_BOMBS = 1;
 const MAX_BOMBS = 8;                
 const HOUSE_EDGE_FACTOR = 0.98;     
 
-// Components V2 Message Flag (Crucial for nesting components inside panels)
-const IS_COMPONENTS_V2 = 1 << 15;
-
 module.exports = {
   category: "Games",
   data: new SlashCommandBuilder()
     .setName("mines")
-    .setDescription("Play Mines via integrated Components V2 containers!")
+    .setDescription("Play Mines – click buttons to sweep tiles!")
     .addStringOption(opt =>
       opt.setName("bet")
         .setDescription("Amount to bet, or 'all'")
@@ -25,7 +25,7 @@ module.exports = {
     )
     .addIntegerOption(opt =>
       opt.setName("bombs")
-        .setDescription("Number of bombs (1-8)")
+        .setDescription(`Number of bombs (${MIN_BOMBS}-${MAX_BOMBS})`)
         .setRequired(true)
         .setMinValue(MIN_BOMBS)
         .setMaxValue(MAX_BOMBS)
@@ -40,7 +40,7 @@ module.exports = {
     const balanceKey = `eco:${userId}:money`;
     const currentBal = Number(await redis.get(balanceKey) || 0);
 
-    // Parse Bet Currency
+    // Parse Bet Wager
     if (betRaw === "all") {
       bet = Math.min(currentBal, MAX_BET);
       if (bet <= 0) return interaction.reply({ content: "❌ You have no coins.", flags: MessageFlags.Ephemeral });
@@ -77,115 +77,126 @@ module.exports = {
     };
     await redis.set(`mines:${userId}`, JSON.stringify(gameState));
 
-    // ---- Helper: Build V2 High-Level Unified Layout Payload ----
-    function buildV2Payload(state) {
+    // ---- Helper: Exact Layout String to Match image_2.png ----
+    function getMessageContent(state, user) {
       const profit = Math.floor(state.bet * state.currentMultiplier);
       const nextMultiplier = state.currentMultiplier * ((TOTAL_TILES - state.safePicks.length) / (TOTAL_TILES - state.bombs - state.safePicks.length)) * HOUSE_EDGE_FACTOR;
       const nextProfit = Math.floor(state.bet * nextMultiplier);
 
-      // 1. Text display heading block inside the box container
-      let statusText = `✨ **<@${userId}> is playing Mines!**\n\n`;
       if (state.status === "bust") {
-        statusText = `💥 **<@${userId}> touched a mine!**\n\n`;
-      } else if (state.status === "cashed_out") {
-        statusText = `🏆 **<@${userId}> cashed out safely!**\n\n`;
+        return [
+          `💥 **<@${user}> touched a mine!**`,
+          ``,
+          `**Bet:** \`${state.bet}\`   **Mines:** \`${state.bombs}\``,
+          `~~**Cash Out:** ${profit} (${state.currentMultiplier.toFixed(2)}x)~~`,
+          `~~**Next:** 0 (0.00x)~~`,
+          `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯`
+        ].join("\n");
       }
 
-      const statsContent = [
-        statusText,
+      if (state.status === "cashed_out") {
+        return [
+          `🏆 **<@${user}> cashed out safely!**`,
+          ``,
+          `**Bet:** \`${state.bet}\`   **Mines:** \`${state.bombs}\``,
+          `**Cash Out:** \`${profit}\` (\`${state.currentMultiplier.toFixed(2)}x\`)`,
+          `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯`
+        ].join("\n");
+      }
+
+      return [
+        `✨ **<@${user}> is playing Mines!**`,
+        ``,
         `**Bet:** \`${state.bet}\`   **Mines:** \`${state.bombs}\``,
-        state.status === "bust" ? `~~**Cash Out:** ${profit} (${state.currentMultiplier.toFixed(2)}x)~~` : `**Cash Out:** \`${profit} (${state.currentMultiplier.toFixed(2)}x)\``,
-        state.status === "bust" ? `~~**Next:** 0 (0.00x)~~` : (state.safePicks.length < (TOTAL_TILES - state.bombs) ? `**Next:** \`${nextProfit} (${nextMultiplier.toFixed(2)}x)\`` : `**Next:** \`MAX!\``)
+        `**Cash Out:** \`${profit} (${state.currentMultiplier.toFixed(2)}x)\``,
+        state.safePicks.length < (TOTAL_TILES - state.bombs) ? `**Next:** \`${nextProfit} (${nextMultiplier.toFixed(2)}x)\`` : `**Next:** \`MAX!\``,
+        `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯`
       ].join("\n");
-
-      // 2. Generate Grid Matrix Children
-      const gridRows = [];
-      for (let r = 0; r < 3; r++) {
-        const rowComponents = [];
-        for (let c = 1; c <= 3; c++) {
-          const num = r * 3 + c;
-          const isPicked = state.safePicks.includes(num);
-          
-          let emoji = "⬛";
-          let style = 2; // Secondary (Grey)
-          let disabled = state.status !== "playing";
-
-          if (state.status === "playing") {
-            if (isPicked) {
-              emoji = "💎";
-              style = 3; // Success (Green)
-              disabled = true;
-            }
-          } else {
-            disabled = true;
-            if (num === state.hitTile) {
-              emoji = "💥";
-              style = 4; // Danger (Red)
-            } else if (state.bombPositions.includes(num)) {
-              emoji = "💣";
-              style = 2;
-            } else {
-              emoji = "💎";
-              style = 3;
-            }
-          }
-
-          rowComponents.push({
-            type: 2, // Button component type
-            custom_id: `mines_tile_${num}`,
-            style: style,
-            emoji: { name: emoji },
-            disabled: disabled
-          });
-        }
-        gridRows.push({
-          type: 1, // Action Row component type
-          components: rowComponents
-        });
-      }
-
-      // 3. Footer Cash Out Action Component
-      gridRows.push({
-        type: 1,
-        components: [{
-          type: 2,
-          custom_id: "mines_cashout",
-          label: "Cash Out",
-          style: 3, // Success Green
-          disabled: state.status !== "playing" || state.safePicks.length === 0
-        }]
-      });
-
-      // Assemble unified layout into container elements (V2 UI System)
-      return {
-        flags: IS_COMPONENTS_V2, 
-        components: [
-          {
-            type: 1, // High level layout row
-            components: [
-              {
-                type: 4, // Text Content component layout block
-                text: statsContent
-              }
-            ]
-          },
-          {
-            type: 1, 
-            components: [
-              {
-                type: 5, // Container UI component block holding nested interaction rows
-                components: gridRows
-              }
-            ]
-          }
-        ]
-      };
     }
 
-    // Initial deployment reply execution
+    // ---- Standard Active 3x3 Interaction Layout Rows ----
+    function buildActiveRows(safePicks) {
+      const rows = [];
+      for (let r = 0; r < 3; r++) {
+        const row = new ActionRowBuilder();
+        for (let c = 1; c <= 3; c++) {
+          const num = r * 3 + c;
+          const isPicked = safePicks.includes(num);
+
+          row.addComponents(
+            new ButtonBuilder()
+              .setCustomId(`mines_tile_${num}`)
+              .setEmoji(isPicked ? "💎" : "⬛") 
+              .setStyle(isPicked ? ButtonStyle.Success : ButtonStyle.Secondary)
+              .setDisabled(isPicked)
+          );
+        }
+        rows.push(row);
+      }
+      rows.push(
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("mines_cashout")
+            .setLabel("Cash Out")
+            .setEmoji("💵")
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(safePicks.length === 0)
+        )
+      );
+      return rows;
+    }
+
+    // ---- Standard Revealed Layout Rows ----
+    function buildRevealedRows(bombPositions, safePicks, hitTile = null) {
+      const revealedRows = [];
+      for (let r = 0; r < 3; r++) {
+        const row = new ActionRowBuilder();
+        for (let c = 1; c <= 3; c++) {
+          const num = r * 3 + c;
+          let emoji, style;
+
+          if (num === hitTile) {
+            emoji = "💥"; 
+            style = ButtonStyle.Danger;    
+          } else if (bombPositions.includes(num)) {
+            emoji = "💣"; 
+            style = ButtonStyle.Secondary; 
+          } else {
+            emoji = "💎"; 
+            style = ButtonStyle.Success;   
+          }
+
+          row.addComponents(
+            new ButtonBuilder()
+              .setCustomId(`mines_tile_${num}`)
+              .setEmoji(emoji)
+              .setStyle(style)
+              .setDisabled(true)
+          );
+        }
+        revealedRows.push(row);
+      }
+      revealedRows.push(
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("mines_cashout_disabled")
+            .setLabel("Cash Out")
+            .setEmoji("💵")
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(true)
+        )
+      );
+      return revealedRows;
+    }
+
     await interaction.deferReply();
-    const payload = buildV2Payload(gameState);
-    const message = await interaction.editReply(payload);
+    
+    // Explicitly pass embeds: [] to destroy any leftover embed memory arrays
+    const message = await interaction.editReply({
+      content: getMessageContent(gameState, userId),
+      embeds: [],
+      components: buildActiveRows([])
+    });
 
     const collector = message.createMessageComponentCollector({
       filter: i => i.user.id === userId &&
@@ -203,7 +214,6 @@ module.exports = {
       const state = JSON.parse(raw);
       if (state.status !== "playing") return;
 
-      // Handle Cashout Action Execution
       if (btnInteraction.customId === "mines_cashout") {
         const payout = Math.floor(state.bet * state.currentMultiplier);
         state.status = "cashed_out";
@@ -213,12 +223,15 @@ module.exports = {
         const newBal = Number(await redis.get(balanceKey) || 0) + payout;
         await redis.set(balanceKey, newBal);
 
-        await btnInteraction.update(buildV2Payload(state));
+        await btnInteraction.update({
+          content: getMessageContent(state, userId),
+          embeds: [],
+          components: buildRevealedRows(state.bombPositions, state.safePicks)
+        });
         await redis.del(`mines:${userId}`);
         return;
       }
 
-      // Handle Grid Selection Action Execution
       const tileNum = parseInt(btnInteraction.customId.split("_")[2]);
 
       if (state.bombPositions.includes(tileNum)) {
@@ -227,7 +240,11 @@ module.exports = {
         await redis.set(`mines:${userId}`, JSON.stringify(state));
         collector.stop();
 
-        await btnInteraction.update(buildV2Payload(state));
+        await btnInteraction.update({
+          content: getMessageContent(state, userId),
+          embeds: [],
+          components: buildRevealedRows(state.bombPositions, state.safePicks, tileNum)
+        });
         await redis.del(`mines:${userId}`);
         return;
       }
@@ -247,13 +264,21 @@ module.exports = {
         const newBal = Number(await redis.get(balanceKey) || 0) + payout;
         await redis.set(balanceKey, newBal);
 
-        await btnInteraction.update(buildV2Payload(state));
+        await btnInteraction.update({
+          content: getMessageContent(state, userId),
+          embeds: [],
+          components: buildRevealedRows(state.bombPositions, state.safePicks)
+        });
         await redis.del(`mines:${userId}`);
         return;
       }
 
       await redis.set(`mines:${userId}`, JSON.stringify(state));
-      await btnInteraction.update(buildV2Payload(state));
+      await btnInteraction.update({
+        content: getMessageContent(state, userId),
+        embeds: [],
+        components: buildActiveRows(state.safePicks)
+      });
     });
 
     collector.on("end", async () => {
@@ -265,7 +290,11 @@ module.exports = {
       state.status = "bust";
       await redis.del(`mines:${userId}`);
       try {
-        await message.edit(buildV2Payload(state));
+        await message.edit({
+          content: getMessageContent(state, userId),
+          embeds: [],
+          components: buildRevealedRows(state.bombPositions, state.safePicks)
+        });
       } catch (e) {}
     });
   }
