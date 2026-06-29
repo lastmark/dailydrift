@@ -160,10 +160,10 @@ module.exports = {
         )
       );
 
-      // Package rows together inside a clean container object
-      const containerPanel = new ContainerBuilder()
-        .setAccentColor(accentColor)
-        .addComponents(...finalRows);
+      // Package rows together inside a clean container object (Separated calls to avoid chaining bugs)
+      const containerPanel = new ContainerBuilder();
+      containerPanel.setAccentColor(accentColor);
+      containerPanel.addComponents(...finalRows);
 
       return {
         components: [containerPanel],
