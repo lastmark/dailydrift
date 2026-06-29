@@ -284,6 +284,21 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // ---- String Select Menus ----
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === "shop_menu_select") {
+      const shopCommand = client.commands.get("shop");
+      if (shopCommand && shopCommand.handleMenu) {
+        try {
+          await shopCommand.handleMenu(interaction, redis);
+        } catch (err) {
+          console.error("Shop menu select interaction processing failure:", err);
+        }
+        return;
+      }
+    }
+  }
+
   // ---- Modal Submits ----
   if (interaction.isModalSubmit()) {
     if (interaction.customId.startsWith("embed_modal:")) {
