@@ -104,7 +104,7 @@ module.exports = {
       ].join("\n");
 
       [span_12](start_span)// Text block inside container[span_12](end_span)
-      const statsBlock = new TextDisplayBuilder().[span_13](start_span)setContent(infoText);[span_13](end_span)
+      const statsBlock = new TextDisplayBuilder().setContent(infoText);
 
       // Build 3x3 Button Array Layout
       const finalRows = [statsBlock];
