@@ -129,6 +129,19 @@ client.on("interactionCreate", async (interaction) => {
 
   // ---- Buttons ----
   if (interaction.isButton()) {
+    // 🚀 ---- HIGH-PERFORMANCE ROCKET CASHOUT HANDLER ----
+    if (interaction.customId === "rocket_cashout_trigger") {
+      const rocketCommand = client.commands.get("rocket");
+      if (rocketCommand && rocketCommand.handleButton) {
+        try {
+          await rocketCommand.handleButton(interaction, redis, client);
+        } catch (err) {
+          console.error("Rocket button interaction routing failure:", err);
+        }
+        return;
+      }
+    }
+
     // ---- Terms of Service button handler ----
     if (interaction.customId === "terms_accept") {
       const userId = interaction.user.id;
@@ -168,7 +181,6 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ content: "🔧 The bot is under maintenance.", flags: MessageFlags.Ephemeral });
       }
 
-      const { createTicket } = require("./commands/ticket.js");
       await createTicket(interaction, client, redis, interaction.user.id, "support");
       return;
     }
@@ -371,18 +383,14 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  // ---- Public prefix commands ----
-  // (shop, buy, shields, countingstats, etc. – keep your existing implementations here)
   // ---- Dev commands (only you) ----
   if (message.author.id === "1303357369622990889") {
     // your dev commands
   }
-
-  // If no command matched, do nothing.
 });
 
 // ==========================================
-// 🖼️ WELCOME / LEAVE CARDS
+// 🛡️ WELCOME / LEAVE CARDS
 // ==========================================
 const { welcomeCard } = require("./canvas/welcome");
 const { leaveCard } = require("./canvas/leave");
