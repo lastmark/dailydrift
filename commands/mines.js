@@ -106,8 +106,14 @@ module.exports = {
       // Text block inside container
       const statsBlock = new TextDisplayBuilder().setContent(infoText);
 
-      // Build 3x3 Button Array Layout
-      const finalRows = [statsBlock];
+      // Package everything cleanly inside a container object using specific V2 methods
+      const containerPanel = new ContainerBuilder();
+      containerPanel.setAccentColor(accentColor);
+      
+      // 1. Add the text block at the top
+      containerPanel.addTextDisplayComponents(statsBlock);
+
+      // 2. Build and add the 3x3 Button Array Layout
       for (let r = 0; r < 3; r++) {
         const row = new ActionRowBuilder();
         for (let c = 1; c <= 3; c++) {
@@ -146,24 +152,18 @@ module.exports = {
               .setDisabled(disabled)
           );
         }
-        finalRows.push(row);
+        containerPanel.addActionRowComponents(row);
       }
 
-      // Add Footer Action Row for Cash Out Option
-      finalRows.push(
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId("mines_cashout")
-            .setLabel("Cash Out")
-            .setStyle(ButtonStyle.Success)
-            .setDisabled(state.status !== "playing" || state.safePicks.length === 0)
-        )
+      // 3. Add Footer Action Row for Cash Out Option
+      const cashoutRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("mines_cashout")
+          .setLabel("Cash Out")
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(state.status !== "playing" || state.safePicks.length === 0)
       );
-
-      // Package rows together inside a clean container object (Separated calls to avoid chaining bugs)
-      const containerPanel = new ContainerBuilder();
-      containerPanel.setAccentColor(accentColor);
-      containerPanel.addComponents(...finalRows);
+      containerPanel.addActionRowComponents(cashoutRow);
 
       return {
         components: [containerPanel],
