@@ -19,7 +19,7 @@ module.exports = {
   category: "Games",
   data: new SlashCommandBuilder()
     .setName("mines")
-    .setDescription("Play Mines inside a native V2 Container panel!")
+    .setDescription("Play Mines!")
     .addStringOption(opt =>
       opt.setName("bet")
         .setDescription("Amount to bet, or 'all'")
@@ -89,7 +89,7 @@ module.exports = {
       let accentColor = 0xda373c; // Red theme default
 
       if (state.status === "bust") {
-        statusLine = `💥 **<@${userId}> touched a mine!**\n\n`;
+        statusLine = `💥 **<@${userId}> exploded a mine!**\n\n`;
         accentColor = 0xda373c; 
       } else if (state.status === "cashed_out") {
         statusLine = `🏆 **<@${userId}> cashed out safely!**\n\n`;
