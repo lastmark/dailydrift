@@ -41,6 +41,17 @@ module.exports = {
       currentXp -= xpNeededForNextLevel;
       currentLevel += 1;
 
+      // ---- Dynamic Scaling Economy Reward Matrix ----
+      // Formula: 10,000 base coins * (New Level - 1)
+      // Level 2 = 10,000 | Level 3 = 20,000 | Level 4 = 30,000 | Level 120 = 1,190,000
+      const baseReward = 10000;
+      const coinBonus = baseReward * (currentLevel - 1);
+
+      // Process wallet updates securely in Redis
+      const balanceKey = `eco:${userId}:money`;
+      const currentWallet = Number(await redis.get(balanceKey) || 0);
+      await redis.set(balanceKey, currentWallet + coinBonus);
+
       // Commit the newly achieved level integers back to global Redis storage
       await redis.hset(profileKey, "level", currentLevel);
       
@@ -48,7 +59,11 @@ module.exports = {
       const lvlUpEmbed = new EmbedBuilder()
         .setColor("#5865F2")
         .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL() })
-        .setDescription(`⚡ **Level Up!** You have advanced to **Level ${currentLevel}**!\n💎 Keep talking to reach the elite **Level 120** milestone.`);
+        .setDescription(
+          `⚡ **Level Up!** You have advanced to **Level ${currentLevel}**!\n` +
+          `💰 **Level Reward:** \`+${coinBonus.toLocaleString()}\` coins have been added to your vault.\n\n` +
+          `💎 Keep talking to reach the elite **Level 120** milestone.`
+        );
       
       message.channel.send({ embeds: [lvlUpEmbed] }).catch(() => null);
     }
