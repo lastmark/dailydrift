@@ -1,4 +1,4 @@
-// commands/mines.js – Native Discord.js Components V2 Setup
+// commands/mines.js – Complete Native Discord.js Components V2 Setup
 const { 
   SlashCommandBuilder, 
   ActionRowBuilder, 
@@ -85,15 +85,15 @@ module.exports = {
       const nextMultiplier = state.currentMultiplier * ((TOTAL_TILES - state.safePicks.length) / (TOTAL_TILES - state.bombs - state.safePicks.length)) * HOUSE_EDGE_FACTOR;
       const nextProfit = Math.floor(state.bet * nextMultiplier);
 
-      let statusLine = `✨ **<@${userId}> is playing Mines!**[span_10](start_span)\n\n`;
-      let accentColor = 0xda373c; // Red theme default[span_10](end_span)
+      let statusLine = `✨ **<@${userId}> is playing Mines!**\n\n`;
+      let accentColor = 0xda373c; // Red theme default
 
       if (state.status === "bust") {
         statusLine = `💥 **<@${userId}> touched a mine!**\n\n`;
         accentColor = 0xda373c; 
       } else if (state.status === "cashed_out") {
-        statusLine = `🏆 **<@${userId}> cashed out safely!**[span_11](start_span)\n\n`;
-        accentColor = 0x23a55a; // Green theme panel on win[span_11](end_span)
+        statusLine = `🏆 **<@${userId}> cashed out safely!**\n\n`;
+        accentColor = 0x23a55a; // Green theme panel on win
       }
 
       const infoText = [
@@ -103,7 +103,7 @@ module.exports = {
         state.status === "bust" ? `~~**Next:** 0 (0.00x)~~` : (state.safePicks.length < (TOTAL_TILES - state.bombs) ? `**Next:** \`${nextProfit} (${nextMultiplier.toFixed(2)}x)\`` : `**Next:** \`MAX!\``)
       ].join("\n");
 
-      [span_12](start_span)// Text block inside container[span_12](end_span)
+      // Text block inside container
       const statsBlock = new TextDisplayBuilder().setContent(infoText);
 
       // Build 3x3 Button Array Layout
@@ -149,7 +149,7 @@ module.exports = {
         finalRows.push(row);
       }
 
-      [span_14](start_span)// Add Footer Action Row for Cash Out Option[span_14](end_span)
+      // Add Footer Action Row for Cash Out Option
       finalRows.push(
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -160,14 +160,14 @@ module.exports = {
         )
       );
 
-      [span_15](start_span)// Package rows together inside a clean container object[span_15](end_span)
+      // Package rows together inside a clean container object
       const containerPanel = new ContainerBuilder()
-        .[span_16](start_span)setAccentColor(accentColor)[span_16](end_span)
+        .setAccentColor(accentColor)
         .addComponents(...finalRows);
 
       return {
         components: [containerPanel],
-        flags: MessageFlags.[span_17](start_span)IsComponentsV2 // Lock the message directly to V2 processing[span_17](end_span)
+        flags: MessageFlags.IsComponentsV2 // Lock the message directly to V2 processing
       };
     }
 
