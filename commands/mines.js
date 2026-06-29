@@ -1,4 +1,4 @@
-// commands/mines.js – OwO‑style Mines (3×3, 1‑8 bombs, one message)
+// commands/mines.js – Aesthetic OwO‑style Mines (3×3, 1‑8 bombs, one message)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -11,7 +11,7 @@ const {
 const MAX_BET = 250_000;
 const TOTAL_TILES = 9;               // 3×3
 const MIN_BOMBS = 1;
-const MAX_BOMBS = 8;                // OwO allows up to 8
+const MAX_BOMBS = 8;                
 const HOUSE_EDGE_FACTOR = 0.98;     // 2% per pick
 
 module.exports = {
@@ -62,7 +62,7 @@ module.exports = {
       });
     }
 
-    // Clear any stale game (solves “already active” bug)
+    // Clear any stale game
     await redis.del(`mines:${userId}`);
 
     // Deduct bet
@@ -79,87 +79,71 @@ module.exports = {
       bet,
       bombs,
       bombPositions,
-      safePicks: [],         // tile numbers picked safely
+      safePicks: [],         
       currentMultiplier: 1.0,
       status: "playing"
     };
     await redis.set(`mines:${userId}`, JSON.stringify(gameState));
 
-    // ---- Build 3×3 grid + cash‑out button on ONE message ----
-    const rows = [];
-    for (let r = 0; r < 3; r++) {
-      const row = new ActionRowBuilder();
-      for (let c = 1; c <= 3; c++) {
-        const num = r * 3 + c;
-        row.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`mines_tile_${num}`)
-            .setLabel(`${num}`)
-            .setStyle(ButtonStyle.Primary)
-        );
+    // ---- Helper to render active components grid ----
+    function buildActiveRows(safePicks) {
+      const rows = [];
+      for (let r = 0; r < 3; r++) {
+        const row = new ActionRowBuilder();
+        for (let c = 1; c <= 3; c++) {
+          const num = r * 3 + c;
+          const isPicked = safePicks.includes(num);
+
+          row.addComponents(
+            new ButtonBuilder()
+              .setCustomId(`mines_tile_${num}`)
+              .setEmoji(isPicked ? "💎" : "⬛")
+              .setStyle(isPicked ? ButtonStyle.Success : ButtonStyle.Secondary)
+              .setDisabled(isPicked)
+          );
+        }
+        rows.push(row);
       }
-      rows.push(row);
-    }
-    // Cash‑out button row
-    rows.push(
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("mines_cashout")
-          .setLabel("Cash Out")
-          .setStyle(ButtonStyle.Success)
-      )
-    );
-
-    const gridEmbed = new EmbedBuilder()
-      .setColor("#5865F2")
-      .setTitle("💣 Mines")
-      .setDescription(
-        `Bet: **${bet.toLocaleString()}** coins\n` +
-        `Bombs: **${bombs}** / 9\n` +
-        `Multiplier: **1.00×**\n\n` +
-        `Pick a tile or cash out!`
-      )
-      .setFooter({ text: "Cash out anytime with the button below." });
-
-    await interaction.deferReply();
-    const message = await interaction.editReply({ embeds: [gridEmbed], components: rows });
-
-    // ---- Single collector for both tile picks and cash out ----
-    const collector = message.createMessageComponentCollector({
-      filter: i => i.user.id === userId &&
-        (i.customId.startsWith("mines_tile_") || i.customId === "mines_cashout"),
-      time: 300_000
-    });
-
-    // ---- Helper to compute new multiplier after a safe pick ----
-    function getNewMultiplier(state) {
-      const safe = state.safePicks.length;
-      const fairNext = (TOTAL_TILES - safe) / (TOTAL_TILES - state.bombs - safe);
-      return state.currentMultiplier * fairNext * HOUSE_EDGE_FACTOR;
+      // Cash‑out button row
+      rows.push(
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("mines_cashout")
+            .setLabel("💵 Cash Out")
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(safePicks.length === 0)
+        )
+      );
+      return rows;
     }
 
-    // ---- Helper to reveal the full grid ----
-    function buildRevealedRows(bombPositions, safePicks) {
+    // ---- Helper to reveal the full grid on Game Over ----
+    function buildRevealedRows(bombPositions, safePicks, hitTile = null) {
       const revealedRows = [];
       for (let r = 0; r < 3; r++) {
         const row = new ActionRowBuilder();
         for (let c = 1; c <= 3; c++) {
           const num = r * 3 + c;
-          let label, style;
-          if (bombPositions.includes(num)) {
-            label = "💣";
+          let emoji, style;
+
+          if (num === hitTile) {
+            emoji = "💥";
             style = ButtonStyle.Danger;
+          } else if (bombPositions.includes(num)) {
+            emoji = "💣";
+            style = ButtonStyle.Secondary;
           } else if (safePicks.includes(num)) {
-            label = "✓";
+            emoji = "💎";
             style = ButtonStyle.Success;
           } else {
-            label = "○";
+            emoji = "🔹";
             style = ButtonStyle.Secondary;
           }
+
           row.addComponents(
             new ButtonBuilder()
               .setCustomId(`mines_tile_${num}`)
-              .setLabel(label)
+              .setEmoji(emoji)
               .setStyle(style)
               .setDisabled(true)
           );
@@ -178,6 +162,37 @@ module.exports = {
       );
       return revealedRows;
     }
+
+    // ---- Helper to compute new multiplier after a safe pick ----
+    function getNewMultiplier(state) {
+      const safe = state.safePicks.length;
+      const fairNext = (TOTAL_TILES - safe) / (TOTAL_TILES - state.bombs - safe);
+      return state.currentMultiplier * fairNext * HOUSE_EDGE_FACTOR;
+    }
+
+    // Initial embed build
+    const gridEmbed = new EmbedBuilder()
+      .setColor("#2b2d31")
+      .setDescription([
+        `\`💣\` **${interaction.user.username}'s ᴍɪɴᴇs ɢᴀᴍᴇ**`,
+        `—`.repeat(18),
+        `💵 **Wager:** \`${bet.toLocaleString()}\` 🪙`,
+        `💣 **Total Mines:** \`${bombs}\``,
+        `💰 **Current Value:** \`${bet.toLocaleString()}\` (1.00x)`,
+        `—`.repeat(18),
+        `Select a tile below to begin tracking diamonds!`
+      ].join('\n'))
+      .setFooter({ text: "Play carefully!" });
+
+    await interaction.deferReply();
+    const message = await interaction.editReply({ embeds: [gridEmbed], components: buildActiveRows([]) });
+
+    // ---- Single collector for both tile picks and cash out ----
+    const collector = message.createMessageComponentCollector({
+      filter: i => i.user.id === userId &&
+        (i.customId.startsWith("mines_tile_") || i.customId === "mines_cashout"),
+      time: 300_000
+    });
 
     // ---- Event handler ----
     collector.on("collect", async btnInteraction => {
@@ -205,15 +220,17 @@ module.exports = {
         await redis.set(balanceKey, newBal);
 
         const embed = new EmbedBuilder()
-          .setColor("#57F287")
-          .setTitle("💰 Cashed Out!")
-          .setDescription(
-            `You cashed out after **${state.safePicks.length}** safe pick(s).\n` +
-            `Multiplier: **${state.currentMultiplier.toFixed(2)}×**\n` +
-            `You won **${payout.toLocaleString()}** coins!\n` +
-            `Bet: ${state.bet.toLocaleString()} coins`
-          )
-          .setFooter({ text: "Well played!" });
+          .setColor("#2ecc71")
+          .setDescription([
+            `\`🏆\` **${interaction.user.username} cashed out safely!**`,
+            `—`.repeat(18),
+            `💵 **Wager:** \`${state.bet.toLocaleString()}\` 🪙`,
+            `✨ **Safe Picks:** \`${state.safePicks.length}\``,
+            `📈 **Final Multiplier:** \`${state.currentMultiplier.toFixed(2)}x\``,
+            `💰 **Total Payout:** \`${payout.toLocaleString()}\` 🪙`,
+            `—`.repeat(18)
+          ].join('\n'))
+          .setFooter({ text: "Excellent choice." });
 
         await btnInteraction.update({ embeds: [embed], components: buildRevealedRows(state.bombPositions, state.safePicks) });
         await redis.del(`mines:${userId}`);
@@ -233,12 +250,18 @@ module.exports = {
         collector.stop();
 
         const embed = new EmbedBuilder()
-          .setColor("#ED4245")
-          .setTitle("💥 Busted!")
-          .setDescription(`You hit a **bomb** on tile ${tileNum}! You lost **${state.bet.toLocaleString()}** coins.`)
+          .setColor("#e74c3c")
+          .setDescription([
+            `\`💥\` **${interaction.user.username} touched a mine!**`,
+            `—`.repeat(18),
+            `💵 **Wager Lost:** \`${state.bet.toLocaleString()}\` 🪙`,
+            `✨ **Safe Picks Made:** \`${state.safePicks.length}\``,
+            `❌ **Exploded On Tile:** \`${tileNum}\``,
+            `—`.repeat(18)
+          ].join('\n'))
           .setFooter({ text: "Better luck next time!" });
 
-        await btnInteraction.update({ embeds: [embed], components: buildRevealedRows(state.bombPositions, state.safePicks) });
+        await btnInteraction.update({ embeds: [embed], components: buildRevealedRows(state.bombPositions, state.safePicks, tileNum) });
         await redis.del(`mines:${userId}`);
         return;
       }
@@ -248,32 +271,24 @@ module.exports = {
       state.currentMultiplier = getNewMultiplier(state);
       await redis.set(`mines:${userId}`, JSON.stringify(state));
 
-      // Update grid buttons (mark picked ones)
-      const updatedRows = rows.map(row =>
-        new ActionRowBuilder().addComponents(
-          row.components.map(btn => {
-            const num = parseInt(btn.data.custom_id?.split("_")[2]);
-            const newBtn = ButtonBuilder.from(btn);
-            if (state.safePicks.includes(num)) {
-              newBtn.setLabel("✓").setStyle(ButtonStyle.Success).setDisabled(true);
-            }
-            return newBtn;
-          })
-        )
-      );
+      const nextMultiplier = state.currentMultiplier * ((TOTAL_TILES - state.safePicks.length) / (TOTAL_TILES - state.bombs - state.safePicks.length)) * HOUSE_EDGE_FACTOR;
+      const profit = Math.floor(state.bet * state.currentMultiplier);
+      const nextProfit = Math.floor(state.bet * nextMultiplier);
 
       const newEmbed = new EmbedBuilder()
-        .setColor("#FFD700")
-        .setTitle("💣 Mines")
-        .setDescription(
-          `Bet: **${state.bet.toLocaleString()}** coins\n` +
-          `Bombs: **${state.bombs}** / 9\n` +
-          `Safe picks: **${state.safePicks.length}**\n` +
-          `Multiplier: **${state.currentMultiplier.toFixed(2)}×**\n\n` +
-          `Pick another tile or cash out!`
-        );
+        .setColor("#2b2d31")
+        .setDescription([
+          `\`💎\` **${interaction.user.username}'s ᴍɪɴᴇs ɢᴀᴍᴇ**`,
+          `—`.repeat(18),
+          `💵 **Wager:** \`${state.bet.toLocaleString()}\` 🪙`,
+          `💣 **Total Mines:** \`${state.bombs}\``,
+          `💰 **Current Value:** \`${profit.toLocaleString()}\` (${state.currentMultiplier.toFixed(2)}x)`,
+          state.safePicks.length < (TOTAL_TILES - state.bombs) ? `✨ **Next Tile:** \`${nextProfit.toLocaleString()}\` (${nextMultiplier.toFixed(2)}x)` : `✨ **Max Multiplier Reached!**`,
+          `—`.repeat(18)
+        ].join('\n'))
+        .setFooter({ text: "Keep hunting or cash out safely!" });
 
-      await btnInteraction.update({ embeds: [newEmbed], components: updatedRows });
+      await btnInteraction.update({ embeds: [newEmbed], components: buildActiveRows(state.safePicks) });
     });
 
     // ---- Timeout ----
@@ -291,10 +306,8 @@ module.exports = {
           await message.edit({
             embeds: [
               new EmbedBuilder()
-                .setColor("#ED4245")
-                .setTitle("⏰ Time's up!")
-                .setDescription("You didn't pick any tile – you lost your bet.")
-                .setFooter({ text: "Next time be faster!" })
+                .setColor("#e74c3c")
+                .setDescription(`⏰ **Time's up!** You didn't make any choices and lost your bet of \`${state.bet.toLocaleString()}\` coins.`)
             ],
             components: revealedRows
           });
@@ -310,10 +323,8 @@ module.exports = {
           await message.edit({
             embeds: [
               new EmbedBuilder()
-                .setColor("#57F287")
-                .setTitle("⏰ Time's up – Auto‑Cashed Out!")
-                .setDescription(`You received **${payout.toLocaleString()}** coins.`)
-                .setFooter({ text: "Game timed out." })
+                .setColor("#2ecc71")
+                .setDescription(`⏰ **Time's up!** Game automatically cashed out. You received \`${payout.toLocaleString()}\` coins.`)
             ],
             components: revealedRows
           });
