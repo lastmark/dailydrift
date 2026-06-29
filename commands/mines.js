@@ -1,4 +1,4 @@
-// commands/mines.js – Realistic 5×5 Mines (dynamic multipliers, house edge)
+// commands/mines.js – Realistic 3×3 Mines (dynamic multipliers, house edge)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -9,9 +9,9 @@ const {
 } = require("discord.js");
 
 const MAX_BET = 250_000;
-const TOTAL_TILES = 25;              // 5×5 grid
+const TOTAL_TILES = 9;               // 3×3 grid
 const MIN_BOMBS = 1;
-const MAX_BOMBS = 10;               // up to 10 mines
+const MAX_BOMBS = 3;                // up to 3 mines (still playable)
 const HOUSE_EDGE_FACTOR = 0.98;     // 2% house edge per pick
 
 module.exports = {
@@ -73,7 +73,7 @@ module.exports = {
     // Deduct bet
     await redis.set(balanceKey, currentBal - bet);
 
-    // Generate bomb positions (unique numbers 1‑25)
+    // Generate bomb positions (unique numbers 1‑9)
     const bombPositions = [];
     while (bombPositions.length < bombs) {
       const pos = Math.floor(Math.random() * TOTAL_TILES) + 1;
@@ -92,12 +92,12 @@ module.exports = {
     };
     await redis.set(`mines:${userId}`, JSON.stringify(gameState));
 
-    // ---- Build 5×5 grid message ----
+    // ---- Build 3×3 grid message ----
     const gridRows = [];
-    for (let r = 0; r < 5; r++) {
+    for (let r = 0; r < 3; r++) {
       const row = new ActionRowBuilder();
-      for (let c = 1; c <= 5; c++) {
-        const num = r * 5 + c;
+      for (let c = 1; c <= 3; c++) {
+        const num = r * 3 + c;
         row.addComponents(
           new ButtonBuilder()
             .setCustomId(`mines_tile_${num}`)
@@ -110,10 +110,10 @@ module.exports = {
 
     const gridEmbed = new EmbedBuilder()
       .setColor("#5865F2")
-      .setTitle("💣 Mines (5×5)")
+      .setTitle("💣 Mines (3×3)")
       .setDescription(
         `Bet: **${bet.toLocaleString()}** coins\n` +
-        `Bombs: **${bombs}** / 25\n` +
+        `Bombs: **${bombs}** / 9\n` +
         `Multiplier: **1.00×**\n\n` +
         `Pick a tile!`
       )
@@ -161,10 +161,10 @@ module.exports = {
     // ---- Helper to reveal the full grid ----
     function buildRevealedRows(bombPositions, safePicks) {
       const rows = [];
-      for (let r = 0; r < 5; r++) {
+      for (let r = 0; r < 3; r++) {
         const row = new ActionRowBuilder();
-        for (let c = 1; c <= 5; c++) {
-          const num = r * 5 + c;
+        for (let c = 1; c <= 3; c++) {
+          const num = r * 3 + c;
           let label, style;
           if (bombPositions.includes(num)) {
             label = "💣";
@@ -221,7 +221,6 @@ module.exports = {
           .setFooter({ text: "Better luck next time!" });
 
         await btnInteraction.update({ embeds: [embed], components: revealedRows });
-        // Disable cash‑out button in ephemeral message
         await cashoutMessage.edit({
           content: "Game over – you busted.",
           components: [
@@ -259,10 +258,10 @@ module.exports = {
 
       const newEmbed = new EmbedBuilder()
         .setColor("#FFD700")
-        .setTitle("💣 Mines (5×5)")
+        .setTitle("💣 Mines (3×3)")
         .setDescription(
           `Bet: **${state.bet.toLocaleString()}** coins\n` +
-          `Bombs: **${state.bombs}** / 25\n` +
+          `Bombs: **${state.bombs}** / 9\n` +
           `Safe picks: **${state.safePicks.length}**\n` +
           `Multiplier: **${state.currentMultiplier.toFixed(2)}×**\n\n` +
           `Pick another tile or cash out!`
@@ -308,7 +307,6 @@ module.exports = {
         .setFooter({ text: "Well played!" });
 
       await btnInteraction.update({ embeds: [embed], components: revealedRows });
-      // Update the ephemeral cash‑out message
       await cashoutMessage.edit({
         content: `✅ Cashed out at ${state.currentMultiplier.toFixed(2)}×.`,
         components: [
