@@ -1,9 +1,6 @@
-// commands/mines.js – Replicating image_2.png Layout Exactly Using Webhook Text Formatting
+// commands/mines.js – Native Components V2 Layout matching OwO perfectly
 const {
   SlashCommandBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   MessageFlags
 } = require("discord.js");
 
@@ -13,11 +10,14 @@ const MIN_BOMBS = 1;
 const MAX_BOMBS = 8;                
 const HOUSE_EDGE_FACTOR = 0.98;     
 
+// Components V2 Message Flag (Crucial for nesting components inside panels)
+const IS_COMPONENTS_V2 = 1 << 15;
+
 module.exports = {
   category: "Games",
   data: new SlashCommandBuilder()
     .setName("mines")
-    .setDescription("Play Mines – click buttons directly to sweep tiles!")
+    .setDescription("Play Mines via integrated Components V2 containers!")
     .addStringOption(opt =>
       opt.setName("bet")
         .setDescription("Amount to bet, or 'all'")
@@ -25,7 +25,7 @@ module.exports = {
     )
     .addIntegerOption(opt =>
       opt.setName("bombs")
-        .setDescription(`Number of bombs (${MIN_BOMBS}-${MAX_BOMBS})`)
+        .setDescription("Number of bombs (1-8)")
         .setRequired(true)
         .setMinValue(MIN_BOMBS)
         .setMaxValue(MAX_BOMBS)
@@ -60,7 +60,6 @@ module.exports = {
     await redis.del(`mines:${userId}`);
     await redis.set(balanceKey, currentBal - bet);
 
-    // Generate Mines Positions
     const bombPositions = [];
     while (bombPositions.length < bombs) {
       const pos = Math.floor(Math.random() * TOTAL_TILES) + 1;
@@ -78,122 +77,115 @@ module.exports = {
     };
     await redis.set(`mines:${userId}`, JSON.stringify(gameState));
 
-    // ---- Exact Layout Generation Helper to Match image_2.png ----
-    function getMessageContent(state, user) {
+    // ---- Helper: Build V2 High-Level Unified Layout Payload ----
+    function buildV2Payload(state) {
       const profit = Math.floor(state.bet * state.currentMultiplier);
       const nextMultiplier = state.currentMultiplier * ((TOTAL_TILES - state.safePicks.length) / (TOTAL_TILES - state.bombs - state.safePicks.length)) * HOUSE_EDGE_FACTOR;
       const nextProfit = Math.floor(state.bet * nextMultiplier);
 
+      // 1. Text display heading block inside the box container
+      let statusText = `✨ **<@${userId}> is playing Mines!**\n\n`;
       if (state.status === "bust") {
-        return [
-          `💥 **<@${user}> touched a mine!**`,
-          ``,
-          `**Bet:** \`${state.bet}\`   **Mines:** \`${state.bombs}\``,
-          `~~**Cash Out:** ${profit} (${state.currentMultiplier.toFixed(2)}x)~~`,
-          `~~**Next:** 0 (0.00x)~~`,
-          `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯`
-        ].join("\n");
+        statusText = `💥 **<@${userId}> touched a mine!**\n\n`;
+      } else if (state.status === "cashed_out") {
+        statusText = `🏆 **<@${userId}> cashed out safely!**\n\n`;
       }
 
-      if (state.status === "cashed_out") {
-        return [
-          `🏆 **<@${user}> cashed out safely!**`,
-          ``,
-          `**Bet:** \`${state.bet}\`   **Mines:** \`${state.bombs}\``,
-          `**Cash Out:** \`${profit}\` (\`${state.currentMultiplier.toFixed(2)}x\`)`,
-          `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯`
-        ].join("\n");
-      }
-
-      // Default Active Play Layout (Uses dark code blocks for grey highlights in image_2.png)
-      return [
-        `✨ **<@${user}> is playing Mines!**`,
-        ``,
+      const statsContent = [
+        statusText,
         `**Bet:** \`${state.bet}\`   **Mines:** \`${state.bombs}\``,
-        `**Cash Out:** \`${profit} (${state.currentMultiplier.toFixed(2)}x)\``,
-        state.safePicks.length < (TOTAL_TILES - state.bombs) ? `**Next:** \`${nextProfit} (${nextMultiplier.toFixed(2)}x)\`` : `**Next:** \`MAX!\``,
-        `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯`
+        state.status === "bust" ? `~~**Cash Out:** ${profit} (${state.currentMultiplier.toFixed(2)}x)~~` : `**Cash Out:** \`${profit} (${state.currentMultiplier.toFixed(2)}x)\``,
+        state.status === "bust" ? `~~**Next:** 0 (0.00x)~~` : (state.safePicks.length < (TOTAL_TILES - state.bombs) ? `**Next:** \`${nextProfit} (${nextMultiplier.toFixed(2)}x)\`` : `**Next:** \`MAX!\``)
       ].join("\n");
-    }
 
-    // ---- Active 3x3 Interaction Layout Rows ----
-    function buildActiveRows(safePicks) {
-      const rows = [];
+      // 2. Generate Grid Matrix Children
+      const gridRows = [];
       for (let r = 0; r < 3; r++) {
-        const row = new ActionRowBuilder();
+        const rowComponents = [];
         for (let c = 1; c <= 3; c++) {
           const num = r * 3 + c;
-          const isPicked = safePicks.includes(num);
+          const isPicked = state.safePicks.includes(num);
+          
+          let emoji = "⬛";
+          let style = 2; // Secondary (Grey)
+          let disabled = state.status !== "playing";
 
-          row.addComponents(
-            new ButtonBuilder()
-              .setCustomId(`mines_tile_${num}`)
-              .setEmoji(isPicked ? "💎" : "⬛") // Green style button vs unselected dark tile
-              .setStyle(isPicked ? ButtonStyle.Success : ButtonStyle.Secondary)
-              .setDisabled(isPicked)
-          );
-        }
-        rows.push(row);
-      }
-      rows.push(
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId("mines_cashout")
-            .setLabel("💵 Cash Out")
-            .setStyle(ButtonStyle.Success)
-            .setDisabled(safePicks.length === 0)
-        )
-      );
-      return rows;
-    }
-
-    // ---- Final State Revealed Board Rows ----
-    function buildRevealedRows(bombPositions, safePicks, hitTile = null) {
-      const revealedRows = [];
-      for (let r = 0; r < 3; r++) {
-        const row = new ActionRowBuilder();
-        for (let c = 1; c <= 3; c++) {
-          const num = r * 3 + c;
-          let emoji, style;
-
-          if (num === hitTile) {
-            emoji = "💥"; 
-            style = ButtonStyle.Danger;    // Red background block for hit mine
-          } else if (bombPositions.includes(num)) {
-            emoji = "💣"; 
-            style = ButtonStyle.Secondary; // Grey background block for safe unrevealed mines
+          if (state.status === "playing") {
+            if (isPicked) {
+              emoji = "💎";
+              style = 3; // Success (Green)
+              disabled = true;
+            }
           } else {
-            emoji = "💎"; 
-            style = ButtonStyle.Success;   // Green background blocks for safe jewels
+            disabled = true;
+            if (num === state.hitTile) {
+              emoji = "💥";
+              style = 4; // Danger (Red)
+            } else if (state.bombPositions.includes(num)) {
+              emoji = "💣";
+              style = 2;
+            } else {
+              emoji = "💎";
+              style = 3;
+            }
           }
 
-          row.addComponents(
-            new ButtonBuilder()
-              .setCustomId(`mines_tile_${num}`)
-              .setEmoji(emoji)
-              .setStyle(style)
-              .setDisabled(true)
-          );
+          rowComponents.push({
+            type: 2, // Button component type
+            custom_id: `mines_tile_${num}`,
+            style: style,
+            emoji: { name: emoji },
+            disabled: disabled
+          });
         }
-        revealedRows.push(row);
+        gridRows.push({
+          type: 1, // Action Row component type
+          components: rowComponents
+        });
       }
-      revealedRows.push(
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId("mines_cashout_disabled")
-            .setLabel("💵 Cash Out")
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(true)
-        )
-      );
-      return revealedRows;
+
+      // 3. Footer Cash Out Action Component
+      gridRows.push({
+        type: 1,
+        components: [{
+          type: 2,
+          custom_id: "mines_cashout",
+          label: "Cash Out",
+          style: 3, // Success Green
+          disabled: state.status !== "playing" || state.safePicks.length === 0
+        }]
+      });
+
+      // Assemble unified layout into container elements (V2 UI System)
+      return {
+        flags: IS_COMPONENTS_V2, 
+        components: [
+          {
+            type: 1, // High level layout row
+            components: [
+              {
+                type: 4, // Text Content component layout block
+                text: statsContent
+              }
+            ]
+          },
+          {
+            type: 1, 
+            components: [
+              {
+                type: 5, // Container UI component block holding nested interaction rows
+                components: gridRows
+              }
+            ]
+          }
+        ]
+      };
     }
 
+    // Initial deployment reply execution
     await interaction.deferReply();
-    const message = await interaction.editReply({
-      content: getMessageContent(gameState, userId),
-      components: buildActiveRows([])
-    });
+    const payload = buildV2Payload(gameState);
+    const message = await interaction.editReply(payload);
 
     const collector = message.createMessageComponentCollector({
       filter: i => i.user.id === userId &&
@@ -211,7 +203,7 @@ module.exports = {
       const state = JSON.parse(raw);
       if (state.status !== "playing") return;
 
-      // Handle Safe Cashout Choice
+      // Handle Cashout Action Execution
       if (btnInteraction.customId === "mines_cashout") {
         const payout = Math.floor(state.bet * state.currentMultiplier);
         state.status = "cashed_out";
@@ -221,39 +213,31 @@ module.exports = {
         const newBal = Number(await redis.get(balanceKey) || 0) + payout;
         await redis.set(balanceKey, newBal);
 
-        await btnInteraction.update({
-          content: getMessageContent(state, userId),
-          components: buildRevealedRows(state.bombPositions, state.safePicks)
-        });
+        await btnInteraction.update(buildV2Payload(state));
         await redis.del(`mines:${userId}`);
         return;
       }
 
-      // Handle Active Tile Choice
+      // Handle Grid Selection Action Execution
       const tileNum = parseInt(btnInteraction.customId.split("_")[2]);
 
-      // Failed Choice: Hit Bomb
       if (state.bombPositions.includes(tileNum)) {
         state.status = "bust";
+        state.hitTile = tileNum;
         await redis.set(`mines:${userId}`, JSON.stringify(state));
         collector.stop();
 
-        await btnInteraction.update({
-          content: getMessageContent(state, userId),
-          components: buildRevealedRows(state.bombPositions, state.safePicks, tileNum)
-        });
+        await btnInteraction.update(buildV2Payload(state));
         await redis.del(`mines:${userId}`);
         return;
       }
 
-      // Successful Choice: Safe Diamond
       state.safePicks.push(tileNum);
       
       const safe = state.safePicks.length;
       const fairNext = (TOTAL_TILES - (safe - 1)) / (TOTAL_TILES - state.bombs - (safe - 1));
       state.currentMultiplier = state.currentMultiplier * fairNext * HOUSE_EDGE_FACTOR;
 
-      // Max Win Auto Cashout Condition
       if (state.safePicks.length === (TOTAL_TILES - state.bombs)) {
         const payout = Math.floor(state.bet * state.currentMultiplier);
         state.status = "cashed_out";
@@ -263,19 +247,13 @@ module.exports = {
         const newBal = Number(await redis.get(balanceKey) || 0) + payout;
         await redis.set(balanceKey, newBal);
 
-        await btnInteraction.update({
-          content: getMessageContent(state, userId),
-          components: buildRevealedRows(state.bombPositions, state.safePicks)
-        });
+        await btnInteraction.update(buildV2Payload(state));
         await redis.del(`mines:${userId}`);
         return;
       }
 
       await redis.set(`mines:${userId}`, JSON.stringify(state));
-      await btnInteraction.update({
-        content: getMessageContent(state, userId),
-        components: buildActiveRows(state.safePicks)
-      });
+      await btnInteraction.update(buildV2Payload(state));
     });
 
     collector.on("end", async () => {
@@ -287,10 +265,7 @@ module.exports = {
       state.status = "bust";
       await redis.del(`mines:${userId}`);
       try {
-        await message.edit({
-          content: `⏰ **Time's up!** Game expired.`,
-          components: buildRevealedRows(state.bombPositions, state.safePicks)
-        });
+        await message.edit(buildV2Payload(state));
       } catch (e) {}
     });
   }
