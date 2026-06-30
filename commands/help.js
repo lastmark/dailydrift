@@ -9,6 +9,7 @@ const {
 
 
 module.exports = {
+  category: "Information",
   data: new SlashCommandBuilder()
     .setName("help")
     .setDescription("View all bot commands"),
