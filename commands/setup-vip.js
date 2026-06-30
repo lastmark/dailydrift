@@ -6,7 +6,7 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName("setup-vip")
-    .setDescription("🎙️ Set up the VIP hub channel (auto-creates it)")
+    .setDescription("Set up the VIP hub channel (auto-creates it)")
     .addBooleanOption(opt =>
       opt.setName("clear")
         .setDescription("Clear the VIP hub setup")
