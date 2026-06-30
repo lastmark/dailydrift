@@ -1,4 +1,4 @@
-// events/messageCreate.js – Main Bot (Full) – COUNTING REMOVED (handled in index.js)
+// events/messageCreate.js – Main Bot (Full) – WITH OFFICIAL PROGRESSION & ECON PAYOUTS
 const { Events, EmbedBuilder } = require("discord.js");
 const { checkBlacklist, buildBlacklistEmbed } = require("../blacklist.js");
 
@@ -8,14 +8,14 @@ const processedMessages = new Set();
 module.exports = {
   name: Events.MessageCreate,
 
-  async execute(message, client, redis) {
+  async execute(message, client, db) {
     // ---- Basic checks ----
     if (!message.guild || message.author.bot) return;
 
     console.log(`[MSG] From ${message.author.tag}: ${message.content.slice(0, 50)}`);
 
     // ---- BLACKLIST CHECK (FIRST) ----
-    const blacklist = await checkBlacklist(redis, message.author.id, message.guild.id);
+    const blacklist = await checkBlacklist(db, message.author.id, message.guild.id);
     if (blacklist) {
       console.log(`[MSG] Blocked by blacklist: ${message.author.tag}`);
       if (message.content.startsWith("!")) {
@@ -28,7 +28,7 @@ module.exports = {
 
     // ---- MAINTENANCE CHECK ----
     const maintenanceKey = `maintenance:${message.guild.id}`;
-    if (await redis.get(maintenanceKey) === "true") {
+    if (await db.get(maintenanceKey) === "true") {
       if (message.content.startsWith("!")) {
         await message.reply("🔧 The bot is currently under maintenance. Please try again later.");
       }
@@ -43,38 +43,27 @@ module.exports = {
     const userId = message.author.id;
     const guildId = message.guild.id;
     const content = message.content;
- 
 
     // ==========================================
-    // ⚠️ COUNTING GAME IS NOW HANDLED IN index.js
-    // ==========================================
-
-    // ==========================================
-    // 💬 PREFIX COMMANDS
-    // ==========================================
-  
-
-// ==========================================
     // 💤 AFK SYSTEM (auto‑clear & mention reply)
     // ==========================================
 
     // If the message author is AFK, remove it and notify them
-    const afkDataRaw = await redis.get(`afk:${userId}`);
-    if (afkDataRaw) {
-      await redis.del(`afk:${userId}`);
-      const afkData = JSON.parse(afkDataRaw);
+    const afkData = await db.get(`afk:${userId}`);
+    if (afkData) {
+      await db.del(`afk:${userId}`);
       const time = Date.now() - afkData.since;
       const timeAgo = time < 60000 ? 'just now' : `<t:${Math.floor(afkData.since / 1000)}:R>`;
 
       const welcomeEmbed = new EmbedBuilder()
         .setColor("#57F287")
         .setTitle("👋 Welcome Back!")
-        .setDescription(`${message.author}, you are no longer AFK.`)
+        .setDescription(`${message.author}, your AFK status has been cleared.`)
         .addFields(
-          { name: "You were AFK for", value: timeAgo },
-          { name: "Reason was", value: afkData.reason }
+          { name: "Duration", value: timeAgo, inline: true },
+          { name: "Last Reason", value: afkData.reason || "No reason provided.", inline: true }
         );
-      // Send a subtle reply (will be deleted after a few seconds)
+      
       const afkReply = await message.channel.send({ embeds: [welcomeEmbed] });
       setTimeout(() => afkReply.delete().catch(() => {}), 5000);
     }
@@ -82,64 +71,101 @@ module.exports = {
     // Check if any mentioned user is AFK
     const mentionedUsers = message.mentions.users.filter(u => u.id !== userId);
     for (const [id, user] of mentionedUsers) {
-      const afkCheck = await redis.get(`afk:${id}`);
+      const afkCheck = await db.get(`afk:${id}`);
       if (afkCheck) {
-        const afkData = JSON.parse(afkCheck);
         const embed = new EmbedBuilder()
-          .setColor("#5865F2")
-          .setDescription(`💤 **${user.username}** is currently AFK since <t:${Math.floor(afkData.since / 1000)}:R>\n**Reason:** ${afkData.reason}`);
+          .setColor("#111111")
+          .setDescription(`💤 **${user.username}** went AFK <t:${Math.floor(afkCheck.since / 1000)}:R>\n💬 "${afkCheck.reason || "No reason provided."}"`);
         await message.reply({ embeds: [embed] }).catch(() => {});
       }
     }
 
-    
     // ==========================================
-    // 💎 XP / LEVEL SYSTEM (non-command messages)
+    // 💎 OFFICIAL XP / LEVELING SYSTEM WITH ECONOMY REWARDS
     // ==========================================
     const cooldownKey = `xp:cd:${userId}`;
-    const isUserPremium = await redis.get(`premium:user:${userId}`);
-    const cooldownSeconds = isUserPremium ? 30 : 60;
-    if (await redis.get(cooldownKey)) return;
-    await redis.setex(cooldownKey, cooldownSeconds, "1");
+    if (!(await db.get(cooldownKey))) {
+      const isUserPremium = await db.get(`premium:user:${userId}`);
+      const cooldownSeconds = isUserPremium ? 30 : 60;
 
-    let xpGain = Math.floor(Math.random() * 11) + 15; // 15–25 XP
-    if (isUserPremium) xpGain = Math.floor(xpGain * 2); // permanent 2x XP for user premium
+      await db.set(cooldownKey, "1");
+      setTimeout(async () => { await db.del(cooldownKey).catch(() => {}); }, cooldownSeconds * 1000);
 
-    const profileKey = `profile:${userId}`;
-    let xp = Number(await redis.hget(profileKey, "xp") || 0);
-    let level = Number(await redis.hget(profileKey, "level") || 1);
+      // Base XP generation (Official Mee6 bracket: 15-25)
+      let xpGain = Math.floor(Math.random() * 11) + 15; 
+      if (isUserPremium) xpGain *= 2; // Permanent double XP booster for premium tier users
 
-    xp += xpGain;
-    const needed = Math.floor(100 * Math.pow(level, 1.6));
+      const profileKey = `profile:${userId}`;
+      const profile = (await db.hgetall(profileKey)) || {};
+      let xp = Number(profile.xp || 0);
+      let level = Number(profile.level || 0); 
 
-    if (xp >= needed && level < 120) {
-      xp -= needed;
-      level++;
-      await redis.hset(profileKey, "level", level);
-      message.channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor("#5865F2")
-            .setTitle("⚡ Level Up!")
-            .setDescription(`You reached **Level ${level}**`)
-        ]
-      }).catch(() => {});
+      xp += xpGain;
+      
+      // Standard Official Progression Formula
+      const getNeededXP = (lvl) => 5 * (lvl ** 2) + (50 * lvl) + 100;
+      let needed = getNeededXP(level);
+
+      let leveledUp = false;
+      const initialLevel = level;
+      let totalCoinReward = 0;
+
+      while (xp >= needed && level < 120) {
+        xp -= needed;
+        level++;
+        needed = getNeededXP(level);
+        leveledUp = true;
+
+        // Calculate scaling economy payout per level up step
+        const levelReward = 10000 * level;
+        totalCoinReward += levelReward;
+      }
+
+      if (leveledUp) {
+        profile.level = level;
+        
+        // Update user's cash balance inside the economy schema
+        const econKey = `eco:${userId}:money`;
+        const currentBalance = Number(await db.get(econKey) || 0);
+        await db.set(econKey, currentBalance + totalCoinReward);
+        
+        // Generate a visual text progress bar
+        const progressBarsCount = 10;
+        const currentProgress = Math.min(Math.floor((xp / needed) * progressBarsCount), progressBarsCount);
+        const progressBarStr = "🟩".repeat(currentProgress) + "⬛".repeat(progressBarsCount - currentProgress);
+
+        const lvlEmbed = new EmbedBuilder()
+          .setColor("#0A0A0A") // Premium minimalist background
+          .setTitle("✨ Level Advanced")
+          .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL({ dynamic: true }) })
+          .setDescription(`Congratulations! Your active participation has progressed your profile account status.`)
+          .addFields(
+            { name: "📈 Level Up", value: `\`Level ${initialLevel}\` ➔ \`Level ${level}\``, inline: true },
+            { name: "💰 Level Reward", value: `🪙 **+${totalCoinReward.toLocaleString()}** coins`, inline: true },
+            { name: "✨ Earned Booster", value: isUserPremium ? "🟢 `2.0x Premium Active`" : "⚪ `1.0x Standard`", inline: true },
+            { name: "📊 Next Progression Stage", value: `${progressBarStr} \`${xp} / ${needed} XP\``, inline: false }
+          )
+          .setTimestamp();
+
+        message.channel.send({ embeds: [lvlEmbed] }).catch(() => {});
+      }
+      
+      profile.xp = xp;
+      await db.set(profileKey, profile);
     }
-    await redis.hset(profileKey, "xp", xp);
 
     // ==========================================
     // 🤖 AUTO RESPONDER
     // ==========================================
     const key = content.toLowerCase().trim();
-    const responder = await redis.get(`responder:${guildId}:${key}`);
+    const responder = await db.get(`responder:${guildId}:${key}`);
     if (responder) {
-      const data = JSON.parse(responder);
       return message.channel.send({
         embeds: [
           new EmbedBuilder()
-            .setColor(data.color || "#5865F2")
-            .setTitle(data.title)
-            .setDescription(data.reply)
+            .setColor(responder.color || "#0A0A0A")
+            .setTitle(responder.title)
+            .setDescription(responder.reply)
         ]
       });
     }
