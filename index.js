@@ -1,4 +1,4 @@
-// index.js – Full Main Bot (counting, tickets, profile, blackjack, rocket, mines, etc.)
+// index.js
 require("dotenv").config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
@@ -8,6 +8,7 @@ const path = require("path");
 const { checkBlacklist, buildBlacklistEmbed } = require("./blacklist.js");
 const setupLogger = require("./logger.js");
 const { createTicket } = require("./commands/ticket.js");
+const { initGiveawayEngine } = require("./engines/giveawayManager");
 
 const client = new Client({
   intents: [
@@ -30,7 +31,6 @@ const client = new Client({
 setupLogger(client, redis);
 client.commands = new Collection();
 
-// ---- Global message cache to prevent duplicate processing ----
 const processedMessages = new Set();
 
 // ==========================================
@@ -66,7 +66,7 @@ if (fs.existsSync(commandsPath)) {
       client.commands.set(cmd.data.name, cmd);
       console.log(`✅ Loaded Command: ${cmd.data.name}`);
     } else {
-      console.log(`❌ [SKIPPED] The file "${file}" is missing valid exports or a data property.`);
+      console.log(`❌ [SKIPPED] The file "${file}" is missing valid exports or data.`);
     }
   }
 }
@@ -81,7 +81,6 @@ client.on("interactionCreate", async (interaction) => {
 
     console.log(`[SLASH] ${interaction.commandName} by ${interaction.user.tag}`);
 
-    // ---- TERMS CHECK (skip for /terms command) ----
     if (interaction.commandName !== "terms") {
       const accepted = await redis.get(`terms:accepted:${interaction.user.id}`);
       if (accepted !== TERMS_VERSION) {
@@ -89,23 +88,18 @@ client.on("interactionCreate", async (interaction) => {
           .setColor("#ED4245")
           .setTitle("📜 Terms of Service Required")
           .setDescription("You must accept the Terms of Service before using this bot.")
-          .addFields({ 
-            name: "Next Steps", 
-            value: "Please run `/terms` to view and accept the Terms of Service." 
-          })
+          .addFields({ name: "Next Steps", value: "Please run `/terms` to view and accept the Terms of Service." })
           .setTimestamp();
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       }
     }
 
-    // ---- BLACKLIST CHECK ----
     const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
     if (blacklist) {
       const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
-    // ---- MAINTENANCE CHECK ----
     const maintenanceKey = `maintenance:${interaction.guild.id}`;
     if (await redis.get(maintenanceKey) === "true") {
       return interaction.reply({
@@ -129,344 +123,264 @@ client.on("interactionCreate", async (interaction) => {
 
   // ---- Buttons ----
   if (interaction.isButton()) {
-    // 🚀 ---- HIGH-PERFORMANCE ROCKET CASHOUT HANDLER ----
+    
+    // ⚙️ ---- GIVEAWAY BUTTON JOIN HANDLER ----
+    if (interaction.customId === "giveaway_join") {
+      const msgId = interaction.message.id;
+      const giveawayData = await redis.hgetall(`giveaway:${msgId}`);
+
+      if (!giveawayData || giveawayData.ended === "true") {
+        return interaction.reply({ content: "❌ **Error:** This giveaway has already ended.", flags: MessageFlags.Ephemeral });
+      }
+
+      const userId = interaction.user.id;
+      const registryKey = `giveaway:entries:${msgId}`;
+      const alreadyEntered = await redis.sismember(registryKey, userId);
+
+      if (alreadyEntered) {
+        await redis.srem(registryKey, userId);
+        const count = await redis.scard(registryKey);
+        
+        const oldEmbed = interaction.message.embeds[0];
+        const updatedEmbed = EmbedBuilder.from(oldEmbed).setFooter({ text: `ACTIVE • ${count} ${count === 1 ? 'ENTRY' : 'ENTRIES'}` });
+        await interaction.message.edit({ embeds: [updatedEmbed] });
+
+        return interaction.reply({ content: "⚠️ **Left Pool:** You removed your entry from this giveaway.", flags: MessageFlags.Ephemeral });
+      } else {
+        await redis.sadd(registryKey, userId);
+        const count = await redis.scard(registryKey);
+
+        const oldEmbed = interaction.message.embeds[0];
+        const updatedEmbed = EmbedBuilder.from(oldEmbed).setFooter({ text: `ACTIVE • ${count} ${count === 1 ? 'ENTRY' : 'ENTRIES'}` });
+        await interaction.message.edit({ embeds: [updatedEmbed] });
+
+        return interaction.reply({ content: "🔒 **Entered:** You are now successfully entered into the raffle pool.", flags: MessageFlags.Ephemeral });
+      }
+    }
+
+    // 🚀 ---- ROCKET CASHOUT HANDLER ----
     if (interaction.customId === "rocket_cashout_trigger") {
       const rocketCommand = client.commands.get("rocket");
       if (rocketCommand && rocketCommand.handleButton) {
-        try {
-          await rocketCommand.handleButton(interaction, redis, client);
-        } catch (err) {
-          console.error("Rocket button interaction routing failure:", err);
-        }
+        try { await rocketCommand.handleButton(interaction, redis, client); } catch (err) { console.error(err); }
         return;
       }
     }
 
-    // ---- Terms of Service button handler ----
     if (interaction.customId === "terms_accept") {
       const userId = interaction.user.id;
       await redis.set(`terms:accepted:${userId}`, TERMS_VERSION);
-      await interaction.update({
-        content: "✅ You have accepted the Terms of Service. You may now use all features.",
-        embeds: [],
-        components: []
-      });
+      await interaction.update({ content: "✅ You have accepted the Terms of Service. You may now use all features.", embeds: [], components: [] });
       return;
     }
 
     if (interaction.customId === "terms_deny") {
       const userId = interaction.user.id;
       await redis.del(`terms:accepted:${userId}`);
-      await interaction.update({
-        content: "❌ You have denied the Terms of Service. You cannot use this bot until you accept.",
-        embeds: [],
-        components: []
-      });
+      await interaction.update({ content: "❌ You have denied the Terms of Service. You cannot use this bot until you accept.", embeds: [], components: [] });
       return;
     }
 
-    // ---- Open Ticket button from panel ----
     if (interaction.customId === "ticket_create_panel") {
       const accepted = await redis.get(`terms:accepted:${interaction.user.id}`);
-      if (accepted !== TERMS_VERSION) {
-        return interaction.reply({ content: "📜 You must accept the Terms of Service first.", flags: MessageFlags.Ephemeral });
-      }
+      if (accepted !== TERMS_VERSION) return interaction.reply({ content: "📜 You must accept the Terms of Service first.", flags: MessageFlags.Ephemeral });
       const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
-      if (blacklist) {
-        const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
-        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-      }
-      const maintenanceKey = `maintenance:${interaction.guild.id}`;
-      if (await redis.get(maintenanceKey) === "true") {
-        return interaction.reply({ content: "🔧 The bot is under maintenance.", flags: MessageFlags.Ephemeral });
-      }
+      if (blacklist) return interaction.reply({ embeds: [buildBlacklistEmbed(blacklist.data, blacklist.type)], flags: MessageFlags.Ephemeral });
+      if (await redis.get(`maintenance:${interaction.guild.id}`) === "true") return interaction.reply({ content: "🔧 The bot is under maintenance.", flags: MessageFlags.Ephemeral });
 
       await createTicket(interaction, client, redis, interaction.user.id, "support");
       return;
     }
 
-    // ---- Ticket button handler (claim, add user, close) ----
     if (interaction.customId.startsWith("ticket_")) {
       const [action, channelId] = interaction.customId.split(':');
       const channel = interaction.guild.channels.cache.get(channelId);
-      if (!channel) {
-        return interaction.reply({ content: "❌ Ticket channel not found.", flags: MessageFlags.Ephemeral });
-      }
+      if (!channel) return interaction.reply({ content: "❌ Ticket channel not found.", flags: MessageFlags.Ephemeral });
+      const data = await redis.hgetall(`ticket:${interaction.guild.id}:${channelId}`);
+      if (!data || !data.creator) return interaction.reply({ content: "❌ Invalid ticket.", flags: MessageFlags.Ephemeral });
 
-      const ticketData = await redis.hgetall(`ticket:${interaction.guild.id}:${channelId}`);
-      if (!ticketData || !ticketData.creator) {
-        return interaction.reply({ content: "❌ Invalid ticket.", flags: MessageFlags.Ephemeral });
-      }
-      const data = ticketData;
-
-      // ---- Claim ----
       if (action === "ticket_claim") {
-        if (data.claimedBy) {
-          return interaction.reply({ content: `❌ Already claimed by <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
-        }
+        if (data.claimedBy) return interaction.reply({ content: `❌ Already claimed by <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
         const supportRoleId = await redis.get(`ticket:settings:${interaction.guild.id}:support_role`);
-        if (supportRoleId && !interaction.member.roles.cache.has(supportRoleId)) {
-          return interaction.reply({ content: "❌ You don't have permission to claim.", flags: MessageFlags.Ephemeral });
-        }
+        if (supportRoleId && !interaction.member.roles.cache.has(supportRoleId)) return interaction.reply({ content: "❌ You don't have permission to claim.", flags: MessageFlags.Ephemeral });
         await redis.hset(`ticket:${interaction.guild.id}:${channelId}`, "claimedBy", interaction.user.id);
         await channel.send(`✅ ${interaction.user} has claimed this ticket.`);
         return interaction.reply({ content: "✅ Ticket claimed!", flags: MessageFlags.Ephemeral });
       }
-
-      // ---- Add User (prompt) ----
-      if (action === "ticket_add_user") {
-        return interaction.reply({
-          content: "Use `/ticket add @user` to add someone.",
-          flags: MessageFlags.Ephemeral
-        });
-      }
-
-      // ---- Close (prompt) ----
-      if (action === "ticket_close") {
-        return interaction.reply({
-          content: "Use `/ticket close` in the ticket channel.",
-          flags: MessageFlags.Ephemeral
-        });
-      }
-
+      if (action === "ticket_add_user") return interaction.reply({ content: "Use `/ticket add @user` to add someone.", flags: MessageFlags.Ephemeral });
+      if (action === "ticket_close") return interaction.reply({ content: "Use `/ticket close` in the ticket channel.", flags: MessageFlags.Ephemeral });
       return interaction.reply({ content: "❌ Unknown ticket action.", flags: MessageFlags.Ephemeral });
     }
 
-    // ---- Blackjack buttons (ignored) ----
-    if (interaction.customId.startsWith('blackjack_')) return;
+    if (interaction.customId.startsWith('blackjack_') || interaction.customId.startsWith('mines_')) return;
 
-    // ---- Mines buttons (ignored) ----
-    if (interaction.customId.startsWith('mines_')) return;
-
-    // ---- Counting shop buttons ----
     const { customId, user } = interaction;
     if (customId.startsWith('counting_buy_')) {
       try {
         const item = customId.split('_')[2];
-        const userId = user.id;
         const prices = { shield: 200, double: 500 };
         const price = prices[item];
         if (!price) return interaction.reply({ content: "❌ Invalid item.", flags: MessageFlags.Ephemeral });
 
-        const balanceKey = `eco:${userId}:money`;
+        const balanceKey = `eco:${user.id}:money`;
         let coins = Number(await redis.get(balanceKey) || 0);
         if (coins < price) {
-          return interaction.reply({
-            embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`❌ You need **${price}** coins but only have **${coins}**.`)],
-            flags: MessageFlags.Ephemeral
-          });
+          return interaction.reply({ embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`❌ You need **${price}** units but only have **${coins}**.`)], flags: MessageFlags.Ephemeral });
         }
 
         await redis.set(balanceKey, coins - price);
-        if (item === 'shield') await redis.incr(`eco:${userId}:shield`);
-        else if (item === 'double') await redis.set(`eco:${userId}:double`, 5);
+        if (item === 'shield') await redis.incr(`eco:${user.id}:shield`);
+        else if (item === 'double') await redis.set(`eco:${user.id}:double`, 5);
 
         const itemNames = { shield: "🛡️ Shield", double: "⚡ Double XP (5 uses)" };
         const embed = new EmbedBuilder()
           .setColor("#57F287")
           .setTitle("✅ Purchase Successful!")
-          .setDescription(`You bought **${itemNames[item]}** for **${price}** coins!`)
-          .addFields({ name: "💰 New Balance", value: `${await redis.get(balanceKey) || 0} coins`, inline: true })
+          .setDescription(`You bought **${itemNames[item]}** for **${price}** units!`)
+          .addFields({ name: "💰 New Balance", value: `${await redis.get(balanceKey) || 0} units`, inline: true })
           .setTimestamp();
 
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       } catch (err) {
-        console.error("Button handler error:", err);
-        if (!interaction.replied) {
-          await interaction.reply({ content: "❌ Error handling button.", flags: MessageFlags.Ephemeral });
-        }
+        console.error(err);
+        if (!interaction.replied) await interaction.reply({ content: "❌ Error handling button.", flags: MessageFlags.Ephemeral });
       }
-    }
-
-    if (!interaction.replied) {
-      await interaction.reply({ content: "❌ This button is not supported.", flags: MessageFlags.Ephemeral });
     }
     return;
   }
 
-  // ---- String Select Menus ----
-  if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === "shop_menu_select") {
-      const shopCommand = client.commands.get("shop");
-      if (shopCommand && shopCommand.handleMenu) {
-        try {
-          await shopCommand.handleMenu(interaction, redis);
-        } catch (err) {
-          console.error("Shop menu select interaction processing failure:", err);
-        }
-        return;
-      }
+  if (interaction.isStringSelectMenu() && interaction.customId === "shop_menu_select") {
+    const shopCommand = client.commands.get("shop");
+    if (shopCommand && shopCommand.handleMenu) {
+      try { await shopCommand.handleMenu(interaction, redis); } catch (err) { console.error(err); }
     }
+    return;
   }
 
-  // ---- Modal Submits ----
-  if (interaction.isModalSubmit()) {
-    if (interaction.customId.startsWith("embed_modal:")) {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      try {
-        const targetChannelId = interaction.customId.split(":")[1];
-        const targetChannel = await interaction.guild.channels.fetch(targetChannelId);
-        if (!targetChannel) {
-          return await interaction.editReply({ content: "❌ Could not find or access that destination channel." });
-        }
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("embed_modal:")) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const targetChannelId = interaction.customId.split(":")[1];
+      const targetChannel = await interaction.guild.channels.fetch(targetChannelId);
+      if (!targetChannel) return await interaction.editReply({ content: "❌ Could not find or access that destination channel." });
 
-        const title = interaction.fields.getTextInputValue("embed_title");
-        const description = interaction.fields.getTextInputValue("embed_description");
-        let colorInput = interaction.fields.getTextInputValue("embed_color") || "#2B2D31";
-        const footerText = interaction.fields.getTextInputValue("embed_footer") || null;
+      const title = interaction.fields.getTextInputValue("embed_title");
+      const description = interaction.fields.getTextInputValue("embed_description");
+      let colorInput = interaction.fields.getTextInputValue("embed_color") || "#2B2D31";
+      const footerText = interaction.fields.getTextInputValue("embed_footer") || null;
 
-        if (!colorInput.startsWith("#")) colorInput = `#${colorInput}`;
-        if (!/^#[0-9A-F]{6}$/i.test(colorInput)) colorInput = "#2B2D31";
+      if (!colorInput.startsWith("#")) colorInput = `#${colorInput}`;
+      if (!/^#[0-9A-F]{6}$/i.test(colorInput)) colorInput = "#2B2D31";
 
-        const customEmbed = new EmbedBuilder()
-          .setTitle(title)
-          .setDescription(description)
-          .setColor(colorInput);
-        if (footerText) customEmbed.setFooter({ text: footerText });
+      const customEmbed = new EmbedBuilder().setTitle(title).setDescription(description).setColor(colorInput);
+      if (footerText) customEmbed.setFooter({ text: footerText });
 
-        await targetChannel.send({ embeds: [customEmbed] });
-        await interaction.editReply({ content: `✅ Success! Your custom embed has been published to ${targetChannel}.` });
-      } catch (error) {
-        console.error("Failed to construct or broadcast modal embed:", error);
-        await interaction.editReply({ content: "❌ Failed to send embed. Ensure I have permissions to view/send messages in that channel." });
-      }
+      await targetChannel.send({ embeds: [customEmbed] });
+      await interaction.editReply({ content: `✅ Success! Your custom embed has been published to ${targetChannel}.` });
+    } catch (error) {
+      console.error(error);
+      await interaction.editReply({ content: "❌ Failed to send embed." });
     }
     return;
   }
 });
 
 // ==========================================
-// 💬 MESSAGE LISTENER (Counting & Prefix Commands)
+// 💬 MESSAGE LISTENER (Guardrails & Counting Only)
 // ==========================================
 client.on("messageCreate", async (message) => {
   if (!message.guild || message.author.bot) return;
-
-  // Prevent duplicate processing of the same message
   if (processedMessages.has(message.id)) return;
   processedMessages.add(message.id);
   setTimeout(() => processedMessages.delete(message.id), 5000);
 
-  // ---- Counting game ----
+  // 1. Blacklist Check Safeguard
+  const blacklist = await checkBlacklist(redis, message.author.id, message.guild.id);
+  if (blacklist) {
+    if (message.content.startsWith("!") || message.content.startsWith("?")) {
+      await message.reply({ embeds: [buildBlacklistEmbed(blacklist.data, blacklist.type)] }).catch(() => {});
+      await message.delete().catch(() => {});
+    }
+    return;
+  }
+
+  // 2. Maintenance Mode Safeguard
+  if (await redis.get(`maintenance:${message.guild.id}`) === "true") {
+    if (message.content.startsWith("!") || message.content.startsWith("?")) {
+      await message.reply("🔧 The bot is currently under maintenance. Please try again later.").catch(() => {});
+    }
+    return;
+  }
+
+  // 3. Counting Channel Mechanics
   try {
     const countingChannelId = await redis.get(`counting:${message.guild.id}:channel`);
     if (countingChannelId && message.channel.id === countingChannelId) {
       const pureContent = message.content.replace(/\s+/g, "");
-      const isValidMathOrNumber = /^[0-9+\-*/^()]+$/.test(pureContent);
-      if (!isValidMathOrNumber) {
-        if (message.deletable) await message.delete().catch((err) => console.error("Failed to delete chat text:", err));
+      if (!/^[0-9+\-*/^()]+$/.test(pureContent)) {
+        if (message.deletable) await message.delete().catch(() => {});
         return;
       }
-
-      // Dynamic import instead of require()
       const countingModule = await import("./games/counting.js");
       const runCountingGame = countingModule.default || countingModule;
-
       await runCountingGame(message, redis);
-      return; // Stop processing – don't treat as prefix command
+      return; 
     }
-  } catch (error) {
-    console.error("Counting game error:", error);
+  } catch (error) { 
+    console.error("Counting engine error:", error); 
   }
 
-  // ---- Prefix Commands ----
-  if (!message.content.startsWith("!") && !message.content.startsWith("?")) return;
-
-  const args = message.content.slice(1).trim().split(/ +/);
-  const cmd = args.shift().toLowerCase();
-
-  // ---- TERMS CHECK (only for prefix commands) ----
-  if (cmd !== "terms") {
-    const accepted = await redis.get(`terms:accepted:${message.author.id}`);
-    if (accepted !== TERMS_VERSION) {
-      return message.reply("📜 You must accept the Terms of Service first. Run `!terms` to view and accept.");
-    }
-  }
-
-  // ---- BLACKLIST CHECK ----
-  const blacklist = await checkBlacklist(redis, message.author.id, message.guild.id);
-  if (blacklist) {
-    const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
-    await message.reply({ embeds: [embed] });
-    await message.delete().catch(() => {});
+  // 4. Prefix Chat Tracking Disabled
+  if (message.content.startsWith("!") || message.content.startsWith("?")) {
     return;
-  }
-
-  // ---- MAINTENANCE CHECK ----
-  const maintenanceKey = `maintenance:${message.guild.id}`;
-  if (await redis.get(maintenanceKey) === "true") {
-    await message.reply("🔧 The bot is currently under maintenance. Please try again later.");
-    return;
-  }
-
-  // ---- Dev commands (only you) ----
-  if (message.author.id === "1303357369622990889") {
-    // your dev commands
   }
 });
 
 // ==========================================
-// 🛡️ WELCOME / LEAVE SYSTEM WITH CHAT TEXT
+// 🛡️ WELCOME / LEAVE SYSTEM WITH TEXT WRAP
 // ==========================================
 const { welcomeCard } = require("./canvas/welcome");
 const { leaveCard } = require("./canvas/leave");
 
-// --- Welcome handler ---
 client.on("guildMemberAdd", async (member) => {
   const channelId = await redis.get(`welcome:${member.guild.id}`);
   if (!channelId) return;
   const channel = member.guild.channels.cache.get(channelId);
   if (!channel) return;
   
-  // Build the canvas card asset (remains automated via engine)
   const img = await welcomeCard(member.user, member.guild, redis);
-
-  // Fetch and parse custom text for the standard chat channel caption wrapper
   const rawText = await redis.get(`welcome:text:${member.guild.id}`) || "👋 Welcome to the server, {user}!";
-  const parsedText = rawText
-    .replace(/{user}/g, `${member.user}`)
-    .replace(/{server}/g, member.guild.name)
-    .replace(/{count}/g, member.guild.memberCount.toLocaleString());
-
+  const parsedText = rawText.replace(/{user}/g, `${member.user}`).replace(/{server}/g, member.guild.name).replace(/{count}/g, member.guild.memberCount.toLocaleString());
   channel.send({ content: parsedText, files: [{ attachment: img, name: "welcome.png" }] });
 });
 
-// --- Leave handler ---
 client.on("guildMemberRemove", async (member) => {
   const channelId = await redis.get(`leave:${member.guild.id}`);
   if (!channelId) return;
   const channel = member.guild.channels.cache.get(channelId);
   if (!channel) return;
 
-  // Build the canvas card asset (remains automated via engine)
   const img = await leaveCard(member.user, member.guild, redis);
-
-  // Fetch and parse custom text for the standard chat channel caption wrapper
   const rawText = await redis.get(`leave:text:${member.guild.id}`) || "❌ {user} has left the server.";
-  const parsedText = rawText
-    .replace(/{user}/g, `**${member.user.username}**`)
-    .replace(/{server}/g, member.guild.name)
-    .replace(/{count}/g, member.guild.memberCount.toLocaleString());
-
+  const parsedText = rawText.replace(/{user}/g, `**${member.user.username}**`).replace(/{server}/g, member.guild.name).replace(/{count}/g, member.guild.memberCount.toLocaleString());
   channel.send({ content: parsedText, files: [{ attachment: img, name: "leave.png" }] });
 });
 
 // ==========================================
-// 🚀 READY EVENT
+// 🚀 READY EVENT LOOP CONTROL
 // ==========================================
 client.once("ready", async () => {
   console.log(`${client.user.tag} online`);
+
+  initGiveawayEngine(client, redis);
 
   const { ActivityType } = require("discord.js");
   client.user.setActivity("/help", { type: ActivityType.Playing });
   client.user.setStatus("online");
 
-  // ---- HEARTBEAT ----
   await redis.set('bot:heartbeat', Date.now());
-  setInterval(async () => {
-    await redis.set('bot:heartbeat', Date.now());
-  }, 60000);
+  setInterval(async () => { await redis.set('bot:heartbeat', Date.now()); }, 60000);
 
-  // ---- REAL‑TIME STATS UPDATER ----
   async function updateStats(guild) {
     const guildId = guild.id;
     const isPremium = await redis.get(`premium:guild:${guildId}`) !== null;
@@ -504,36 +418,12 @@ client.once("ready", async () => {
           if (channel.name !== newName) await channel.setName(newName).catch(() => {});
         }
       }
-
-      const joinedChannelId = await redis.get(`stats:channel:joined:${guildId}`);
-      if (joinedChannelId) {
-        const channel = guild.channels.cache.get(joinedChannelId);
-        if (channel) {
-          const now = new Date();
-          const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          const joinedCount = guild.members.cache.filter(m => m.joinedAt && m.joinedAt >= today).size;
-          const baseName = await redis.get(`stats:baseName:joined:${guildId}`) || "📅 ┃ Joined Today";
-          const newName = `${baseName} • ${joinedCount}`;
-          if (channel.name !== newName) await channel.setName(newName).catch(() => {});
-        }
-      }
     }
   }
 
   setInterval(async () => {
-    for (const guild of client.guilds.cache.values()) {
-      await updateStats(guild);
-    }
+    for (const guild of client.guilds.cache.values()) { await updateStats(guild); }
   }, 30000);
-
-  client.on("guildMemberAdd", async (member) => { await updateStats(member.guild); });
-  client.on("guildMemberRemove", async (member) => { await updateStats(member.guild); });
-  client.on("presenceUpdate", async (oldPresence, newPresence) => { if (newPresence.guild) await updateStats(newPresence.guild); });
-  client.on("voiceStateUpdate", async (oldState, newState) => {
-    const guild = newState.guild;
-    const isPremium = await redis.get(`premium:guild:${guild.id}`) !== null;
-    if (isPremium) await updateStats(guild);
-  });
 
   // ---- BIRTHDAY CRON ----
   setInterval(async () => {
@@ -543,55 +433,33 @@ client.once("ready", async () => {
       const userIds = await redis.smembers(`birthdays:date:${todayStr}`);
       if (!userIds || userIds.length === 0) return;
       for (const guild of client.guilds.cache.values()) {
-        try {
-          const channelId = await redis.get(`birthday_channel:${guild.id}`);
-          if (!channelId) continue;
-          const channel = await guild.channels.fetch(channelId).catch(() => null);
-          if (!channel) continue;
-          const birthdayMembersInGuild = [];
-          for (const id of userIds) {
-            const hasMember = await guild.members.fetch(id).catch(() => null);
-            if (hasMember) birthdayMembersInGuild.push(id);
-          }
-          if (birthdayMembersInGuild.length > 0) {
-            const mentions = birthdayMembersInGuild.map(id => `<@${id}>`).join(", ");
-            const bdayEmbed = new EmbedBuilder()
-              .setColor("#FF69B4")
-              .setTitle("🎉 Happy Birthday! 🎉")
-              .setDescription(`✨ Today we celebrate the wonderful day of birth for our amazing members:\n\n${mentions}\n\nDrop some love in the chat and wish them a legendary day! 🎂🎈`)
-              .setThumbnail(client.user.displayAvatarURL())
-              .setTimestamp();
-            await channel.send({ content: mentions, embeds: [bdayEmbed] }).catch(() => null);
-          }
-        } catch (guildError) {
-          console.error(`Error processing birthday cycle for guild ${guild.id}:`, guildError);
+        const channelId = await redis.get(`birthday_channel:${guild.id}`);
+        if (!channelId) continue;
+        const channel = await guild.channels.fetch(channelId).catch(() => null);
+        if (!channel) continue;
+        const birthdayMembersInGuild = [];
+        for (const id of userIds) { if (await guild.members.fetch(id).catch(() => null)) birthdayMembersInGuild.push(id); }
+        if (birthdayMembersInGuild.length > 0) {
+          const mentions = birthdayMembersInGuild.map(id => `<@${id}>`).join(", ");
+          const bdayEmbed = new EmbedBuilder()
+            .setColor("#FF69B4")
+            .setTitle("🎉 Happy Birthday! 🎉")
+            .setDescription(`✨ Today we celebrate our amazing members:\n\n${mentions}\n\nDrop some love in the chat and wish them a legendary day! 🎂🎈`)
+            .setTimestamp();
+          await channel.send({ content: mentions, embeds: [bdayEmbed] }).catch(() => null);
         }
       }
     }
   }, 60000);
 
-  // ---- DEPLOY SLASH COMMANDS ----
   const commands = [];
-  for (const [name, cmd] of client.commands) {
-    try {
-      commands.push(cmd.data.toJSON());
-    } catch (err) {
-      console.error(`❌ Broken data conversion structure: ${name}`);
-      console.error(err);
-    }
-  }
+  for (const [name, cmd] of client.commands) { if (cmd?.data) commands.push(cmd.data.toJSON()); }
   try {
     const { REST, Routes } = require("discord.js");
     const rest = new REST({ version: "10" }).setToken(token);
-    console.log(`Syncing ${commands.length} application slash entries...`);
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands }
-    );
+    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
     console.log(`Successfully deployed application command nodes globally!`);
-  } catch (err) {
-    console.error("REST Command Deployment Error:", err);
-  }
+  } catch (err) { console.error(err); }
 });
 
 client.login(token);
