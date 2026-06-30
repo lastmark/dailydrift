@@ -2,7 +2,7 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
-const redis = require("./redis");
+const db = require("./database"); // Swapped out Redis for clean MongoDB wrapper instance
 const fs = require("fs");
 const path = require("path");
 const { checkBlacklist, buildBlacklistEmbed } = require("./blacklist.js");
@@ -28,7 +28,7 @@ const client = new Client({
   ]
 });
 
-setupLogger(client, redis);
+setupLogger(client, db);
 client.commands = new Collection();
 
 const processedMessages = new Set();
@@ -44,9 +44,9 @@ if (fs.existsSync(eventsPath)) {
     const event = require(filePath);
     if (event && event.name) {
       if (event.once) {
-        client.once(event.name, (...args) => event.execute(...args, client, redis));
+        client.once(event.name, (...args) => event.execute(...args, client, db));
       } else {
-        client.on(event.name, (...args) => event.execute(...args, client, redis));
+        client.on(event.name, (...args) => event.execute(...args, client, db));
       }
       console.log(`✅ Loaded Event: ${file}`);
     }
@@ -82,7 +82,7 @@ client.on("interactionCreate", async (interaction) => {
     console.log(`[SLASH] ${interaction.commandName} by ${interaction.user.tag}`);
 
     if (interaction.commandName !== "terms") {
-      const accepted = await redis.get(`terms:accepted:${interaction.user.id}`);
+      const accepted = await db.get(`terms:accepted:${interaction.user.id}`);
       if (accepted !== TERMS_VERSION) {
         const embed = new EmbedBuilder()
           .setColor("#ED4245")
@@ -94,14 +94,14 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
-    const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
+    const blacklist = await checkBlacklist(db, interaction.user.id, interaction.guild.id);
     if (blacklist) {
       const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
     const maintenanceKey = `maintenance:${interaction.guild.id}`;
-    if (await redis.get(maintenanceKey) === "true") {
+    if (await db.get(maintenanceKey) === "true") {
       return interaction.reply({
         content: "🔧 The bot is currently under maintenance. Please try again later.",
         flags: MessageFlags.Ephemeral
@@ -109,7 +109,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     try {
-      await cmd.execute(interaction, client, redis);
+      await cmd.execute(interaction, client, db);
     } catch (err) {
       console.error(err);
       if (interaction.deferred || interaction.replied) {
@@ -127,7 +127,7 @@ client.on("interactionCreate", async (interaction) => {
     // ⚙️ ---- GIVEAWAY BUTTON JOIN HANDLER ----
     if (interaction.customId === "giveaway_join") {
       const msgId = interaction.message.id;
-      const giveawayData = await redis.hgetall(`giveaway:${msgId}`);
+      const giveawayData = await db.hgetall(`giveaway:${msgId}`);
 
       if (!giveawayData || giveawayData.ended === "true") {
         return interaction.reply({ content: "❌ **Error:** This giveaway has already ended.", flags: MessageFlags.Ephemeral });
@@ -135,11 +135,11 @@ client.on("interactionCreate", async (interaction) => {
 
       const userId = interaction.user.id;
       const registryKey = `giveaway:entries:${msgId}`;
-      const alreadyEntered = await redis.sismember(registryKey, userId);
+      const alreadyEntered = await db.sismember(registryKey, userId);
 
       if (alreadyEntered) {
-        await redis.srem(registryKey, userId);
-        const count = await redis.scard(registryKey);
+        await db.srem(registryKey, userId);
+        const count = await db.scard(registryKey);
         
         const oldEmbed = interaction.message.embeds[0];
         const updatedEmbed = EmbedBuilder.from(oldEmbed).setFooter({ text: `ACTIVE • ${count} ${count === 1 ? 'ENTRY' : 'ENTRIES'}` });
@@ -147,8 +147,8 @@ client.on("interactionCreate", async (interaction) => {
 
         return interaction.reply({ content: "⚠️ **Left Pool:** You removed your entry from this giveaway.", flags: MessageFlags.Ephemeral });
       } else {
-        await redis.sadd(registryKey, userId);
-        const count = await redis.scard(registryKey);
+        await db.sadd(registryKey, userId);
+        const count = await db.scard(registryKey);
 
         const oldEmbed = interaction.message.embeds[0];
         const updatedEmbed = EmbedBuilder.from(oldEmbed).setFooter({ text: `ACTIVE • ${count} ${count === 1 ? 'ENTRY' : 'ENTRIES'}` });
@@ -162,33 +162,33 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.customId === "rocket_cashout_trigger") {
       const rocketCommand = client.commands.get("rocket");
       if (rocketCommand && rocketCommand.handleButton) {
-        try { await rocketCommand.handleButton(interaction, redis, client); } catch (err) { console.error(err); }
+        try { await rocketCommand.handleButton(interaction, db, client); } catch (err) { console.error(err); }
         return;
       }
     }
 
     if (interaction.customId === "terms_accept") {
       const userId = interaction.user.id;
-      await redis.set(`terms:accepted:${userId}`, TERMS_VERSION);
+      await db.set(`terms:accepted:${userId}`, TERMS_VERSION);
       await interaction.update({ content: "✅ You have accepted the Terms of Service. You may now use all features.", embeds: [], components: [] });
       return;
     }
 
     if (interaction.customId === "terms_deny") {
       const userId = interaction.user.id;
-      await redis.del(`terms:accepted:${userId}`);
+      await db.del(`terms:accepted:${userId}`);
       await interaction.update({ content: "❌ You have denied the Terms of Service. You cannot use this bot until you accept.", embeds: [], components: [] });
       return;
     }
 
     if (interaction.customId === "ticket_create_panel") {
-      const accepted = await redis.get(`terms:accepted:${interaction.user.id}`);
+      const accepted = await db.get(`terms:accepted:${interaction.user.id}`);
       if (accepted !== TERMS_VERSION) return interaction.reply({ content: "📜 You must accept the Terms of Service first.", flags: MessageFlags.Ephemeral });
-      const blacklist = await checkBlacklist(redis, interaction.user.id, interaction.guild.id);
+      const blacklist = await checkBlacklist(db, interaction.user.id, interaction.guild.id);
       if (blacklist) return interaction.reply({ embeds: [buildBlacklistEmbed(blacklist.data, blacklist.type)], flags: MessageFlags.Ephemeral });
-      if (await redis.get(`maintenance:${interaction.guild.id}`) === "true") return interaction.reply({ content: "🔧 The bot is under maintenance.", flags: MessageFlags.Ephemeral });
+      if (await db.get(`maintenance:${interaction.guild.id}`) === "true") return interaction.reply({ content: "🔧 The bot is under maintenance.", flags: MessageFlags.Ephemeral });
 
-      await createTicket(interaction, client, redis, interaction.user.id, "support");
+      await createTicket(interaction, client, db, interaction.user.id, "support");
       return;
     }
 
@@ -196,14 +196,14 @@ client.on("interactionCreate", async (interaction) => {
       const [action, channelId] = interaction.customId.split(':');
       const channel = interaction.guild.channels.cache.get(channelId);
       if (!channel) return interaction.reply({ content: "❌ Ticket channel not found.", flags: MessageFlags.Ephemeral });
-      const data = await redis.hgetall(`ticket:${interaction.guild.id}:${channelId}`);
+      const data = await db.hgetall(`ticket:${interaction.guild.id}:${channelId}`);
       if (!data || !data.creator) return interaction.reply({ content: "❌ Invalid ticket.", flags: MessageFlags.Ephemeral });
 
       if (action === "ticket_claim") {
         if (data.claimedBy) return interaction.reply({ content: `❌ Already claimed by <@${data.claimedBy}>.`, flags: MessageFlags.Ephemeral });
-        const supportRoleId = await redis.get(`ticket:settings:${interaction.guild.id}:support_role`);
+        const supportRoleId = await db.get(`ticket:settings:${interaction.guild.id}:support_role`);
         if (supportRoleId && !interaction.member.roles.cache.has(supportRoleId)) return interaction.reply({ content: "❌ You don't have permission to claim.", flags: MessageFlags.Ephemeral });
-        await redis.hset(`ticket:${interaction.guild.id}:${channelId}`, "claimedBy", interaction.user.id);
+        await db.hset(`ticket:${interaction.guild.id}:${channelId}`, "claimedBy", interaction.user.id);
         await channel.send(`✅ ${interaction.user} has claimed this ticket.`);
         return interaction.reply({ content: "✅ Ticket claimed!", flags: MessageFlags.Ephemeral });
       }
@@ -223,21 +223,21 @@ client.on("interactionCreate", async (interaction) => {
         if (!price) return interaction.reply({ content: "❌ Invalid item.", flags: MessageFlags.Ephemeral });
 
         const balanceKey = `eco:${user.id}:money`;
-        let coins = Number(await redis.get(balanceKey) || 0);
+        let coins = Number(await db.get(balanceKey) || 0);
         if (coins < price) {
           return interaction.reply({ embeds: [new EmbedBuilder().setColor("#ED4245").setDescription(`❌ You need **${price}** units but only have **${coins}**.`)], flags: MessageFlags.Ephemeral });
         }
 
-        await redis.set(balanceKey, coins - price);
-        if (item === 'shield') await redis.incr(`eco:${user.id}:shield`);
-        else if (item === 'double') await redis.set(`eco:${user.id}:double`, 5);
+        await db.set(balanceKey, coins - price);
+        if (item === 'shield') await db.incr(`eco:${user.id}:shield`);
+        else if (item === 'double') await db.set(`eco:${user.id}:double`, 5);
 
         const itemNames = { shield: "🛡️ Shield", double: "⚡ Double XP (5 uses)" };
         const embed = new EmbedBuilder()
           .setColor("#57F287")
           .setTitle("✅ Purchase Successful!")
           .setDescription(`You bought **${itemNames[item]}** for **${price}** units!`)
-          .addFields({ name: "💰 New Balance", value: `${await redis.get(balanceKey) || 0} units`, inline: true })
+          .addFields({ name: "💰 New Balance", value: `${await db.get(balanceKey) || 0} units`, inline: true })
           .setTimestamp();
 
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
@@ -252,7 +252,7 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.isStringSelectMenu() && interaction.customId === "shop_menu_select") {
     const shopCommand = client.commands.get("shop");
     if (shopCommand && shopCommand.handleMenu) {
-      try { await shopCommand.handleMenu(interaction, redis); } catch (err) { console.error(err); }
+      try { await shopCommand.handleMenu(interaction, db); } catch (err) { console.error(err); }
     }
     return;
   }
@@ -295,7 +295,7 @@ client.on("messageCreate", async (message) => {
   setTimeout(() => processedMessages.delete(message.id), 5000);
 
   // 1. Blacklist Check Safeguard
-  const blacklist = await checkBlacklist(redis, message.author.id, message.guild.id);
+  const blacklist = await checkBlacklist(db, message.author.id, message.guild.id);
   if (blacklist) {
     if (message.content.startsWith("!") || message.content.startsWith("?")) {
       await message.reply({ embeds: [buildBlacklistEmbed(blacklist.data, blacklist.type)] }).catch(() => {});
@@ -305,7 +305,7 @@ client.on("messageCreate", async (message) => {
   }
 
   // 2. Maintenance Mode Safeguard
-  if (await redis.get(`maintenance:${message.guild.id}`) === "true") {
+  if (await db.get(`maintenance:${message.guild.id}`) === "true") {
     if (message.content.startsWith("!") || message.content.startsWith("?")) {
       await message.reply("🔧 The bot is currently under maintenance. Please try again later.").catch(() => {});
     }
@@ -314,7 +314,7 @@ client.on("messageCreate", async (message) => {
 
   // 3. Counting Channel Mechanics
   try {
-    const countingChannelId = await redis.get(`counting:${message.guild.id}:channel`);
+    const countingChannelId = await db.get(`counting:${message.guild.id}:channel`);
     if (countingChannelId && message.channel.id === countingChannelId) {
       const pureContent = message.content.replace(/\s+/g, "");
       if (!/^[0-9+\-*/^()]+$/.test(pureContent)) {
@@ -323,7 +323,7 @@ client.on("messageCreate", async (message) => {
       }
       const countingModule = await import("./games/counting.js");
       const runCountingGame = countingModule.default || countingModule;
-      await runCountingGame(message, redis);
+      await runCountingGame(message, db);
       return; 
     }
   } catch (error) { 
@@ -343,25 +343,25 @@ const { welcomeCard } = require("./canvas/welcome");
 const { leaveCard } = require("./canvas/leave");
 
 client.on("guildMemberAdd", async (member) => {
-  const channelId = await redis.get(`welcome:${member.guild.id}`);
+  const channelId = await db.get(`welcome:${member.guild.id}`);
   if (!channelId) return;
   const channel = member.guild.channels.cache.get(channelId);
   if (!channel) return;
   
-  const img = await welcomeCard(member.user, member.guild, redis);
-  const rawText = await redis.get(`welcome:text:${member.guild.id}`) || "👋 Welcome to the server, {user}!";
+  const img = await welcomeCard(member.user, member.guild, db);
+  const rawText = await db.get(`welcome:text:${member.guild.id}`) || "👋 Welcome to the server, {user}!";
   const parsedText = rawText.replace(/{user}/g, `${member.user}`).replace(/{server}/g, member.guild.name).replace(/{count}/g, member.guild.memberCount.toLocaleString());
   channel.send({ content: parsedText, files: [{ attachment: img, name: "welcome.png" }] });
 });
 
 client.on("guildMemberRemove", async (member) => {
-  const channelId = await redis.get(`leave:${member.guild.id}`);
+  const channelId = await db.get(`leave:${member.guild.id}`);
   if (!channelId) return;
   const channel = member.guild.channels.cache.get(channelId);
   if (!channel) return;
 
-  const img = await leaveCard(member.user, member.guild, redis);
-  const rawText = await redis.get(`leave:text:${member.guild.id}`) || "❌ {user} has left the server.";
+  const img = await leaveCard(member.user, member.guild, db);
+  const rawText = await db.get(`leave:text:${member.guild.id}`) || "❌ {user} has left the server.";
   const parsedText = rawText.replace(/{user}/g, `**${member.user.username}**`).replace(/{server}/g, member.guild.name).replace(/{count}/g, member.guild.memberCount.toLocaleString());
   channel.send({ content: parsedText, files: [{ attachment: img, name: "leave.png" }] });
 });
@@ -372,48 +372,48 @@ client.on("guildMemberRemove", async (member) => {
 client.once("ready", async () => {
   console.log(`${client.user.tag} online`);
 
-  initGiveawayEngine(client, redis);
+  initGiveawayEngine(client, db);
 
   const { ActivityType } = require("discord.js");
   client.user.setActivity("/help", { type: ActivityType.Playing });
   client.user.setStatus("online");
 
-  await redis.set('bot:heartbeat', Date.now());
-  setInterval(async () => { await redis.set('bot:heartbeat', Date.now()); }, 60000);
+  await db.set('bot:heartbeat', Date.now());
+  setInterval(async () => { await db.set('bot:heartbeat', Date.now()); }, 60000);
 
   async function updateStats(guild) {
     const guildId = guild.id;
-    const isPremium = await redis.get(`premium:guild:${guildId}`) !== null;
+    const isPremium = await db.get(`premium:guild:${guildId}`) !== null;
 
-    const totalChannelId = await redis.get(`stats:channel:total:${guildId}`);
+    const totalChannelId = await db.get(`stats:channel:total:${guildId}`);
     if (totalChannelId) {
       const channel = guild.channels.cache.get(totalChannelId);
       if (channel) {
         const count = guild.memberCount;
-        const baseName = await redis.get(`stats:baseName:total:${guildId}`) || "👥 ┃ Members";
+        const baseName = await db.get(`stats:baseName:total:${guildId}`) || "👥 ┃ Members";
         const newName = `${baseName} • ${count}`;
         if (channel.name !== newName) await channel.setName(newName).catch(() => {});
       }
     }
 
-    const onlineChannelId = await redis.get(`stats:channel:online:${guildId}`);
+    const onlineChannelId = await db.get(`stats:channel:online:${guildId}`);
     if (onlineChannelId) {
       const channel = guild.channels.cache.get(onlineChannelId);
       if (channel) {
         const onlineCount = guild.members.cache.filter(m => m.presence && ["online", "idle", "dnd"].includes(m.presence.status)).size;
-        const baseName = await redis.get(`stats:baseName:online:${guildId}`) || "🟢 ┃ Online";
+        const baseName = await db.get(`stats:baseName:online:${guildId}`) || "🟢 ┃ Online";
         const newName = `${baseName} • ${onlineCount}`;
         if (channel.name !== newName) await channel.setName(newName).catch(() => {});
       }
     }
 
     if (isPremium) {
-      const voiceChannelId = await redis.get(`stats:channel:voice:${guildId}`);
+      const voiceChannelId = await db.get(`stats:channel:voice:${guildId}`);
       if (voiceChannelId) {
         const channel = guild.channels.cache.get(voiceChannelId);
         if (channel) {
           const voiceCount = guild.members.cache.filter(m => m.voice.channel).size;
-          const baseName = await redis.get(`stats:baseName:voice:${guildId}`) || "🎙️ ┃ Voice";
+          const baseName = await db.get(`stats:baseName:voice:${guildId}`) || "🎙️ ┃ Voice";
           const newName = `${baseName} • ${voiceCount}`;
           if (channel.name !== newName) await channel.setName(newName).catch(() => {});
         }
@@ -430,10 +430,10 @@ client.once("ready", async () => {
     const now = new Date();
     if (now.getHours() === 0 && now.getMinutes() === 0) {
       const todayStr = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      const userIds = await redis.smembers(`birthdays:date:${todayStr}`);
+      const userIds = await db.smembers(`birthdays:date:${todayStr}`);
       if (!userIds || userIds.length === 0) return;
       for (const guild of client.guilds.cache.values()) {
-        const channelId = await redis.get(`birthday_channel:${guild.id}`);
+        const channelId = await db.get(`birthday_channel:${guild.id}`);
         if (!channelId) continue;
         const channel = await guild.channels.fetch(channelId).catch(() => null);
         if (!channel) continue;
