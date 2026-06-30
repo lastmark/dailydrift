@@ -11,8 +11,8 @@ const {
 const DEV_ID = "1303357369622990889";
 
 function formatTTL(ttl) {
-  if (ttl === -1) return "💎 **LIFETIME UNLOCKED**";
-  if (ttl <= 0) return "❌ EXPIRED / INACTIVE";
+  if (ttl === -1) return "💎 Lifetime";
+  if (ttl <= 0) return "❌ Expired/Inactive";
   const d = Math.floor(ttl / 86400);
   const h = Math.floor((ttl % 86400) / 3600);
   const m = Math.floor((ttl % 3600) / 60);
@@ -20,7 +20,7 @@ function formatTTL(ttl) {
   if (d > 0) parts.push(`${d}d`);
   if (h > 0) parts.push(`${h}h`);
   if (m > 0) parts.push(`${m}m`);
-  return parts.length > 0 ? `⏳ **ACTIVE** • \`${parts.join(' ')}\` remaining` : "⏳ **ACTIVE** • `< 1m` remaining";
+  return parts.length > 0 ? `⏳ **Active** • \`${parts.join(' ')}\` remaining` : "⏳ **Active** • `< 1m` remaining";
 }
 
 module.exports = {
@@ -108,22 +108,30 @@ module.exports = {
       }
 
       const embed = new EmbedBuilder()
-        .setColor("#0A0A0A")
-        .setTitle("💎 Premium Status")
-        .setDescription(`Current operational access limits verified for account \`${userId}\` across the current network server instance.`)
-        .addFields(
-          {
-            name: "👤 Personal Membership",
-            value: userValue ? formatTTL(userTTL) : "❌ **NO ACTIVE LICENSE**",
-            inline: false
-          },
-          {
-            name: "🏰 Guild Membership",
-            value: guildValue ? formatTTL(guildTTL) : "❌ **RUNNING BASE standard tier**",
-            inline: false
-          }
-        )
-        .setFooter({ text: "Use /redeem <code> to provision activation licenses." });
+  .setColor("#0A0A0A")
+  .setTitle("💎 Premium Status")
+  .setDescription(
+    "View the current premium status for your account and this server."
+  )
+  .addFields(
+    {
+      name: "👤 Personal Membership",
+      value: userValue
+        ? `🟢 **Active**\nExpires ${formatTTL(userTTL)}`
+        : "⚫ **Inactive**\nNo active personal membership.",
+      inline: false
+    },
+    {
+      name: "🏰 Guild Membership",
+      value: guildValue
+        ? `🟢 **Active**\nExpires ${formatTTL(guildTTL)}`
+        : "⚫ **Inactive**\nThis server is currently using the free tier.",
+      inline: false
+    }
+  )
+  .setFooter({
+    text: "Use /redeem <code> to activate a premium membership."
+  });
 
       if (userId === DEV_ID) {
         embed.addFields({
