@@ -162,7 +162,7 @@ async function generateTranscript(channel) {
 //  MAIN COMMAND MODULE
 // ======================================================================
 module.exports = {
-  category: "Support",
+  category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("ticket")
     .setDescription("🎫 Manage the ticket system")
