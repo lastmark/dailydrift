@@ -8,11 +8,11 @@ const {
 
 
 module.exports = {
-  category: "Server Management",
+  category: "User",
 
   data: new SlashCommandBuilder()
     .setName("birthday")
-    .setDescription("🎂 Complete birthday management system")
+    .setDescription("    Set and manage your birthday information.")
     .addSubcommand(sub =>
       sub.setName("set")
         .setDescription("Save your birthday")
