@@ -43,17 +43,7 @@ module.exports = {
     const userId = message.author.id;
     const guildId = message.guild.id;
     const content = message.content;
-
-    // ---- TERMS CHECK (prefix commands) ----
-    const accepted = await redis.get(`terms:accepted:${message.author.id}`);
-    const currentVersion = require("../config").TERMS_VERSION || "1.0";
-    if (accepted !== currentVersion) {
-      // Block all prefix commands except `!terms` or `?terms`
-      if (!message.content.match(/^[!?]terms$/)) {
-        return message.reply("📜 You must accept the Terms of Service first. Run `!terms` to view and accept.");
-      }
-      // Allow !terms to go through
-    }
+ 
 
     // ==========================================
     // ⚠️ COUNTING GAME IS NOW HANDLED IN index.js
