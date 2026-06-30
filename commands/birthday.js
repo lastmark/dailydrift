@@ -8,7 +8,7 @@ const {
 
 
 module.exports = {
-  category: "Events",
+  category: "Server Management",
 
   data: new SlashCommandBuilder()
     .setName("birthday")
