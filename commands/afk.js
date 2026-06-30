@@ -2,7 +2,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 
 module.exports = {
-  category: "Utility",
+  category: "User",
   data: new SlashCommandBuilder()
     .setName("afk")
     .setDescription("Set or clear your AFK status")
