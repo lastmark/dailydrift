@@ -6,7 +6,7 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName("rename-vip")
-    .setDescription("✏️ Rename the VIP Hub channel (admin only)")
+    .setDescription("Rename the VIP Hub channel (admin only)")
     .addStringOption(opt =>
       opt.setName("name")
         .setDescription("New name for the VIP Hub (max 32 characters)")
