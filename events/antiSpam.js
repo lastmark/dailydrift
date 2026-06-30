@@ -1,9 +1,10 @@
+// events/antiSpam.js
 const { Events, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
 
 module.exports = {
   name: Events.MessageCreate,
 
-  async execute(message, client, redis) {
+  async execute(message, client, db) {
     if (!message.guild || message.author.bot) return;
 
     const guildId = message.guild.id;
@@ -12,13 +13,8 @@ module.exports = {
     /* =========================
        FAST SINGLE CONFIG READ
     ========================= */
-    const config = await redis.mget(
-      `premium:guild:${guildId}`,
-      `antispam:${guildId}:enabled`
-    );
-
-    const premium = config[0];
-    const enabled = config[1];
+    const premium = await db.get(`premium:guild:${guildId}`);
+    const enabled = await db.get(`antispam:${guildId}:enabled`);
 
     if (!premium || premium === "false") return;
     if (enabled !== "true") return;
@@ -29,7 +25,7 @@ module.exports = {
        COOLDOWN LOCK (PREVENT DOUBLE TRIGGERS)
     ========================= */
     const lockKey = `spamlock:${guildId}:${userId}`;
-    const locked = await redis.get(lockKey);
+    const locked = await db.get(lockKey);
 
     if (locked) return;
 
@@ -37,13 +33,21 @@ module.exports = {
     const key = `spam:${guildId}:${userId}`;
 
     /* =========================
-       TRACK MESSAGES
+       TRACK MESSAGES (Using Array Storage via DB)
     ========================= */
-    await redis.rpush(key, now);
-    await redis.ltrim(key, -10, -1);
+    let recentTimestamps = (await db.get(key)) || [];
+    if (!Array.isArray(recentTimestamps)) recentTimestamps = [];
 
-    const raw = await redis.lrange(key, 0, -1);
-    const recent = raw.map(Number).filter(t => now - t < 3500);
+    recentTimestamps.push(now);
+    
+    // Simulate ltrim - keep the last 10 elements max
+    if (recentTimestamps.length > 10) {
+      recentTimestamps = recentTimestamps.slice(-10);
+    }
+    await db.set(key, recentTimestamps);
+
+    // Filter recent messages sent within the 3.5s window
+    const recent = recentTimestamps.map(Number).filter(t => now - t < 3500);
 
     /* =========================
        THRESHOLDS
@@ -58,12 +62,16 @@ module.exports = {
 
     if (!severity) return;
 
-    await redis.del(key);
+    await db.del(key);
 
     /* =========================
        SET COOLDOWN LOCK (10 MIN SAFE BUFFER)
     ========================= */
-    await redis.set(lockKey, "1", "EX", 600);
+    await db.set(lockKey, "1"); // Sets lock state
+    // Simple custom timeout mechanism to release lock since Mongo isn't natively expiring this key
+    setTimeout(async () => {
+      await db.del(lockKey).catch(() => {});
+    }, 600 * 1000);
 
     try {
       /* =========================
@@ -95,7 +103,7 @@ module.exports = {
          USER NOTICE
       ========================= */
       const warn = await message.channel.send({
-        content: `${e.error || "🚨"} **Anti-Spam (${severity})** → ${message.author} temporarily restricted.`
+        content: `🚨 **Anti-Spam (${severity})** → ${message.author} temporarily restricted.`
       });
 
       setTimeout(() => warn.delete().catch(() => null), 4000);
@@ -103,7 +111,7 @@ module.exports = {
       /* =========================
          AUDIT LOG
       ========================= */
-      const logId = await redis.get(`modlog_channel:${guildId}`);
+      const logId = await db.get(`modlog_channel:${guildId}`);
       if (!logId) return;
 
       const logChannel = await message.guild.channels.fetch(logId).catch(() => null);
