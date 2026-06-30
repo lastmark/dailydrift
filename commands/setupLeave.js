@@ -1,55 +1,100 @@
-const { SlashCommandBuilder, EmbedBuilder, ChannelType, MessageFlags } = require("discord.js");
+// commands/setleave.js – Premium Leave Configuration Panel
+const { SlashCommandBuilder, EmbedBuilder, ChannelType, MessageFlags, PermissionFlagsBits } = require("discord.js");
 
 module.exports = {
   category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("setleave")
-    .setDescription("Configure or update the leave channel for this server.")
-    .addChannelOption(option =>
-      option
-        .setName("channel")
-        .setDescription("The channel where leave messages should be sent")
-        .addChannelTypes(ChannelType.GuildText)
-        .setRequired(true)
+    .setDescription("⚙️ Configure or customize the departure grid setup")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand(sub =>
+      sub.setName("channel")
+        .setDescription("Set the text channel destination for member leave logs")
+        .addChannelOption(opt => opt.setName("target").setDescription("The destination text channel").addChannelTypes(ChannelType.GuildText).setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub.setName("text")
+        .setDescription("📝 [FREE] Customize the departure text caption format")
+        .addStringOption(opt => opt.setName("message").setDescription("Use {user}, {server}, or {count} variables").setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub.setName("background")
+        .setDescription("🎨 [GUILD PREMIUM] Upload a custom background canvas link")
+        .addStringOption(opt => opt.setName("url").setDescription("Direct high-res image URL link (PNG/JPG)").setRequired(true))
     ),
 
   async execute(interaction, client, redis) {
     const guildId = interaction.guild.id;
-    const targetChannel = interaction.options.getChannel("channel");
+    const sub = interaction.options.getSubcommand();
+    
+    // Check Guild Premium Tier up-front for restrictions
+    const isGuildPremium = await redis.get(`premium:guild:${guildId}`) !== null;
 
-    // Safety check
-    if (!targetChannel) {
-      return interaction.reply({
-        content: "❌ Invalid channel selected.",
-        flags: [MessageFlags.Ephemeral]
-      });
+    // ─── SUBCOMMAND: CHANNEL ───
+    if (sub === "channel") {
+      const targetChannel = interaction.options.getChannel("target");
+      await redis.set(`leave:${guildId}`, targetChannel.id);
+
+      const embed = new EmbedBuilder()
+        .setColor("#0A0A0A")
+        .setTitle("⚙️ CONFIGURATION SYSTEM RECONFIGURED")
+        .setDescription(
+          `**SYSTEM DEPLOYMENT SUCCESSFUL**\n` +
+          `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n` +
+          `• **Operational Module:** \`Leave Canvas Node\`\n` +
+          `• **Routing Target:** ${targetChannel}\n\n` +
+          `*All member departures will now register down this pipeline vector.*`
+        );
+
+      return interaction.reply({ embeds: [embed] });
     }
 
-    // Save config
-    await redis.set(`leave:${guildId}`, targetChannel.id);
+    // ─── SUBCOMMAND: TEXT (FREE TIER) ───
+    if (sub === "text") {
+      const msgFormat = interaction.options.getString("message");
+      await redis.set(`leave:text:${guildId}`, msgFormat);
 
-    const embed = new EmbedBuilder()
-      .setColor(0xFF4500)
-      .setTitle("⚙️ Leave System Configured")
-      .setDescription("Leave messages will now be routed correctly.")
-      .addFields(
-        {
-          name: "📍 Module",
-          value: "Leave System",
-          inline: true
-        },
-        {
-          name: "💬 Channel",
-          value: `${targetChannel}`,
-          inline: true
-        }
-      )
-      .setTimestamp()
-      .setFooter({
-        text: `Updated by ${interaction.user.username}`,
-        iconURL: interaction.user.displayAvatarURL()
-      });
+      const embed = new EmbedBuilder()
+        .setColor("#111111")
+        .setTitle("📝 DEPARTURE CAPTION STRING APPLIED")
+        .setDescription(
+          `**VARIABLE TEXT PARSER RECORDED**\n` +
+          `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n` +
+          `\`\`\`${msgFormat}\`\`\`\n` +
+          `*Variables like \`{user}\`, \`{server}\`, and \`{count}\` will automatically render natively on trigger events.*`
+        );
 
-    return interaction.reply({ embeds: [embed] });
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    // ─── SUBCOMMAND: BACKGROUND (PREMIUM ONLY) ───
+    if (sub === "background") {
+      if (!isGuildPremium) {
+        return interaction.reply({
+          content: "⭐ **Guild Premium Sub-module Locked:** Overriding the default canvas asset layer requires an active Guild Premium tier subscription for this instance.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const url = interaction.options.getString("url");
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        return interaction.reply({ content: "❌ **Invalid URI Vector:** Provide a clean, direct web layout link protocol.", flags: MessageFlags.Ephemeral });
+      }
+
+      await redis.set(`leave:bg:${guildId}`, url);
+
+      const embed = new EmbedBuilder()
+        .setColor("#1A1A1A")
+        .setTitle("🎨 PREMIUM CANVAS BACKGROUND LINKED")
+        .setDescription(
+          `**CUSTOM ASSET RENDER OVERRIDE INITIALIZED**\n` +
+          `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n` +
+          `The engine has logged your external layout overlay link and will pass it into the dynamic canvas compiler process.\n\n` +
+          `🖼️ **Asset Target Vector:** [View Configuration Link](${url})`
+        )
+        .setThumbnail(url);
+
+      return interaction.reply({ embeds: [embed] });
+    }
   }
 };
