@@ -1,47 +1,33 @@
 // blacklist.js – Main bot (with logging)
 const { EmbedBuilder } = require("discord.js");
 
-async function checkBlacklist(redis, userId, guildId) {
+async function checkBlacklist(db, userId, guildId) {
   console.log(`[BLACKLIST] Checking user ${userId} in guild ${guildId}`);
 
   // Check guild blacklist
   const guildKey = `blacklist:guild:${guildId}`;
-  const guildData = await redis.get(guildKey);
+  const guildData = await db.get(guildKey);
   if (guildData) {
     console.log(`[BLACKLIST] Guild blacklist found for ${guildId}`);
-    try {
-      const data = JSON.parse(guildData);
-      if (data.expiresAt && Date.now() > data.expiresAt) {
-        await redis.del(guildKey);
-        console.log(`[BLACKLIST] Guild blacklist expired, removed.`);
-        return null;
-      }
-      return { type: 'guild', data };
-    } catch (e) {
-      console.error(`[BLACKLIST] Error parsing guild blacklist:`, e);
-      await redis.del(guildKey);
+    if (guildData.expiresAt && Date.now() > guildData.expiresAt) {
+      await db.del(guildKey);
+      console.log(`[BLACKLIST] Guild blacklist expired, removed.`);
       return null;
     }
+    return { type: 'guild', data: guildData };
   }
 
   // Check user blacklist
   const userKey = `blacklist:user:${userId}`;
-  const userData = await redis.get(userKey);
+  const userData = await db.get(userKey);
   if (userData) {
     console.log(`[BLACKLIST] User blacklist found for ${userId}`);
-    try {
-      const data = JSON.parse(userData);
-      if (data.expiresAt && Date.now() > data.expiresAt) {
-        await redis.del(userKey);
-        console.log(`[BLACKLIST] User blacklist expired, removed.`);
-        return null;
-      }
-      return { type: 'user', data };
-    } catch (e) {
-      console.error(`[BLACKLIST] Error parsing user blacklist:`, e);
-      await redis.del(userKey);
+    if (userData.expiresAt && Date.now() > userData.expiresAt) {
+      await db.del(userKey);
+      console.log(`[BLACKLIST] User blacklist expired, removed.`);
       return null;
     }
+    return { type: 'user', data: userData };
   }
 
   console.log(`[BLACKLIST] No blacklist found for user ${userId} or guild ${guildId}`);
