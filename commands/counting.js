@@ -6,7 +6,7 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName("counting")
-    .setDescription("🎯 Counting game system")
+    .setDescription("Counting game system")
     .addSubcommand(sub =>
       sub.setName("setup")
         .setDescription("Setup counting channel")
