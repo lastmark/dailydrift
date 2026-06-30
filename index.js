@@ -72,7 +72,7 @@ if (fs.existsSync(commandsPath)) {
 }
 
 // ==========================================
-// 🏎️ INTERACTION HANDLER
+// 👑 INTERACTION HANDLER
 // ==========================================
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isChatInputCommand()) {
@@ -410,13 +410,28 @@ client.on("messageCreate", async (message) => {
 const { welcomeCard } = require("./canvas/welcome");
 const { leaveCard } = require("./canvas/leave");
 
+// --- Welcome handler ---
 client.on("guildMemberAdd", async (member) => {
   const channelId = await redis.get(`welcome:${member.guild.id}`);
   if (!channelId) return;
   const channel = member.guild.channels.cache.get(channelId);
   if (!channel) return;
-  const img = await welcomeCard(member.user, member.guild);
+  
+  // ✅ Fixed: passing 'redis' instance to prevent undefined crash
+  const img = await welcomeCard(member.user, member.guild, redis);
   channel.send({ files: [{ attachment: img, name: "welcome.png" }] });
+});
+
+// --- Leave handler ---
+client.on("guildMemberRemove", async (member) => {
+  const channelId = await redis.get(`leave:${member.guild.id}`);
+  if (!channelId) return;
+  const channel = member.guild.channels.cache.get(channelId);
+  if (!channel) return;
+
+  // ✅ Fixed: registered and added leaveCard execution with 'redis' instance pass-down
+  const img = await leaveCard(member.user, member.guild, redis);
+  channel.send({ files: [{ attachment: img, name: "leave.png" }] });
 });
 
 // ==========================================
