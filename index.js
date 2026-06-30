@@ -405,7 +405,7 @@ client.on("messageCreate", async (message) => {
 });
 
 // ==========================================
-// 🛡️ WELCOME / LEAVE CARDS
+// 🛡️ WELCOME / LEAVE SYSTEM WITH CHAT TEXT
 // ==========================================
 const { welcomeCard } = require("./canvas/welcome");
 const { leaveCard } = require("./canvas/leave");
@@ -417,9 +417,17 @@ client.on("guildMemberAdd", async (member) => {
   const channel = member.guild.channels.cache.get(channelId);
   if (!channel) return;
   
-  // ✅ Fixed: passing 'redis' instance to prevent undefined crash
+  // Build the canvas card asset (remains automated via engine)
   const img = await welcomeCard(member.user, member.guild, redis);
-  channel.send({ files: [{ attachment: img, name: "welcome.png" }] });
+
+  // Fetch and parse custom text for the standard chat channel caption wrapper
+  const rawText = await redis.get(`welcome:text:${member.guild.id}`) || "👋 Welcome to the server, {user}!";
+  const parsedText = rawText
+    .replace(/{user}/g, `${member.user}`)
+    .replace(/{server}/g, member.guild.name)
+    .replace(/{count}/g, member.guild.memberCount.toLocaleString());
+
+  channel.send({ content: parsedText, files: [{ attachment: img, name: "welcome.png" }] });
 });
 
 // --- Leave handler ---
@@ -429,9 +437,17 @@ client.on("guildMemberRemove", async (member) => {
   const channel = member.guild.channels.cache.get(channelId);
   if (!channel) return;
 
-  // ✅ Fixed: registered and added leaveCard execution with 'redis' instance pass-down
+  // Build the canvas card asset (remains automated via engine)
   const img = await leaveCard(member.user, member.guild, redis);
-  channel.send({ files: [{ attachment: img, name: "leave.png" }] });
+
+  // Fetch and parse custom text for the standard chat channel caption wrapper
+  const rawText = await redis.get(`leave:text:${member.guild.id}`) || "❌ {user} has left the server.";
+  const parsedText = rawText
+    .replace(/{user}/g, `**${member.user.username}**`)
+    .replace(/{server}/g, member.guild.name)
+    .replace(/{count}/g, member.guild.memberCount.toLocaleString());
+
+  channel.send({ content: parsedText, files: [{ attachment: img, name: "leave.png" }] });
 });
 
 // ==========================================
