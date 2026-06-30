@@ -6,7 +6,7 @@ const {
 } = require("discord.js");
 
 module.exports = {
-  category: "Moderation",
+  category: "Premium",
   data: new SlashCommandBuilder()
     .setName("antighostping")
     .setDescription("Detect deleted messages that contain mentions")
