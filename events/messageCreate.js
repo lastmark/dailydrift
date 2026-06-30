@@ -222,6 +222,46 @@ module.exports = {
       return;
     }
 
+
+// ==========================================
+    // 💤 AFK SYSTEM (auto‑clear & mention reply)
+    // ==========================================
+
+    // If the message author is AFK, remove it and notify them
+    const afkDataRaw = await redis.get(`afk:${userId}`);
+    if (afkDataRaw) {
+      await redis.del(`afk:${userId}`);
+      const afkData = JSON.parse(afkDataRaw);
+      const time = Date.now() - afkData.since;
+      const timeAgo = time < 60000 ? 'just now' : `<t:${Math.floor(afkData.since / 1000)}:R>`;
+
+      const welcomeEmbed = new EmbedBuilder()
+        .setColor("#57F287")
+        .setTitle("👋 Welcome Back!")
+        .setDescription(`${message.author}, you are no longer AFK.`)
+        .addFields(
+          { name: "You were AFK for", value: timeAgo },
+          { name: "Reason was", value: afkData.reason }
+        );
+      // Send a subtle reply (will be deleted after a few seconds)
+      const afkReply = await message.channel.send({ embeds: [welcomeEmbed] });
+      setTimeout(() => afkReply.delete().catch(() => {}), 5000);
+    }
+
+    // Check if any mentioned user is AFK
+    const mentionedUsers = message.mentions.users.filter(u => u.id !== userId);
+    for (const [id, user] of mentionedUsers) {
+      const afkCheck = await redis.get(`afk:${id}`);
+      if (afkCheck) {
+        const afkData = JSON.parse(afkCheck);
+        const embed = new EmbedBuilder()
+          .setColor("#5865F2")
+          .setDescription(`💤 **${user.username}** is currently AFK since <t:${Math.floor(afkData.since / 1000)}:R>\n**Reason:** ${afkData.reason}`);
+        await message.reply({ embeds: [embed] }).catch(() => {});
+      }
+    }
+
+    
     // ==========================================
     // 💎 XP / LEVEL SYSTEM (non-command messages)
     // ==========================================
