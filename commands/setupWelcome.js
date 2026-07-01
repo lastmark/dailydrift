@@ -1,11 +1,11 @@
-// commands/setwelcome.js – Premium Welcome Configuration Panel
+// commands/setwelcome.js – Premium Welcome Configuration Panel (MongoDB Optimized)
 const { SlashCommandBuilder, EmbedBuilder, ChannelType, MessageFlags, PermissionFlagsBits } = require("discord.js");
 
 module.exports = {
   category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("setwelcome")
-    .setDescription("⚙️ Configure or customize the greeting welcome grid setup")
+    .setDescription("Configure or customize the greeting welcome grid setup")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("channel")
@@ -14,23 +14,26 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("text")
-        .setDescription("📝 [FREE] Customize the welcome text caption format")
+        .setDescription("Customize the welcome text caption format")
         .addStringOption(opt => opt.setName("message").setDescription("Use {user}, {server}, or {count} variables").setRequired(true))
     )
     .addSubcommand(sub =>
       sub.setName("background")
-        .setDescription("🎨 [GUILD PREMIUM] Upload a custom background canvas link")
+        .setDescription("[GUILD PREMIUM] Upload a custom background canvas link")
         .addStringOption(opt => opt.setName("url").setDescription("Direct high-res image URL link (PNG/JPG)").setRequired(true))
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const guildId = interaction.guild.id;
     const sub = interaction.options.getSubcommand();
-    const isGuildPremium = await redis.get(`premium:guild:${guildId}`) !== null;
+    
+    // Check Guild Premium Tier in MongoDB
+    const isGuildPremium = (await db.get(`premium:guild:${guildId}`)) !== null;
 
+    // ─── SUBCOMMAND: CHANNEL ───
     if (sub === "channel") {
       const targetChannel = interaction.options.getChannel("target");
-      await redis.set(`welcome:${guildId}`, targetChannel.id);
+      await db.set(`welcome:channel:${guildId}`, targetChannel.id);
 
       const embed = new EmbedBuilder()
         .setColor("#0A0A0A")
@@ -40,9 +43,10 @@ module.exports = {
       return interaction.reply({ embeds: [embed] });
     }
 
+    // ─── SUBCOMMAND: TEXT ───
     if (sub === "text") {
       const msgFormat = interaction.options.getString("message");
-      await redis.set(`welcome:text:${guildId}`, msgFormat);
+      await db.set(`welcome:text:${guildId}`, msgFormat);
 
       const embed = new EmbedBuilder()
         .setColor("#111111")
@@ -52,6 +56,7 @@ module.exports = {
       return interaction.reply({ embeds: [embed] });
     }
 
+    // ─── SUBCOMMAND: BACKGROUND (PREMIUM) ───
     if (sub === "background") {
       if (!isGuildPremium) {
         return interaction.reply({
@@ -61,7 +66,7 @@ module.exports = {
       }
 
       const url = interaction.options.getString("url");
-      await redis.set(`welcome:bg:${guildId}`, url);
+      await db.set(`welcome:bg:${guildId}`, url);
 
       const embed = new EmbedBuilder()
         .setColor("#1A1A1A")
