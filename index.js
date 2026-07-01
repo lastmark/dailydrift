@@ -1,14 +1,15 @@
-// index.js – Main Bot (MongoDB, debug included)
+// index.js – Main Bot (MongoDB, fixed connection, debug included)
 require("dotenv").config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
-const db = require("./database"); // MongoDB wrapper
+const db = require("./database"); // MongoDB wrapper (uses models)
 const fs = require("fs");
 const path = require("path");
 const { checkBlacklist, buildBlacklistEmbed } = require("./blacklist.js");
 const setupLogger = require("./logger.js");
 const { createTicket } = require("./commands/ticket.js");
 const { initGiveawayEngine } = require("./engines/giveawayManager");
+const connectDB = require("./mongoose"); // MongoDB connection promise
 
 const client = new Client({
   intents: [
@@ -229,7 +230,6 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         await db.set(balanceKey, coins - price);
-        // Fixed typo: db.incr → db.incrby
         if (item === 'shield') await db.incrby(`eco:${user.id}:shield`, 1);
         else if (item === 'double') await db.set(`eco:${user.id}:double`, 5);
 
@@ -483,4 +483,8 @@ client.once("ready", async () => {
   }
 });
 
-client.login(token);
+// ✅ Wait for MongoDB connection, then start Discord
+(async () => {
+  await connectDB();
+  client.login(token);
+})();
