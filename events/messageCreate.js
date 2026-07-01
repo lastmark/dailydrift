@@ -1,4 +1,4 @@
-// events/messageCreate.js – Unified handler (counting first, fast)
+// events/messageCreate.js – Unified handler (counting first, fast, XP fixed)
 const { Events, EmbedBuilder } = require("discord.js");
 const { checkBlacklist, buildBlacklistEmbed } = require("../blacklist.js");
 
@@ -56,58 +56,17 @@ module.exports = {
     const maintenanceKey = `maintenance:${guildId}`;
     if (await db.get(maintenanceKey) === "true") {
       if (content.startsWith("!")) {
-        await message.reply("🔧 The bot is currently under maintenance. Please try again later.");
+        await message.reply("🔧 The bot is currently under maintenance. Please try again later and Join our Support Server for more informations! .");
       }
       return;
     }
 
-if (cmd === "!testanimated") {
-  const bgUrl = await db.get(`profile:${message.author.id}`);
-  const bg = bgUrl?.custom_bg;
-  if (!bg) return message.reply("❌ No background set. Upload one first with /profile upload.");
-
-  const data = {
-    avatarUrl: message.author.displayAvatarURL({ extension: "png", size: 256 }),
-    username: message.author.username,
-    color: "#5865F2",
-    theme: "default",
-    premium: true,
-    beta: false,
-    bio: "Test bio",
-    status: "",
-    balance: 0,
-    reputation: 0,
-    level: 1,
-    xp: 0,
-    needed: 100,
-    progress: 0,
-    barStyle: "default",
-    links: [],
-    nameColor: "#FFFFFF",
-    favGame: "None",
-    embedBg: null,
-    userId: message.author.id,
-  };
-
-  try {
-    const { generateAnimatedProfile } = require("../utils/animatedProfile.js");
-    const buffer = await generateAnimatedProfile(bg, data);
-    await message.author.send({ files: [{ attachment: buffer, name: "test.gif" }] });
-    await message.reply("📬 Sent animated test to your DMs.");
-  } catch (err) {
-    console.error(err);
-    await message.reply(`❌ Failed: ${err.message}`);
-  }
-  return;
-}
-
-
-    
     // ==========================================
     // 💤 AFK SYSTEM
     // ==========================================
-    const afkData = await db.get(`afk:${userId}`);
-    if (afkData) {
+    const afkDataRaw = await db.get(`afk:${userId}`);
+    if (afkDataRaw) {
+      const afkData = typeof afkDataRaw === 'object' ? afkDataRaw : JSON.parse(afkDataRaw);
       await db.del(`afk:${userId}`);
       const time = Date.now() - afkData.since;
       const timeAgo = time < 60000 ? 'just now' : `<t:${Math.floor(afkData.since / 1000)}:R>`;
@@ -126,8 +85,9 @@ if (cmd === "!testanimated") {
 
     const mentionedUsers = message.mentions.users.filter(u => u.id !== userId);
     for (const [id, user] of mentionedUsers) {
-      const afkCheck = await db.get(`afk:${id}`);
-      if (afkCheck) {
+      const afkCheckRaw = await db.get(`afk:${id}`);
+      if (afkCheckRaw) {
+        const afkCheck = typeof afkCheckRaw === 'object' ? afkCheckRaw : JSON.parse(afkCheckRaw);
         const embed = new EmbedBuilder()
           .setColor("#111111")
           .setDescription(`💤 **${user.username}** went AFK <t:${Math.floor(afkCheck.since / 1000)}:R>\n💬 "${afkCheck.reason || "No reason provided."}"`);
@@ -150,7 +110,9 @@ if (cmd === "!testanimated") {
       if (isUserPremium) xpGain *= 2;
 
       const profileKey = `profile:${userId}`;
-      const profile = (await db.hgetall(profileKey)) || {};
+      // ✅ FIX: use db.get instead of hgetall, and parse JSON
+      const raw = await db.get(profileKey);
+      const profile = (raw && typeof raw === 'object') ? raw : (typeof raw === 'string' ? JSON.parse(raw) : {});
       let xp = Number(profile.xp || 0);
       let level = Number(profile.level || 0); 
 
@@ -183,13 +145,13 @@ if (cmd === "!testanimated") {
 
         const lvlEmbed = new EmbedBuilder()
           .setColor("#0A0A0A")
-          .setTitle("✨ Level Advanced")
+          .setTitle("✨ Level Up")
           .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL({ dynamic: true }) })
           .setDescription(`Congratulations! Your active participation has progressed your profile account status.`)
           .addFields(
-            { name: "📈 Level Up", value: `\`Level ${initialLevel}\` ➔ \`Level ${level}\``, inline: true },
-            { name: "💰 Level Reward", value: `🪙 **+${totalCoinReward.toLocaleString()}** coins`, inline: true },
-            { name: "✨ Earned Booster", value: isUserPremium ? "🟢 `2.0x Premium Active`" : "⚪ `1.0x Standard`", inline: true },
+            { name: "📈 Level Up", value: `\`From Level ${initialLevel}\` ➔ \`To Level ${level}\``, inline: true },
+            { name: "💰 Level Reward", value: `🪙 **+${totalCoinReward.toLocaleString()}** coins earned`, inline: true },
+            { name: "✨ Booster In Use", value: isUserPremium ? "`2.0x Premium Active`" : "`1.0x Standard`", inline: true },
             { name: "📊 Next Progression Stage", value: `${progressBarStr} \`${xp} / ${needed} XP\``, inline: false }
           )
           .setTimestamp();
@@ -198,15 +160,17 @@ if (cmd === "!testanimated") {
       }
       
       profile.xp = xp;
-      await db.set(profileKey, profile);
+      // ✅ Store as JSON string
+      await db.set(profileKey, JSON.stringify(profile));
     }
 
     // ==========================================
     // 🤖 AUTO RESPONDER
     // ==========================================
     const key = content.toLowerCase().trim();
-    const responder = await db.get(`responder:${guildId}:${key}`);
-    if (responder) {
+    const responderRaw = await db.get(`responder:${guildId}:${key}`);
+    if (responderRaw) {
+      const responder = typeof responderRaw === 'object' ? responderRaw : JSON.parse(responderRaw);
       return message.channel.send({
         embeds: [
           new EmbedBuilder()
@@ -218,11 +182,10 @@ if (cmd === "!testanimated") {
     }
 
     // ==========================================
-    // 💬 PREFIX COMMANDS (optional, if you still use them)
+    // 💬 PREFIX COMMANDS (optional)
     // ==========================================
     if (content.startsWith("!")) {
       // your existing prefix command logic...
-      // you can keep the shop/buy/shields/countingstats commands here
     }
   }
 };
