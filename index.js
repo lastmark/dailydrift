@@ -462,4 +462,4 @@ client.once("ready", async () => {
   } catch (err) { console.error(err); }
 });
 
-client.login(token); this is
+client.login(token);
