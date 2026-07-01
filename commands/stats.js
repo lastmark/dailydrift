@@ -1,18 +1,18 @@
-// commands/stats.js – Setup stats channels (voice & joined are premium) – FIXED
+// commands/stats.js – Server Statistics Engine (MongoDB Optimized)
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require("discord.js");
 
 module.exports = {
   category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("stats")
-    .setDescription("Setup live statistics channels")
+    .setDescription("Deploy live server statistics channels")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("setup")
-        .setDescription("Deploy live tracking channels")
+        .setDescription("Initialize a tracking node")
         .addStringOption(opt =>
           opt.setName("type")
-            .setDescription("Select metric type")
+            .setDescription("The metric to track")
             .setRequired(true)
             .addChoices(
               { name: "👥 Total Members", value: "total" },
@@ -23,27 +23,27 @@ module.exports = {
         )
         .addChannelOption(opt =>
           opt.setName("target_channel")
-            .setDescription("Use existing voice channel (optional)")
+            .setDescription("Existing channel to link (optional)")
             .addChannelTypes(ChannelType.GuildVoice)
             .setRequired(false)
         )
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     await interaction.deferReply();
 
-    const guild = interaction.guild;
-    const guildId = interaction.guildId;
+    const { guild } = interaction;
+    const guildId = guild.id;
     const type = interaction.options.getString("type");
     const targetChannel = interaction.options.getChannel("target_channel");
 
-    // ---- Check if guild has premium for voice & joined stats ----
-    const isPremium = await redis.get(`premium:guild:${guildId}`) !== null;
-    const premiumOnlyTypes = ["voice", "joined"];
+    // --- Premium Guard ---
+    const isPremium = (await db.get(`premium:guild:${guildId}`)) !== null;
+    const premiumOnly = ["voice", "joined"];
 
-    if (premiumOnlyTypes.includes(type) && !isPremium) {
+    if (premiumOnly.includes(type) && !isPremium) {
       return interaction.editReply({
-        content: "❌ **Voice Activity** and **Joined Today** stats are **Guild Premium** features. Upgrade to premium to unlock them."
+        content: "⭐ **Guild Premium Required:** Voice Activity and Joined Today statistics require an active premium subscription."
       });
     }
 
@@ -54,19 +54,14 @@ module.exports = {
       joined: "📅 ┃ Joined Today"
     };
 
+    // --- Logic for Metric Retrieval ---
     const getCount = () => {
       if (type === "total") return guild.memberCount;
-      if (type === "online") {
-        // ✅ FIX: only count members with a valid presence and status not "offline"
-        return guild.members.cache.filter(m => m.presence && m.presence.status !== "offline").size;
-      }
-      if (type === "voice") {
-        return guild.members.cache.filter(m => m.voice.channel).size;
-      }
+      if (type === "online") return guild.members.cache.filter(m => m.presence?.status !== "offline").size;
+      if (type === "voice") return guild.members.cache.filter(m => m.voice.channel).size;
       if (type === "joined") {
-        const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        return guild.members.cache.filter(m => m.joinedAt && m.joinedAt >= today).size;
+        const today = new Date().setHours(0, 0, 0, 0);
+        return guild.members.cache.filter(m => m.joinedAt?.getTime() >= today).size;
       }
       return 0;
     };
@@ -78,25 +73,22 @@ module.exports = {
 
     if (targetChannel) {
       channelId = targetChannel.id;
-      const nameParts = targetChannel.name.split("•");
-      const base = nameParts[0]?.trim() || baseName;
-      await targetChannel.setName(`${base} • ${currentCount}`).catch(() => null);
+      await targetChannel.setName(`${baseName} • ${currentCount}`).catch(() => null);
     } else {
       const newChannel = await guild.channels.create({
         name: `${baseName} • ${currentCount}`,
         type: ChannelType.GuildVoice,
-        permissionOverwrites: [
-          { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.Connect] }
-        ]
+        permissionOverwrites: [{ id: guild.roles.everyone.id, deny: [PermissionFlagsBits.Connect] }]
       });
       channelId = newChannel.id;
     }
 
-    await redis.set(`stats:channel:${type}:${guildId}`, channelId);
-    await redis.set(`stats:baseName:${type}:${guildId}`, baseName);
+    // --- Persistence in MongoDB ---
+    await db.set(`stats:channel:${type}:${guildId}`, channelId);
+    await db.set(`stats:baseName:${type}:${guildId}`, baseName);
 
     return interaction.editReply({
-      content: `✅ Stats tracking enabled for **${type.toUpperCase()}** in <#${channelId}>.`
+      content: `✅ **Metric Active:** Tracking **${type.toUpperCase()}** at <#${channelId}>.`
     });
   }
 };
