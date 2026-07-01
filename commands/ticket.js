@@ -1,4 +1,4 @@
-// commands/ticket.js – Premium Ticket Management System (MongoDB Optimized)
+// commands/ticket.js – Fixed for MongoDB wrapper
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -10,9 +10,6 @@ const {
   MessageFlags
 } = require("discord.js");
 
-// ----------------------------------------------------------------------
-//  HELPER: createTicket
-// ----------------------------------------------------------------------
 async function createTicket(interaction, client, db, userId, category = "support") {
   const guild = interaction.guild;
   const member = await guild.members.fetch(userId).catch(() => null);
@@ -71,13 +68,14 @@ async function createTicket(interaction, client, db, userId, category = "support
 
   await ticketChannel.send({ embeds: [embed], components: [row] });
 
-  // Atomic database set for ticket
-  await db.set(`ticket:${guildId}:${ticketChannel.id}`, {
+  // Store ticket data
+  const ticketData = {
     creator: userId,
     category,
     claimedBy: "",
     createdAt: Date.now()
-  });
+  };
+  await db.set(`ticket:${guildId}:${ticketChannel.id}`, ticketData);
   await db.set(openTicketKey, ticketChannel.id);
 
   const reply = { content: `✅ Ticket created: ${ticketChannel}`, flags: MessageFlags.Ephemeral };
@@ -85,17 +83,11 @@ async function createTicket(interaction, client, db, userId, category = "support
   return ticketChannel;
 }
 
-// ----------------------------------------------------------------------
-//  HELPER: generateTranscript
-// ----------------------------------------------------------------------
 async function generateTranscript(channel) {
   const messages = await channel.messages.fetch({ limit: 100 });
   return messages.map(m => `[${m.createdAt.toISOString()}] ${m.author.tag}: ${m.content}`).reverse().join("\n");
 }
 
-// ======================================================================
-//  MAIN MODULE
-// ======================================================================
 module.exports = {
   category: "Server Management",
   data: new SlashCommandBuilder()
@@ -104,15 +96,15 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
     .addSubcommand(sub => sub.setName("panel").setDescription("Deploy ticket panel")
       .addStringOption(o => o.setName("title").setDescription("Embed title"))
-      .addChannelOption(o => o.setName("channel").addChannelTypes(ChannelType.GuildText)))
+      .addChannelOption(o => o.setName("channel").setDescription("Target channel").addChannelTypes(ChannelType.GuildText)))
     .addSubcommand(sub => sub.setName("create").setDescription("Manually open ticket")
-      .addStringOption(o => o.setName("category").addChoices({name: "Support", value: "support"}, {name: "Report", value: "report"})))
+      .addStringOption(o => o.setName("category").setDescription("Ticket category").addChoices({name: "Support", value: "support"}, {name: "Report", value: "report"})))
     .addSubcommand(sub => sub.setName("close").setDescription("Close current ticket"))
     .addSubcommand(sub => sub.setName("settings").setDescription("Configure settings")
-      .addChannelOption(o => o.setName("category").addChannelTypes(ChannelType.GuildCategory))
+      .addChannelOption(o => o.setName("category").setDescription("Ticket category channel").addChannelTypes(ChannelType.GuildCategory))
       .addRoleOption(o => o.setName("support_role").setDescription("Support role")))
     .addSubcommand(sub => sub.setName("transcript").setDescription("Retrieve closed transcript")
-    .addStringOption(o => o.setName("ticket_id").setDescription("Ticket channel ID").setRequired(true))),
+      .addStringOption(o => o.setName("ticket_id").setDescription("Ticket channel ID").setRequired(true))),
 
   async execute(interaction, client, db) {
     const sub = interaction.options.getSubcommand();
