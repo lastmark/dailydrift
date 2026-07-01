@@ -1,4 +1,4 @@
-// commands/redeem.js – Premium Code Redemption Engine (MongoDB Optimized)
+// commands/redeem.js – Fixed MongoDB redemption
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 
 module.exports = {
@@ -18,83 +18,93 @@ module.exports = {
     const guildId = interaction.guild.id;
 
     try {
-      // Fetch code data from MongoDB
-      const data = await db.get(`redeem:${code}`);
-      
-      if (!data) {
+      // 1️⃣ Fetch raw data (stored as JSON string)
+      const raw = await db.get(`redeem:${code}`);
+      if (!raw) {
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#BA1A1A").setDescription("❌ **Invalid Registry:** The provided code is unrecognized or has been exhausted.")],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription("❌ Invalid or already redeemed code.")],
           flags: MessageFlags.Ephemeral
         });
       }
 
-      // --- Validation ---
+      // 2️⃣ Parse the JSON string into an object
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (e) {
+        console.error("Redeem code JSON parse error:", e);
+        await db.del(`redeem:${code}`);
+        return interaction.reply({
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription("❌ Corrupted code – removed.")],
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // 3️⃣ Validation
       if (data.used >= data.uses) {
         await db.del(`redeem:${code}`);
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#BA1A1A").setDescription("❌ **Exhausted:** This code has reached its maximum redemption threshold.")],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription("❌ This code has already been fully redeemed.")],
           flags: MessageFlags.Ephemeral
         });
       }
 
-      // Check if user already redeemed
       if (data.users && data.users.includes(userId)) {
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor("#BA1A1A").setDescription("❌ **Redundancy Detected:** You have already utilized this specific code.")],
+          embeds: [new EmbedBuilder().setColor("#ED4245").setDescription("❌ You have already used this code.")],
           flags: MessageFlags.Ephemeral
         });
       }
 
-      // --- Determine premium type and expiry ---
+      // 4️⃣ Apply premium
       const premiumType = data.type || 'user';
-      const premiumKey = premiumType === 'guild' ? `premium:guild:${guildId}` : `premium:user:${userId}`;
-      
-      const now = Date.now();
-      let newExpiry;
+      const premiumKey = premiumType === 'guild'
+        ? `premium:guild:${guildId}`
+        : `premium:user:${userId}`;
 
       if (data.duration === "perm") {
-        newExpiry = -1;
+        await db.set(premiumKey, "perm");
       } else {
-        // Calculate expiry based on duration (seconds)
-        const durationMs = (data.seconds || 3600) * 1000;
-        newExpiry = now + durationMs;
+        const seconds = data.seconds || 3600;
+        await db.set(premiumKey, "active");
+        await db.expire(premiumKey, seconds);
       }
 
-      // Save to MongoDB (Updating the subscription record)
-      await db.set(premiumKey, { expiry: newExpiry });
-
-      // --- Give currency rewards if applicable ---
-      const updates = [];
+      // 5️⃣ Give coins if applicable
+      let coinsMsg = "";
       if (data.giveCoins && data.coinAmount > 0) {
         const currentBal = Number(await db.get(`eco:${userId}:money`) || 0);
         await db.set(`eco:${userId}:money`, currentBal + data.coinAmount);
-        updates.push(`💰 \`${data.coinAmount.toLocaleString()}\` coins credited`);
+        coinsMsg = `💰 +${data.coinAmount.toLocaleString()} coins`;
       }
 
-      // --- Update code usage registry ---
+      // 6️⃣ Update code usage
       data.used += 1;
+      if (!data.users) data.users = [];
       data.users.push(userId);
-      await db.set(`redeem:${code}`, data);
 
-      // --- Build response ---
+      // Store back as JSON string
+      await db.set(`redeem:${code}`, JSON.stringify(data));
+
+      // 7️⃣ Build response
       const embed = new EmbedBuilder()
-        .setColor("#0A0A0A") // Premium dark minimalist styling
-        .setTitle("✅ Authorization Successful")
-        .setDescription(`Redemption sequence validated for **${premiumType.toUpperCase()} PREMIUM** profile.`)
+        .setColor("#57F287")
+        .setTitle("✅ Code Redeemed!")
+        .setDescription(`You activated **${premiumType.toUpperCase()} PREMIUM**.`)
         .addFields(
-          { name: "🎁 Allocation Rewards", value: updates.length ? updates.join("\n") : "None", inline: false },
-          { name: "⏳ Term Duration", value: data.duration === "perm" ? "♾️ Lifetime" : `\`${data.duration}\``, inline: true },
-          { name: "📊 Usage Status", value: `\`${data.used} / ${data.uses}\``, inline: true }
-        )
-        .setFooter({ text: "Subscription status updated in the database." })
-        .setTimestamp();
+          { name: "⏳ Duration", value: data.duration === "perm" ? "♾️ Lifetime" : `\`${data.duration}\``, inline: true },
+          { name: "📊 Uses", value: `${data.used} / ${data.uses}`, inline: true }
+        );
+      if (coinsMsg) embed.addFields({ name: "🎁 Bonus", value: coinsMsg, inline: false });
+
+      embed.setTimestamp();
 
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 
     } catch (error) {
-      console.error("Redemption pipeline error:", error);
+      console.error("Redemption error:", error);
       return interaction.reply({
-        embeds: [new EmbedBuilder().setColor("#BA1A1A").setDescription("❌ **System Fault:** Critical failure during redemption verification.")],
+        embeds: [new EmbedBuilder().setColor("#ED4245").setDescription("❌ Internal error during redemption.")],
         flags: MessageFlags.Ephemeral
       });
     }
