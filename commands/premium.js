@@ -1,36 +1,28 @@
-// commands/premium.js – High-Aesthetic Premium Control Center
-const { 
-  SlashCommandBuilder, 
-  EmbedBuilder, 
-  MessageFlags 
-} = require("discord.js");
+// commands/premium.js – Fixed status display (supports "perm" string and timed objects)
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 
 const DEV_ID = "1303357369622990889";
 
-/**
- * Calculates remaining time from a stored expiry timestamp
- * @param {number|null} expiryTimestamp 
- * @returns {string} Formatted duration string
- */
 function formatTTL(expiryTimestamp) {
   if (!expiryTimestamp) return "❌ Inactive";
   if (expiryTimestamp === -1) return "💎 Lifetime";
-  
+
   const now = Date.now();
   const diff = expiryTimestamp - now;
-  
   if (diff <= 0) return "❌ Expired";
-  
+
   const d = Math.floor(diff / 86400000);
   const h = Math.floor((diff % 86400000) / 3600000);
   const m = Math.floor((diff % 3600000) / 60000);
-  
+
   const parts = [];
   if (d > 0) parts.push(`${d}d`);
   if (h > 0) parts.push(`${h}h`);
   if (m > 0) parts.push(`${m}m`);
-  
-  return parts.length > 0 ? `⏳ **Active** • \`${parts.join(' ')}\` remaining` : "⏳ **Active** • `< 1m` remaining";
+
+  return parts.length > 0
+    ? `⏳ **Active** • \`${parts.join(' ')}\` remaining`
+    : "⏳ **Active** • `< 1m` remaining";
 }
 
 module.exports = {
@@ -55,7 +47,7 @@ module.exports = {
     // ── /premium info ──
     if (sub === "info") {
       const embed = new EmbedBuilder()
-        .setColor("#0A0A0A") // Premium dark minimalist aesthetic
+        .setColor("#0A0A0A")
         .setAuthor({ name: "PREMIUM MEMBERSHIP ARCHITECTURE", iconURL: client.user.displayAvatarURL() })
         .setDescription("Upgrade your operational capacity with exclusive user and guild-wide benefits.")
         .addFields(
@@ -80,12 +72,40 @@ module.exports = {
 
     // ── /premium status ──
     if (sub === "status") {
-      // Assuming db structure stores expiry as a timestamp (number) or -1 (lifetime)
-      const userSub = await db.get(`premium:user:${userId}`); // Expects { expiry: number|-1 }
-      const guildSub = await db.get(`premium:guild:${guildId}`);
+      // ── User premium ──
+      const userRaw = await db.get(`premium:user:${userId}`);
+      let userExpiry = null;
 
-      const userExpiry = userSub?.expiry || null;
-      const guildExpiry = guildSub?.expiry || null;
+      if (userRaw === "perm") {
+        // Lifetime string
+        userExpiry = -1;
+      } else if (userRaw && typeof userRaw === "object" && userRaw.expiry) {
+        // Object with expiry timestamp
+        userExpiry = userRaw.expiry;
+      } else if (userRaw === "active") {
+        // Timed premium stored as "active" string – check TTL via db.ttl
+        const ttl = await db.ttl(`premium:user:${userId}`);
+        if (ttl > 0) {
+          userExpiry = Date.now() + ttl * 1000;
+        } else {
+          userExpiry = null; // expired or missing
+        }
+      }
+
+      // ── Guild premium ──
+      const guildRaw = await db.get(`premium:guild:${guildId}`);
+      let guildExpiry = null;
+
+      if (guildRaw === "perm") {
+        guildExpiry = -1;
+      } else if (guildRaw && typeof guildRaw === "object" && guildRaw.expiry) {
+        guildExpiry = guildRaw.expiry;
+      } else if (guildRaw === "active") {
+        const ttl = await db.ttl(`premium:guild:${guildId}`);
+        if (ttl > 0) {
+          guildExpiry = Date.now() + ttl * 1000;
+        }
+      }
 
       const embed = new EmbedBuilder()
         .setColor("#0A0A0A")
@@ -94,15 +114,15 @@ module.exports = {
         .addFields(
           {
             name: "👤 Personal Node",
-            value: userExpiry 
-              ? `🟢 **Status: Enabled**\n${formatTTL(userExpiry)}` 
+            value: userExpiry
+              ? `🟢 **Status: Enabled**\n${formatTTL(userExpiry)}`
               : "⚫ **Status: Standard**\nNo active personal membership.",
             inline: false
           },
           {
             name: "🏰 Guild Node",
-            value: guildExpiry 
-              ? `🟢 **Status: Enabled**\n${formatTTL(guildExpiry)}` 
+            value: guildExpiry
+              ? `🟢 **Status: Enabled**\n${formatTTL(guildExpiry)}`
               : "⚫ **Status: Standard**\nThis server is currently operating on the free tier.",
             inline: false
           }
@@ -112,7 +132,7 @@ module.exports = {
       if (userId === DEV_ID) {
         embed.addFields({
           name: "🔧 CORE SYSTEM DEPLOYMENT DEBUG",
-          value: `\`\`\`User: ${JSON.stringify(userSub)}\nGuild: ${JSON.stringify(guildSub)}\`\`\``,
+          value: `\`\`\`User raw: ${JSON.stringify(userRaw)}\nGuild raw: ${JSON.stringify(guildRaw)}\`\`\``,
           inline: false
         });
       }
