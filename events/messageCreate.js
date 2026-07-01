@@ -61,7 +61,7 @@ module.exports = {
       return;
     }
 
-if (cmd === "testanimated") {
+if (cmd === "!testanimated") {
   const bgUrl = await db.get(`profile:${message.author.id}`);
   const bg = bgUrl?.custom_bg;
   if (!bg) return message.reply("❌ No background set. Upload one first with /profile upload.");
