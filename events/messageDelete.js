@@ -4,15 +4,15 @@ const { Events, EmbedBuilder } = require("discord.js");
 module.exports = {
   name: Events.MessageDelete,
 
-  async execute(message, client, redis) {
+  async execute(message, client, db) {
     // Ignore bots, DMs, or partial messages
     if (!message.guild || message.author?.bot || message.partial) return;
 
     const guildId = message.guild.id;
 
     // Check if ghost ping detection is enabled
-    const enabled = await redis.get(`antighostping:${guildId}`);
-    if (!enabled) return;
+    const enabled = await db.get(`antighostping:${guildId}`);
+    if (enabled !== "true" && !enabled) return;
 
     // Only log if the message contained any mentions (user, role, or everyone)
     const mentions = [
@@ -26,7 +26,7 @@ module.exports = {
     // Build embed
     const embed = new EmbedBuilder()
       .setColor("#ED4245")
-      .setAuthor({ name: message.author?.tag || "Unknown", iconURL: message.author?.displayAvatarURL() })
+      .setAuthor({ name: message.author?.tag || "Unknown", iconURL: message.author?.displayAvatarURL({ dynamic: true }) })
       .setDescription(
         `**Ghost ping detected!**\n` +
         `A message containing mentions was deleted.\n\n` +
@@ -38,16 +38,17 @@ module.exports = {
       .setFooter({ text: `Message ID: ${message.id}` })
       .setTimestamp();
 
-    // Send to the same channel (or you can specify a log channel in Redis)
-    const logChannelId = await redis.get(`antighostping:channel:${guildId}`);
+    // Check if a dedicated log channel is configured
+    const logChannelId = await db.get(`antighostping:channel:${guildId}`);
     if (logChannelId) {
-      const logChannel = message.guild.channels.cache.get(logChannelId);
+      const logChannel = message.guild.channels.cache.get(logChannelId) || 
+                         await message.guild.channels.fetch(logChannelId).catch(() => null);
       if (logChannel) {
         return logChannel.send({ embeds: [embed] });
       }
     }
 
     // Fallback: send to the channel where the message was deleted
-    await message.channel.send({ embeds: [embed] });
+    await message.channel.send({ embeds: [embed] }).catch(() => {});
   }
 };
