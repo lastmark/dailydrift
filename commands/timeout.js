@@ -1,49 +1,60 @@
-// commands/timeout.js
+// commands/timeout.js – Administrative Member Throttling
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
   category: "Moderation",
   data: new SlashCommandBuilder()
     .setName("timeout")
-    .setDescription("Timeout a member")
+    .setDescription("Apply a temporary communication restriction to a member")
     .addUserOption(opt =>
       opt.setName("user")
-        .setDescription("User to timeout")
+        .setDescription("Target member to throttle")
         .setRequired(true))
     .addIntegerOption(opt =>
       opt.setName("minutes")
-        .setDescription("Duration in minutes")
+        .setDescription("Duration in minutes (1–40320)")
         .setRequired(true)
         .setMinValue(1)
         .setMaxValue(40320))
     .addStringOption(opt =>
       opt.setName("reason")
-        .setDescription("Reason for the timeout")
+        .setDescription("Justification for the action")
         .setRequired(false))
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .setDMPermission(false),
 
   async execute(interaction) {
-    if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
-      const embed = new EmbedBuilder().setColor("#ED4245").setDescription("❌ You need the **Moderate Members** permission.");
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-    }
     const user = interaction.options.getUser("user");
     const minutes = interaction.options.getInteger("minutes");
-    const reason = interaction.options.getString("reason") || "No reason provided";
+    const reason = interaction.options.getString("reason") || "No justification provided";
+
     try {
       const member = await interaction.guild.members.fetch(user.id);
+      
+      // Attempt timeout application
       await member.timeout(minutes * 60 * 1000, reason);
+
       const embed = new EmbedBuilder()
-        .setColor("#FEE75C")
-        .setTitle("⏳ Member Timed Out")
-        .setDescription(`**${user.tag}** has been timed out for **${minutes}** minute(s).\n**Reason:** ${reason}`)
+        .setColor("#0A0A0A") // Premium dark minimalist theme
+        .setTitle("⏳ Member Communication Throttled")
+        .addFields(
+          { name: "Subject", value: `${user}`, inline: true },
+          { name: "Duration", value: `\`${minutes}\` minute(s)`, inline: true },
+          { name: "Justification", value: reason, inline: false }
+        )
         .setTimestamp();
+
       return interaction.reply({ embeds: [embed] });
+      
     } catch (err) {
-      console.error(err);
-      const embed = new EmbedBuilder().setColor("#ED4245").setDescription("❌ I cannot timeout that user.");
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      console.error("Timeout Pipeline Exception:", err);
+      return interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor("#BA1A1A")
+          .setDescription("❌ **Operation Failed:** Unable to apply timeout. (Ensure the user is not higher in the hierarchy than the bot).")
+        ],
+        flags: MessageFlags.Ephemeral
+      });
     }
   }
 };
