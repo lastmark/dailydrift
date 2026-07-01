@@ -1,18 +1,40 @@
-// games/counting.js – Instant reaction, clean UI, shield/freeze embeds
+// games/counting.js – Ultra‑fast counting (in‑memory cache, DB background sync)
 const { EmbedBuilder } = require("discord.js");
+
+// Guild cache: guildId -> { next, last, users: { userId: { streak, best } } }
+const cache = new Map();
+
+// Load a guild's state from DB into cache (called on first message in that guild)
+async function loadGuild(guildId, db) {
+  const data = await db.get(`counting:${guildId}`);
+  if (data) {
+    const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+    cache.set(guildId, parsed);
+  } else {
+    // init fresh
+    cache.set(guildId, { next: 1, last: null, users: {} });
+  }
+}
+
+// Save a guild's state back to DB (fire‑and‑forget)
+function saveGuild(guildId, db, state) {
+  db.set(`counting:${guildId}`, JSON.stringify(state)).catch(() => {});
+}
 
 module.exports = async function counting(message, db) {
   const userId = message.author.id;
   const guildId = message.guild.id;
 
-  // ---- Expected number ----
-  const nextKey = `counting:${guildId}:next`;
-  const expected = Number(await db.get(nextKey)) || 1;
+  // Ensure the guild is loaded in cache (first message after restart)
+  if (!cache.has(guildId)) {
+    await loadGuild(guildId, db);
+  }
+  const state = cache.get(guildId);
+
   const rawContent = message.content.trim();
 
-  // ---- Prevent same user counting twice in a row ----
-  const lastCounter = await db.get(`counting:${guildId}:last`);
-  if (lastCounter === userId) {
+  // ---- Prevent double counts ----
+  if (state.last === userId) {
     if (message.deletable) await message.delete().catch(() => {});
     const warnEmbed = new EmbedBuilder()
       .setColor("#FEE75C")
@@ -22,7 +44,7 @@ module.exports = async function counting(message, db) {
     return;
   }
 
-  // ---- Parse the number ----
+  // ---- Parse number ----
   let userNumber;
   try {
     const sanitized = rawContent.replace(/\^/g, '**');
@@ -35,11 +57,11 @@ module.exports = async function counting(message, db) {
     userNumber = NaN;
   }
 
-  // ---- WRONG COUNT ----
-  if (isNaN(userNumber) || userNumber !== expected) {
+  // ---- Wrong count ----
+  if (isNaN(userNumber) || userNumber !== state.next) {
     if (message.deletable) await message.delete().catch(() => {});
 
-    // Check for shield
+    // Shield check
     const shields = Number(await db.get(`eco:${userId}:shield`) || 0);
     if (shields > 0) {
       await db.set(`eco:${userId}:shield`, shields - 1);
@@ -49,15 +71,15 @@ module.exports = async function counting(message, db) {
         .setDescription(`${message.author.username} made a mistake, but a shield saved their streak!`)
         .addFields(
           { name: "Remaining Shields", value: `${shields - 1}`, inline: true },
-          { name: "Expected Number", value: `${expected}`, inline: true }
+          { name: "Expected Number", value: `${state.next}`, inline: true }
         )
         .setFooter({ text: "The count continues..." });
       const msg = await message.channel.send({ embeds: [shieldEmbed] });
       setTimeout(() => msg.delete().catch(() => {}), 5000);
-      return; // Count is NOT reset
+      return; // Count NOT reset
     }
 
-    // Check for Premium Streak Freeze (once per 24h)
+    // Premium streak freeze
     const isPremium = await db.get(`premium:user:${userId}`);
     if (isPremium) {
       const freezeKey = `counting:freeze:${userId}`;
@@ -68,63 +90,69 @@ module.exports = async function counting(message, db) {
           .setColor("#00AAFF")
           .setTitle("❄️ Premium Streak Freeze")
           .setDescription(`${message.author.username}'s premium freeze saved their streak!`)
-          .addFields({ name: "Expected Number", value: `${expected}`, inline: true })
+          .addFields({ name: "Expected Number", value: `${state.next}`, inline: true })
           .setFooter({ text: "The count continues..." });
         const msg = await message.channel.send({ embeds: [freezeEmbed] });
         setTimeout(() => msg.delete().catch(() => {}), 5000);
-        return; // Count is NOT reset
+        return; // Count NOT reset
       }
     }
 
-    // No protection → reset
-    await db.del(`counting:${guildId}:${userId}:streak`);
-    await db.zincrby(`counting:${guildId}:mistakes`, 1, userId);
-    await db.set(nextKey, 1);
-    await db.del(`counting:${guildId}:last`);
-
-    const embed = new EmbedBuilder()
+    // No protection – reset the count
+    const resetEmbed = new EmbedBuilder()
       .setColor("#ED4245")
       .setTitle("❌ Wrong Number!")
       .setDescription(
         `${message.author.username} broke the chain.\n` +
-        `The correct number was **${expected}**, but they sent **${userNumber}**.`
+        `The correct number was **${state.next}**, but they sent **${userNumber}**.`
       )
       .addFields({ name: "Count", value: "Reset to **1**" })
       .setTimestamp();
-    await message.channel.send({ embeds: [embed] });
+    await message.channel.send({ embeds: [resetEmbed] });
+
+    // Reset cache + DB
+    state.next = 1;
+    state.last = null;
+    // Also reset the user's streak (keep best?)
+    if (state.users[userId]) {
+      state.users[userId].streak = 0;
+      // increment mistakes
+      state.users[userId].mistakes = (state.users[userId].mistakes || 0) + 1;
+    } else {
+      state.users[userId] = { streak: 0, best: 0, correct: 0, mistakes: 1 };
+    }
+    saveGuild(guildId, db, state);
     return;
   }
 
   // ---- CORRECT COUNT ----
-  // ✅ React IMMEDIATELY – before any database writes
+  // ✅ React immediately (before any DB call)
   await message.react("✅").catch(() => {});
 
-  // Now update the database
-  await db.set(nextKey, expected + 1);
-  await db.set(`counting:${guildId}:last`, userId);
+  // Update cache
+  state.next++;
+  state.last = userId;
 
-  // Streak handling
-  const streakKey = `counting:${guildId}:${userId}:streak`;
-  const bestKey = `counting:${guildId}:${userId}:bestStreak`;
-  let streak = Number(await db.get(streakKey) || 0);
-  streak++;
-  await db.set(streakKey, streak);
-  let best = Number(await db.get(bestKey) || 0);
-  if (streak > best) {
-    best = streak;
-    await db.set(bestKey, best);
+  // Update user stats in cache
+  if (!state.users[userId]) {
+    state.users[userId] = { streak: 0, best: 0, correct: 0, mistakes: 0 };
+  }
+  const userStats = state.users[userId];
+  userStats.correct = (userStats.correct || 0) + 1;
+  userStats.streak = (userStats.streak || 0) + 1;
+  if (userStats.streak > (userStats.best || 0)) {
+    userStats.best = userStats.streak;
   }
 
-  await db.zincrby(`counting:${guildId}:correct`, 1, userId);
+  // Save to DB in background (fire‑and‑forget)
+  saveGuild(guildId, db, state);
 
-  // No coins – already removed
-
-  // Streak milestones
-  if (streak === 10 || streak === 25 || streak === 50 || streak === 100 || streak === 250) {
+  // Streak milestone (optional, still fast)
+  if (userStats.streak === 10 || userStats.streak === 25 || userStats.streak === 50 || userStats.streak === 100 || userStats.streak === 250) {
     const milestoneEmbed = new EmbedBuilder()
       .setColor("#FFD700")
       .setTitle("🔥 Streak Milestone!")
-      .setDescription(`${message.author.username} reached a **${streak}** count streak!`)
+      .setDescription(`${message.author.username} reached a **${userStats.streak}** count streak!`)
       .setTimestamp();
     await message.channel.send({ embeds: [milestoneEmbed] });
   }
