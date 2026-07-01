@@ -4,11 +4,11 @@ const { Events, ChannelType, PermissionFlagsBits } = require("discord.js");
 module.exports = {
   name: Events.VoiceStateUpdate,
 
-  async execute(oldState, newState, client, redis) {
+  async execute(oldState, newState, client, db) {
     const guildId = newState.guild.id;
 
     // Get the hub channel ID
-    const hubId = await redis.get(`vip:${guildId}:hub`);
+    const hubId = await db.get(`vip:${guildId}:hub`);
     if (!hubId) return;
 
     // ---- USER JOINED THE HUB ----
@@ -17,14 +17,16 @@ module.exports = {
       const guild = newState.guild;
 
       // Check premium status
-      const isPremium = await redis.get(`premium:guild:${guildId}`) !== null;
+      const isPremium = await db.get(`premium:guild:${guildId}`) !== null;
 
       // Count user's current VIP channels
-      const createdChannels = await redis.smembers(`vip:${guildId}:createdChannels`);
+      let createdChannels = (await db.get(`vip:${guildId}:createdChannels`)) || [];
+      if (!Array.isArray(createdChannels)) createdChannels = [];
+      
       let userChannelCount = 0;
       for (const channelId of createdChannels) {
-        const owner = await redis.hget(`vip:${guildId}:${channelId}`, "owner");
-        if (owner === userId) userChannelCount++;
+        const channelData = (await db.get(`vip:${guildId}:${channelId}`)) || {};
+        if (channelData.owner === userId) userChannelCount++;
       }
 
       // Limit check (standard = 3, premium = unlimited)
@@ -63,16 +65,18 @@ module.exports = {
           ]
         });
 
-        await redis.sadd(`vip:${guildId}:createdChannels`, channel.id);
-        await redis.hset(`vip:${guildId}:${channel.id}`, {
+        // Add channel to set tracking array
+        createdChannels.push(channel.id);
+        await db.set(`vip:${guildId}:createdChannels`, createdChannels);
+
+        // Store channel configuration object
+        await db.set(`vip:${guildId}:${channel.id}`, {
           owner: userId,
           createdAt: Date.now()
         });
 
         // Move the user into the new channel
         await newState.member.voice.setChannel(channel);
-
-        // ✅ No DM sent here – only alert on limit
 
       } catch (error) {
         console.error("[VIP] Error creating VIP channel:", error);
@@ -82,7 +86,11 @@ module.exports = {
     // ---- USER LEFT A VIP CHANNEL – delete instantly if empty ----
     if (oldState.channelId && oldState.channelId !== hubId) {
       const channelId = oldState.channelId;
-      const isVip = await redis.sismember(`vip:${guildId}:createdChannels`, channelId);
+      
+      let createdChannels = (await db.get(`vip:${guildId}:createdChannels`)) || [];
+      if (!Array.isArray(createdChannels)) createdChannels = [];
+
+      const isVip = createdChannels.includes(channelId);
       if (!isVip) return;
 
       // Wait 1 second to let Discord update the member list
@@ -91,8 +99,12 @@ module.exports = {
         if (channel && channel.members.size === 0) {
           try {
             await channel.delete("Auto-deleted – empty VIP channel");
-            await redis.srem(`vip:${guildId}:createdChannels`, channelId);
-            await redis.del(`vip:${guildId}:${channelId}`);
+            
+            // Filter target out from array to simulate srem
+            createdChannels = createdChannels.filter(id => id !== channelId);
+            await db.set(`vip:${guildId}:createdChannels`, createdChannels);
+            
+            await db.del(`vip:${guildId}:${channelId}`);
           } catch (err) {
             console.error("[VIP] Failed to auto-delete VIP channel:", err);
           }
