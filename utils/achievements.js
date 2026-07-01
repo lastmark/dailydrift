@@ -1,4 +1,4 @@
-// utils/achievements.js – Achievement definitions and helpers
+// utils/achievements.js – Achievement System (MongoDB Optimized)
 const ACHIEVEMENTS = {
   first_count: { id: 'first_count', name: 'First Count', desc: 'Made your first correct count', icon: '🎯' },
   level_10: { id: 'level_10', name: 'Level 10', desc: 'Reached level 10', icon: '⭐' },
@@ -24,22 +24,35 @@ function getAchievement(id) {
   return ACHIEVEMENTS[id];
 }
 
-async function grantAchievement(redis, userId, achievementId) {
-  const key = `profile:${userId}:achievements`;
-  const exists = await redis.sismember(key, achievementId);
-  if (!exists) {
-    await redis.sadd(key, achievementId);
-    return true;
-  }
-  return false;
+/**
+ * Grants an achievement if the user does not already possess it.
+ * Uses MongoDB $addToSet to ensure atomicity.
+ */
+async function grantAchievement(db, userId, achievementId) {
+  // Using MongoDB's update operator to add if missing
+  const result = await db.client.db().collection("profiles").updateOne(
+    { userId },
+    { $addToSet: { achievements: achievementId } },
+    { upsert: true }
+  );
+  
+  // modifiedCount > 0 means the set was updated (item didn't exist)
+  return result.modifiedCount > 0;
 }
 
-async function getAchievements(redis, userId) {
-  return await redis.smembers(`profile:${userId}:achievements`);
+/**
+ * Retrieves an array of all achievement IDs owned by the user.
+ */
+async function getAchievements(db, userId) {
+  const profile = await db.client.db().collection("profiles").findOne({ userId }, { projection: { achievements: 1 } });
+  return profile?.achievements || [];
 }
 
-async function getAchievementCount(redis, userId) {
-  const ach = await getAchievements(redis, userId);
+/**
+ * Retrieves the total count of achievements owned by the user.
+ */
+async function getAchievementCount(db, userId) {
+  const ach = await getAchievements(db, userId);
   return ach.length;
 }
 
