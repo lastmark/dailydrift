@@ -1,4 +1,4 @@
-// commands/profile.js – Full Profile System (MongoDB, all subcommands, canvas)
+// commands/profile.js – Full Profile System (MongoDB, all subcommands, canvas + animated GIF)
 const { SlashCommandBuilder, EmbedBuilder, AttachmentBuilder, MessageFlags } = require("discord.js");
 const { createCanvas, loadImage, registerFont, CanvasRenderingContext2D } = require("canvas");
 const path = require("path");
@@ -218,7 +218,6 @@ module.exports = {
       if (target.id === userId) return interaction.editReply({ content: "❌ Cannot marry yourself.", flags: MessageFlags.Ephemeral });
       if (await db.get(`marry:${userId}`)) return interaction.editReply({ content: "❌ Already married.", flags: MessageFlags.Ephemeral });
       if (await db.get(`marry:${target.id}`)) return interaction.editReply({ content: `❌ ${target.username} is already married.`, flags: MessageFlags.Ephemeral });
-      // Proposal (simplified for space – you can expand)
       return interaction.editReply({ content: "💍 Proposal sent! (reaction collector needed)", flags: MessageFlags.Ephemeral });
     }
 
@@ -383,207 +382,241 @@ module.exports = {
         .setFooter({ text: `Requested by ${interaction.user.username}` })
         .setTimestamp();
 
-      // ---------- Static Canvas Generation ----------
-      const canvas = createCanvas(900, 350);
-      const ctx = canvas.getContext("2d");
+      // ── Decide: Animated GIF or Static PNG ──
+      let profileBuffer;
+      let attachmentName = "profile.png";
 
-      // Background
-      let bgImage = null;
-      if (customBg) {
-        try { bgImage = await loadImage(customBg); } catch {}
-      }
-      if (!bgImage && prof.bg) {
-        const shopData = await db.get(`shop:bg:${prof.bg}`);
-        if (shopData?.url) {
-          try { bgImage = await loadImage(shopData.url); } catch {}
+      // Robust GIF check (ignores query parameters)
+      const isGif = customBg && customBg.toLowerCase().split('?')[0].endsWith('.gif');
+
+      if (premium && customBg && isGif) {
+        console.log("[PROFILE] Attempting animated GIF generation...");
+        try {
+          const profileData = {
+            avatarUrl: targetUser.displayAvatarURL({ extension: "png", size: 256 }),
+            username: targetUser.username,
+            color,
+            theme,
+            premium: true,
+            beta,
+            bio,
+            status,
+            balance,
+            reputation,
+            level,
+            xp,
+            needed,
+            progress,
+            barStyle,
+            links,
+            nameColor,
+            favGame,
+            embedBg,
+            userId: targetId,
+          };
+          profileBuffer = await generateAnimatedProfile(customBg, profileData);
+          attachmentName = "profile.gif";
+          console.log("[PROFILE] Animated GIF generated successfully.");
+        } catch (err) {
+          console.error("[PROFILE] Animated GIF failed, using static:", err.message);
+          profileBuffer = null;
         }
       }
-      if (bgImage) {
-        ctx.drawImage(bgImage, 0, 0, 900, 350);
-      } else {
-        let gradColors;
-        switch (theme) {
-          case "neon": gradColors = ["#FF00FF33", "#00FFFF33"]; break;
-          case "space": gradColors = ["#00003333", "#33006633"]; break;
-          case "nature": gradColors = ["#00FF0033", "#00660033"]; break;
-          case "retro": gradColors = ["#FF6B6B33", "#FFD93D33"]; break;
-          default: gradColors = [color + "33", "#2C3E50"];
+
+      // If no animated buffer, generate static canvas
+      if (!profileBuffer) {
+        const canvas = createCanvas(900, 350);
+        const ctx = canvas.getContext("2d");
+
+        // Background
+        let bgImage = null;
+        if (customBg) {
+          try { bgImage = await loadImage(customBg); } catch {}
         }
-        const gradient = ctx.createLinearGradient(0, 0, 900, 350);
-        gradient.addColorStop(0, gradColors[0]);
-        gradient.addColorStop(1, gradColors[1]);
-        ctx.fillStyle = gradient;
+        if (!bgImage && prof.bg) {
+          const shopData = await db.get(`shop:bg:${prof.bg}`);
+          if (shopData?.url) {
+            try { bgImage = await loadImage(shopData.url); } catch {}
+          }
+        }
+        if (bgImage) {
+          ctx.drawImage(bgImage, 0, 0, 900, 350);
+        } else {
+          let gradColors;
+          switch (theme) {
+            case "neon": gradColors = ["#FF00FF33", "#00FFFF33"]; break;
+            case "space": gradColors = ["#00003333", "#33006633"]; break;
+            case "nature": gradColors = ["#00FF0033", "#00660033"]; break;
+            case "retro": gradColors = ["#FF6B6B33", "#FFD93D33"]; break;
+            default: gradColors = [color + "33", "#2C3E50"];
+          }
+          const gradient = ctx.createLinearGradient(0, 0, 900, 350);
+          gradient.addColorStop(0, gradColors[0]);
+          gradient.addColorStop(1, gradColors[1]);
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, 900, 350);
+        }
+
+        // Overlay
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
         ctx.fillRect(0, 0, 900, 350);
-      }
+        ctx.fillStyle = "rgba(255,255,255,0.05)";
+        ctx.fillRect(0, 0, 900, 350);
 
-      // Overlay
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.fillRect(0, 0, 900, 350);
-      ctx.fillStyle = "rgba(255,255,255,0.05)";
-      ctx.fillRect(0, 0, 900, 350);
+        // Avatar
+        const avatar = await loadImage(targetUser.displayAvatarURL({ extension: "png", size: 256 }));
+        ctx.shadowColor = "rgba(0,0,0,0.5)";
+        ctx.shadowBlur = 20;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(130, 145, 80, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(avatar, 45, 65, 170, 170);
+        ctx.restore();
 
-      // Avatar
-      const avatar = await loadImage(targetUser.displayAvatarURL({ extension: "png", size: 256 }));
-      ctx.shadowColor = "rgba(0,0,0,0.5)";
-      ctx.shadowBlur = 20;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(130, 145, 80, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(avatar, 45, 65, 170, 170);
-      ctx.restore();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 30;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(130, 145, 85, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
 
-      // Avatar ring
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 30;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(130, 145, 85, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-
-      // Status below picture
-      if (status) {
-        ctx.fillStyle = "rgba(255,255,255,0.6)";
-        ctx.font = getFont("italic", 14);
-        ctx.textAlign = "center";
-        ctx.fillText(`"${status}"`, 130, 250);
-        ctx.textAlign = "left";
-      }
-
-      // Username + Premium badge
-      const nameColorHex = nameColor || "#FFFFFF";
-      ctx.fillStyle = nameColorHex;
-      ctx.font = getFont("bold", 32);
-      const nameWidth = ctx.measureText(targetUser.username).width;
-      ctx.fillText(targetUser.username, 270, 100);
-      if (premium) {
-        ctx.fillStyle = "#FFD700";
-        ctx.font = getFont("bold", 18);
-        ctx.fillText("PREMIUM", 270 + nameWidth + 15, 100);
-      }
-
-      // Title
-      let title = "Member";
-      if (premium) title = "PREMIUM";
-      else if (beta) title = "Beta Tester";
-      ctx.fillStyle = color;
-      ctx.font = getFont("bold", 18);
-      ctx.fillText(title, 270, 140);
-
-      // Bio
-      ctx.fillStyle = "rgba(255,255,255,0.8)";
-      ctx.font = getFont("normal", 16);
-      let displayBio = bio.length > 60 ? bio.substring(0, 57) + "..." : bio;
-      ctx.fillText(displayBio, 270, 175);
-
-      // Stats (coins, reputation, level)
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.font = getFont("bold", 16);
-      let xPos = 270;
-      const stats = [
-        { label: "Coins:", value: formatNumber(balance) },
-        { label: "Reputation:", value: formatNumber(reputation) },
-        { label: "Level:", value: level }
-      ];
-      stats.forEach((stat, i) => {
-        if (i > 0) {
-          ctx.fillStyle = "rgba(255,255,255,0.2)";
-          ctx.font = getFont("normal", 16);
-          ctx.fillText("|", xPos + 20, 205);
-          xPos += 40;
+        if (status) {
+          ctx.fillStyle = "rgba(255,255,255,0.6)";
+          ctx.font = getFont("italic", 14);
+          ctx.textAlign = "center";
+          ctx.fillText(`"${status}"`, 130, 250);
+          ctx.textAlign = "left";
         }
+
+        const nameColorHex = nameColor || "#FFFFFF";
+        ctx.fillStyle = nameColorHex;
+        ctx.font = getFont("bold", 32);
+        const nameWidth = ctx.measureText(targetUser.username).width;
+        ctx.fillText(targetUser.username, 270, 100);
+        if (premium) {
+          ctx.fillStyle = "#FFD700";
+          ctx.font = getFont("bold", 18);
+          ctx.fillText("PREMIUM", 270 + nameWidth + 15, 100);
+        }
+
+        let title = "Member";
+        if (premium) title = "PREMIUM";
+        else if (beta) title = "Beta Tester";
+        ctx.fillStyle = color;
+        ctx.font = getFont("bold", 18);
+        ctx.fillText(title, 270, 140);
+
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.font = getFont("normal", 16);
+        let displayBio = bio.length > 60 ? bio.substring(0, 57) + "..." : bio;
+        ctx.fillText(displayBio, 270, 175);
+
         ctx.fillStyle = "rgba(255,255,255,0.9)";
         ctx.font = getFont("bold", 16);
-        ctx.fillText(stat.label, xPos, 205);
-        xPos += 100;
-        ctx.font = getFont("normal", 16);
+        let xPos = 270;
+        const stats = [
+          { label: "Coins:", value: formatNumber(balance) },
+          { label: "Reputation:", value: formatNumber(reputation) },
+          { label: "Level:", value: level }
+        ];
+        stats.forEach((stat, i) => {
+          if (i > 0) {
+            ctx.fillStyle = "rgba(255,255,255,0.2)";
+            ctx.font = getFont("normal", 16);
+            ctx.fillText("|", xPos + 20, 205);
+            xPos += 40;
+          }
+          ctx.fillStyle = "rgba(255,255,255,0.9)";
+          ctx.font = getFont("bold", 16);
+          ctx.fillText(stat.label, xPos, 205);
+          xPos += 100;
+          ctx.font = getFont("normal", 16);
+          ctx.fillStyle = color;
+          ctx.fillText(stat.value, xPos, 205);
+          xPos += 100;
+        });
+
+        if (links.length) {
+          const linkText = links.map(l => `${l.platform}: ${l.url}`).join('  •  ');
+          ctx.fillStyle = "rgba(255,255,255,0.5)";
+          ctx.font = getFont("normal", 12);
+          ctx.fillText(linkText, 270, 225);
+        }
+
+        const barX = 270, barY = 240, barWidth = 540, barHeight = 22;
+        ctx.shadowBlur = 5;
+        ctx.shadowColor = "rgba(0,0,0,0.2)";
+        ctx.fillStyle = "rgba(255,255,255,0.15)";
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, barWidth, barHeight, 11);
+        ctx.fill();
+
+        let barGradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
+        if (barStyle === "neon") {
+          barGradient.addColorStop(0, "#00FFAA");
+          barGradient.addColorStop(1, "#00AAFF");
+        } else if (barStyle === "retro") {
+          barGradient.addColorStop(0, "#FF6B6B");
+          barGradient.addColorStop(1, "#FFD93D");
+        } else if (barStyle === "minimal") {
+          barGradient.addColorStop(0, "#FFFFFF");
+          barGradient.addColorStop(1, "#AAAAAA");
+        } else {
+          barGradient.addColorStop(0, color);
+          barGradient.addColorStop(1, "#FF6B6B");
+        }
+        ctx.fillStyle = barGradient;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = color;
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, barWidth * progress, barHeight, 11);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = getFont("bold", 14);
+        ctx.textAlign = "center";
+        ctx.fillText(`${formatNumber(xp)}/${formatNumber(needed)} XP`, barX + barWidth / 2, barY + 17);
+
+        ctx.textAlign = "center";
+        const levelX = 780, levelY = 80;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = "rgba(0,0,0,0.3)";
+        ctx.fillStyle = "rgba(255,255,255,0.1)";
+        ctx.beginPath();
+        ctx.arc(levelX, levelY, 50, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(levelX, levelY, 50, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = getFont("bold", 18);
+        ctx.fillText("LEVEL", levelX, levelY - 12);
         ctx.fillStyle = color;
-        ctx.fillText(stat.value, xPos, 205);
-        xPos += 100;
-      });
+        ctx.font = getFont("bold", 28);
+        ctx.fillText(level, levelX, levelY + 22);
 
-      // Social Links
-      if (links.length) {
-        const linkText = links.map(l => `${l.platform}: ${l.url}`).join('  •  ');
-        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.textAlign = "left";
+        ctx.fillStyle = "rgba(255,255,255,0.2)";
         ctx.font = getFont("normal", 12);
-        ctx.fillText(linkText, 270, 225);
+        ctx.fillText(`ID: ${targetId.slice(0, 8)}...`, 20, 340);
+        ctx.textAlign = "right";
+        ctx.fillText("Profile v2.0", 880, 340);
+
+        profileBuffer = canvas.toBuffer("image/png");
       }
 
-      // XP Bar
-      const barX = 270, barY = 240, barWidth = 540, barHeight = 22;
-      ctx.shadowBlur = 5;
-      ctx.shadowColor = "rgba(0,0,0,0.2)";
-      ctx.fillStyle = "rgba(255,255,255,0.15)";
-      ctx.beginPath();
-      ctx.roundRect(barX, barY, barWidth, barHeight, 11);
-      ctx.fill();
-
-      let barGradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
-      if (barStyle === "neon") {
-        barGradient.addColorStop(0, "#00FFAA");
-        barGradient.addColorStop(1, "#00AAFF");
-      } else if (barStyle === "retro") {
-        barGradient.addColorStop(0, "#FF6B6B");
-        barGradient.addColorStop(1, "#FFD93D");
-      } else if (barStyle === "minimal") {
-        barGradient.addColorStop(0, "#FFFFFF");
-        barGradient.addColorStop(1, "#AAAAAA");
-      } else {
-        barGradient.addColorStop(0, color);
-        barGradient.addColorStop(1, "#FF6B6B");
-      }
-      ctx.fillStyle = barGradient;
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = color;
-      ctx.beginPath();
-      ctx.roundRect(barX, barY, barWidth * progress, barHeight, 11);
-      ctx.fill();
-
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = getFont("bold", 14);
-      ctx.textAlign = "center";
-      ctx.fillText(`${formatNumber(xp)}/${formatNumber(needed)} XP`, barX + barWidth / 2, barY + 17);
-
-      // Level badge
-      ctx.textAlign = "center";
-      const levelX = 780, levelY = 80;
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = "rgba(0,0,0,0.3)";
-      ctx.fillStyle = "rgba(255,255,255,0.1)";
-      ctx.beginPath();
-      ctx.arc(levelX, levelY, 50, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(levelX, levelY, 50, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = getFont("bold", 18);
-      ctx.fillText("LEVEL", levelX, levelY - 12);
-      ctx.fillStyle = color;
-      ctx.font = getFont("bold", 28);
-      ctx.fillText(level, levelX, levelY + 22);
-
-      // Footer
-      ctx.textAlign = "left";
-      ctx.fillStyle = "rgba(255,255,255,0.2)";
-      ctx.font = getFont("normal", 12);
-      ctx.fillText(`ID: ${targetId.slice(0, 8)}...`, 20, 340);
-      ctx.textAlign = "right";
-      ctx.fillText("Profile v2.0", 880, 340);
-
-      const profileBuffer = canvas.toBuffer("image/png");
-      embed.setImage("attachment://profile.png");
+      embed.setImage(`attachment://${attachmentName}`);
 
       return interaction.editReply({
         embeds: [embed],
-        files: [new AttachmentBuilder(profileBuffer, { name: "profile.png" })]
+        files: [new AttachmentBuilder(profileBuffer, { name: attachmentName })]
       });
     }
   }
