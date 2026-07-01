@@ -1,4 +1,4 @@
-// commands/mines.js – Complete Native Discord.js Components V2 Setup
+// commands/mines.js – Advanced Mines V2 Layout Engine (Custom Database Adaptation)
 const { 
   SlashCommandBuilder, 
   ActionRowBuilder, 
@@ -19,48 +19,59 @@ module.exports = {
   category: "Games",
   data: new SlashCommandBuilder()
     .setName("mines")
-    .setDescription("Play Mines!")
+    .setDescription("Initialize a secure tactical minefield grid session")
     .addStringOption(opt =>
       opt.setName("bet")
-        .setDescription("Amount to bet, or 'all'")
+        .setDescription("Amount to bet, or 'all' (max 250,000)")
         .setRequired(true)
     )
     .addIntegerOption(opt =>
       opt.setName("bombs")
-        .setDescription("Number of bombs (1-8)")
+        .setDescription("Number of hidden threat matrix nodes (1-8)")
         .setRequired(true)
         .setMinValue(MIN_BOMBS)
         .setMaxValue(MAX_BOMBS)
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const userId = interaction.user.id;
     const betRaw = interaction.options.getString("bet").toLowerCase();
     const bombs = interaction.options.getInteger("bombs");
     let bet;
 
     const balanceKey = `eco:${userId}:money`;
-    const currentBal = Number(await redis.get(balanceKey) || 0);
+    const currentBal = Number(await db.get(balanceKey) || 0);
 
     // Parse Bet Currency
     if (betRaw === "all") {
       bet = Math.min(currentBal, MAX_BET);
-      if (bet <= 0) return interaction.reply({ content: "❌ You have no coins.", flags: MessageFlags.Ephemeral });
+      if (bet <= 0) {
+        return interaction.reply({ 
+          content: "❌ Operation Denied: Wallet balance is empty. Unable to initialize a wager.", 
+          flags: MessageFlags.Ephemeral 
+        });
+      }
     } else {
       bet = parseInt(betRaw);
-      if (isNaN(bet) || bet < 1) return interaction.reply({ content: "❌ Invalid amount.", flags: MessageFlags.Ephemeral });
+      if (isNaN(bet) || bet < 1) {
+        return interaction.reply({ 
+          content: "❌ Invalid Argument: Please declare a valid numerical amount or type 'all'.", 
+          flags: MessageFlags.Ephemeral 
+        });
+      }
       if (bet > MAX_BET) bet = MAX_BET;
     }
 
     if (currentBal < bet) {
       return interaction.reply({
-        content: `❌ Balance insufficient. Need **${bet.toLocaleString()}** coins.`,
+        content: `❌ Insufficient funds. Required: \`${bet.toLocaleString()}\` coins | Available: \`${currentBal.toLocaleString()}\` coins.`,
         flags: MessageFlags.Ephemeral
       });
     }
 
-    await redis.del(`mines:${userId}`);
-    await redis.set(balanceKey, currentBal - bet);
+    // Clean up overlapping sessions and deduct wager amount
+    await db.del(`mines:${userId}`);
+    await db.set(balanceKey, currentBal - bet);
 
     const bombPositions = [];
     while (bombPositions.length < bombs) {
@@ -77,7 +88,7 @@ module.exports = {
       status: "playing",
       hitTile: null
     };
-    await redis.set(`mines:${userId}`, JSON.stringify(gameState));
+    await db.set(`mines:${userId}`, gameState);
 
     // ---- Helper: Build the Native V2 Component Structure ----
     function buildV2Layout(state) {
@@ -85,22 +96,22 @@ module.exports = {
       const nextMultiplier = state.currentMultiplier * ((TOTAL_TILES - state.safePicks.length) / (TOTAL_TILES - state.bombs - state.safePicks.length)) * HOUSE_EDGE_FACTOR;
       const nextProfit = Math.floor(state.bet * nextMultiplier);
 
-      let statusLine = `✨ **<@${userId}> is playing Mines!**\n\n`;
-      let accentColor = 0xda373c; // Red theme default
+      let statusLine = `⚙️ **SYSTEM OVERVIEW // ACTIVE SESSION**\n\n`;
+      let accentColor = 0x0A0A0A; // Premium dark minimalist table accent
 
       if (state.status === "bust") {
-        statusLine = `💥 **<@${userId}> exploded a mine!**\n\n`;
-        accentColor = 0xda373c; 
+        statusLine = `🔴 **CRITICAL FAULT // MATRIX EXPLODED**\n\n`;
+        accentColor = 0xBA1A1A; // Dark luxury accent for losses
       } else if (state.status === "cashed_out") {
-        statusLine = `🏆 **<@${userId}> cashed out safely!**\n\n`;
-        accentColor = 0x23a55a; // Green theme panel on win
+        statusLine = `🟢 **TRANSACTION SETTLED // SAFELY EXTRACTED**\n\n`;
+        accentColor = 0x0A0A0A; 
       }
 
       const infoText = [
         statusLine,
-        `**Bet:** \`${state.bet}\`   **Mines:** \`${state.bombs}\``,
-        state.status === "bust" ? `~~**Cash Out:** ${profit} (${state.currentMultiplier.toFixed(2)}x)~~` : `**Cash Out:** \`${profit} (${state.currentMultiplier.toFixed(2)}x)\``,
-        state.status === "bust" ? `~~**Next:** 0 (0.00x)~~` : (state.safePicks.length < (TOTAL_TILES - state.bombs) ? `**Next:** \`${nextProfit} (${nextMultiplier.toFixed(2)}x)\`` : `**Next:** \`MAX!\``)
+        `• **Wager:** \`${state.bet.toLocaleString()}\` coins  • **Mines:** \`${state.bombs}\``,
+        state.status === "bust" ? `~~• **Current Yield:** ${profit.toLocaleString()} (${state.currentMultiplier.toFixed(2)}x)~~` : `• **Current Yield:** \`${profit.toLocaleString()}\` (${state.currentMultiplier.toFixed(2)}x)`,
+        state.status === "bust" ? `~~• **Next Node Step:** 0 (0.00x)~~` : (state.safePicks.length < (TOTAL_TILES - state.bombs) ? `• **Next Node Step:** \`${nextProfit.toLocaleString()}\` (${nextMultiplier.toFixed(2)}x)` : `• **Next Node Step:** \`MAX CAPACITY!\``)
       ].join("\n");
 
       // Text block inside container
@@ -159,7 +170,7 @@ module.exports = {
       const cashoutRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId("mines_cashout")
-          .setLabel("Cash Out")
+          .setLabel("LIQUIDATE & CASH OUT")
           .setStyle(ButtonStyle.Success)
           .setDisabled(state.status !== "playing" || state.safePicks.length === 0)
       );
@@ -167,7 +178,7 @@ module.exports = {
 
       return {
         components: [containerPanel],
-        flags: MessageFlags.IsComponentsV2 // Lock the message directly to V2 processing
+        flags: MessageFlags.IsComponentsV2 // Lock the message directly to V2 processing structures
       };
     }
 
@@ -182,26 +193,25 @@ module.exports = {
     });
 
     collector.on("collect", async btnInteraction => {
-      const raw = await redis.get(`mines:${userId}`);
-      if (!raw) {
-        await btnInteraction.update({ content: "⚠️ Session expired.", components: [] });
+      const state = await db.get(`mines:${userId}`);
+      if (!state) {
+        await btnInteraction.update({ content: "⚠️ Session data corrupt or expired.", components: [] });
         collector.stop();
         return;
       }
-      const state = JSON.parse(raw);
       if (state.status !== "playing") return;
 
       if (btnInteraction.customId === "mines_cashout") {
         const payout = Math.floor(state.bet * state.currentMultiplier);
         state.status = "cashed_out";
-        await redis.set(`mines:${userId}`, JSON.stringify(state));
+        await db.set(`mines:${userId}`, state);
         collector.stop();
 
-        const newBal = Number(await redis.get(balanceKey) || 0) + payout;
-        await redis.set(balanceKey, newBal);
+        const newBal = Number(await db.get(balanceKey) || 0) + payout;
+        await db.set(balanceKey, newBal);
 
         await btnInteraction.update(buildV2Layout(state));
-        await redis.del(`mines:${userId}`);
+        await db.del(`mines:${userId}`);
         return;
       }
 
@@ -210,11 +220,11 @@ module.exports = {
       if (state.bombPositions.includes(tileNum)) {
         state.status = "bust";
         state.hitTile = tileNum;
-        await redis.set(`mines:${userId}`, JSON.stringify(state));
+        await db.set(`mines:${userId}`, state);
         collector.stop();
 
         await btnInteraction.update(buildV2Layout(state));
-        await redis.del(`mines:${userId}`);
+        await db.del(`mines:${userId}`);
         return;
       }
 
@@ -227,29 +237,27 @@ module.exports = {
       if (state.safePicks.length === (TOTAL_TILES - state.bombs)) {
         const payout = Math.floor(state.bet * state.currentMultiplier);
         state.status = "cashed_out";
-        await redis.set(`mines:${userId}`, JSON.stringify(state));
+        await db.set(`mines:${userId}`, state);
         collector.stop();
 
-        const newBal = Number(await redis.get(balanceKey) || 0) + payout;
-        await redis.set(balanceKey, newBal);
+        const newBal = Number(await db.get(balanceKey) || 0) + payout;
+        await db.set(balanceKey, newBal);
 
         await btnInteraction.update(buildV2Layout(state));
-        await redis.del(`mines:${userId}`);
+        await db.del(`mines:${userId}`);
         return;
       }
 
-      await redis.set(`mines:${userId}`, JSON.stringify(state));
+      await db.set(`mines:${userId}`, state);
       await btnInteraction.update(buildV2Layout(state));
     });
 
     collector.on("end", async () => {
-      const raw = await redis.get(`mines:${userId}`);
-      if (!raw) return;
-      const state = JSON.parse(raw);
-      if (state.status !== "playing") return;
+      const state = await db.get(`mines:${userId}`);
+      if (!state || state.status !== "playing") return;
 
       state.status = "bust";
-      await redis.del(`mines:${userId}`);
+      await db.del(`mines:${userId}`);
       try {
         await message.edit(buildV2Layout(state));
       } catch (e) {}
