@@ -1,11 +1,11 @@
-// commands/setleave.js – Premium Leave Configuration Panel
+// commands/setleave.js – Premium Leave Configuration Panel (MongoDB Optimized)
 const { SlashCommandBuilder, EmbedBuilder, ChannelType, MessageFlags, PermissionFlagsBits } = require("discord.js");
 
 module.exports = {
   category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("setleave")
-    .setDescription("⚙️ Configure or customize the departure grid setup")
+    .setDescription("Configure or customize the departure grid setup")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand(sub =>
       sub.setName("channel")
@@ -14,26 +14,28 @@ module.exports = {
     )
     .addSubcommand(sub =>
       sub.setName("text")
-        .setDescription("📝 [FREE] Customize the departure text caption format")
+        .setDescription("Customize the departure text caption format")
         .addStringOption(opt => opt.setName("message").setDescription("Use {user}, {server}, or {count} variables").setRequired(true))
     )
     .addSubcommand(sub =>
       sub.setName("background")
-        .setDescription("🎨 [GUILD PREMIUM] Upload a custom background canvas link")
+        .setDescription("[GUILD PREMIUM] Upload a custom background canvas link")
         .addStringOption(opt => opt.setName("url").setDescription("Direct high-res image URL link (PNG/JPG)").setRequired(true))
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const guildId = interaction.guild.id;
     const sub = interaction.options.getSubcommand();
     
-    // Check Guild Premium Tier up-front for restrictions
-    const isGuildPremium = await redis.get(`premium:guild:${guildId}`) !== null;
+    // Check Guild Premium Tier in MongoDB
+    const guildPremiumData = await db.get(`premium:guild:${guildId}`);
+    const isGuildPremium = guildPremiumData !== null;
 
     // ─── SUBCOMMAND: CHANNEL ───
     if (sub === "channel") {
       const targetChannel = interaction.options.getChannel("target");
-      await redis.set(`leave:${guildId}`, targetChannel.id);
+      // Persist channel ID in MongoDB
+      await db.set(`leave:channel:${guildId}`, targetChannel.id);
 
       const embed = new EmbedBuilder()
         .setColor("#0A0A0A")
@@ -49,10 +51,10 @@ module.exports = {
       return interaction.reply({ embeds: [embed] });
     }
 
-    // ─── SUBCOMMAND: TEXT (FREE TIER) ───
+    // ─── SUBCOMMAND: TEXT ───
     if (sub === "text") {
       const msgFormat = interaction.options.getString("message");
-      await redis.set(`leave:text:${guildId}`, msgFormat);
+      await db.set(`leave:text:${guildId}`, msgFormat);
 
       const embed = new EmbedBuilder()
         .setColor("#111111")
@@ -61,17 +63,17 @@ module.exports = {
           `**VARIABLE TEXT PARSER RECORDED**\n` +
           `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n` +
           `\`\`\`${msgFormat}\`\`\`\n` +
-          `*Variables like \`{user}\`, \`{server}\`, and \`{count}\` will automatically render natively on trigger events.*`
+          `*Variables like \`{user}\`, \`{server}\`, and \`{count}\` will automatically render natively.*`
         );
 
       return interaction.reply({ embeds: [embed] });
     }
 
-    // ─── SUBCOMMAND: BACKGROUND (PREMIUM ONLY) ───
+    // ─── SUBCOMMAND: BACKGROUND (PREMIUM) ───
     if (sub === "background") {
       if (!isGuildPremium) {
         return interaction.reply({
-          content: "⭐ **Guild Premium Sub-module Locked:** Overriding the default canvas asset layer requires an active Guild Premium tier subscription for this instance.",
+          content: "⭐ **Guild Premium Sub-module Locked:** Overriding the default canvas asset layer requires an active Guild Premium tier subscription.",
           flags: MessageFlags.Ephemeral
         });
       }
@@ -81,7 +83,7 @@ module.exports = {
         return interaction.reply({ content: "❌ **Invalid URI Vector:** Provide a clean, direct web layout link protocol.", flags: MessageFlags.Ephemeral });
       }
 
-      await redis.set(`leave:bg:${guildId}`, url);
+      await db.set(`leave:bg:${guildId}`, url);
 
       const embed = new EmbedBuilder()
         .setColor("#1A1A1A")
