@@ -97,7 +97,7 @@ module.exports = {
 
       if (targetId === userId) {
         return interaction.reply({
-          content: "❌ Transacting with your own profile wallet address is locked.",
+          content: "❌ You cannot send coins to yourself.",
           flags: MessageFlags.Ephemeral
         });
       }
@@ -105,7 +105,7 @@ module.exports = {
       const senderBalance = Number(await db.get(`eco:${userId}:money`) || 0);
       if (senderBalance < amount) {
         return interaction.reply({
-          content: `❌ Insufficient account balance. Available: \`${formatNumber(senderBalance)}\``,
+          content: `❌ Insufficient funds. Available balance: \`${formatNumber(senderBalance)}\``,
           flags: MessageFlags.Ephemeral
         });
       }
@@ -119,7 +119,7 @@ module.exports = {
       if (sentToday + amount > DAILY_LIMIT) {
         const remaining = DAILY_LIMIT - sentToday;
         return interaction.reply({
-          content: `❌ Transaction exceeds daily limit (${formatNumber(DAILY_LIMIT)} coins/day). Remaining capacity: \`${formatNumber(remaining)}\``,
+          content: `❌ You have reached your daily transfer limit.`,
           flags: MessageFlags.Ephemeral
         });
       }
@@ -127,9 +127,9 @@ module.exports = {
       // ---- Public confirmation embed with warning ----
       const confirmEmbed = new EmbedBuilder()
         .setColor("#0A0A0A")
-        .setTitle("📤 Verify Vault Transaction")
+        .setTitle("📤 Confirm Transfer")
         .setDescription(
-          `<@${userId}> is initializing a transfer of **${formatNumber(amount)}** coins to **${targetUser.username}**.`
+          `<@${userId}> is transferring **${formatNumber(amount)}** coins to **${targetUser.username}**.`
         )
         .addFields(
           { name: "Sender Current", value: `\`${formatNumber(senderBalance)}\``, inline: true },
@@ -137,7 +137,7 @@ module.exports = {
           { name: "Post-Transaction", value: `\`${formatNumber(senderBalance - amount)}\``, inline: true }
         )
         .setFooter({ 
-          text: "ℹ️ Security Rule: Coin trading (real-money conversions or outside network transactions) is strictly prohibited and flag-monitored." 
+          text: "ℹ️ Coin trading for real money or transactions outside the network are prohibited." 
         })
         .setTimestamp();
 
@@ -172,7 +172,7 @@ module.exports = {
 
           if (freshSenderBal < amount) {
             await replyMsg.reactions.removeAll().catch(() => {});
-            return replyMsg.edit({ content: "❌ Transaction failed. Balance updated before verification completed.", embeds: [] });
+            return replyMsg.edit({ content: "❌ Transaction failed during verification. Any balance changes have been reverted.", embeds: [] });
           }
 
           // Process MongoDB transfers safely
@@ -186,15 +186,15 @@ module.exports = {
           }, 86400 * 1000);
 
           const successEmbed = new EmbedBuilder()
-            .setColor("#0A0A0A")
-            .setTitle("✅ Vault Settlement Completed")
-            .setDescription(`<@${userId}> safely dispatched **${formatNumber(amount)}** coins to **${targetUser.username}**.`)
+            .setColor("#22C55E")
+            .setTitle("✅ Transfer Completed")
+            .setDescription(`<@${userId}> safely transferred **${formatNumber(amount)}** coins to **${targetUser.username}**.`)
             .addFields(
               { name: "Updated Balance", value: `\`${formatNumber(freshSenderBal - amount)}\``, inline: true },
               { name: "Remaining Daily Allowance", value: `\`${formatNumber(DAILY_LIMIT - (freshSentToday + amount))}\``, inline: true }
             )
             .setFooter({ 
-              text: "ℹ️ Security Rule: Coin trading (real-money conversions or outside network transactions) is strictly prohibited and flag-monitored." 
+              text: "ℹ️ Coin trading for real money or transactions outside the network are prohibited." 
             })
             .setTimestamp();
 
@@ -205,8 +205,9 @@ module.exports = {
         } else if (reaction.emoji.name === '❌') {
           const cancelEmbed = new EmbedBuilder()
             .setColor("#BA1A1A")
-            .setTitle("❌ Transfer Aborted")
-            .setDescription(`<@${userId}> cancelled the vault transaction pipeline.`)
+            .setTitle("❌ Transfer Cancelled ")
+            .setDescription(`<@${userId}> ❌ Transaction Cancelled
+The transfer was cancelled by the sender..`)
             .setTimestamp();
 
           await replyMsg.edit({ embeds: [cancelEmbed] });
@@ -218,7 +219,7 @@ module.exports = {
         const timeoutEmbed = new EmbedBuilder()
           .setColor("#BA1A1A")
           .setTitle("⌛ Verification Expired")
-          .setDescription(`<@${userId}> failed to respond within the 30s confirmation window. Pipelined transaction rejected.`)
+          .setDescription(`<@${userId}> ❌ Transaction cancelled. Confirmation timed out after 30 seconds..`)
           .setTimestamp();
 
         await replyMsg.edit({ embeds: [timeoutEmbed] });
