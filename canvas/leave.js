@@ -1,37 +1,38 @@
+// canvas/leave.js – Dynamic Leave Canvas Generator
 const { createCanvas, loadImage, registerFont } = require("canvas");
 const path = require("path");
 
+// Register assets
 registerFont(path.join(__dirname, "..", "font.ttf"), { family: "CustomFontName" });
 
-async function leaveCard(user, guild, redis) {
+async function leaveCard(user, guild, db) {
   const canvas = createCanvas(800, 250);
   const ctx = canvas.getContext("2d");
   const guildId = guild.id;
 
-  // Premium Background Check
-  const isGuildPremium = await redis.get(`premium:guild:${guildId}`) !== null;
-  let backgroundLoaded = false;
+  // --- Configuration Retrieval ---
+  const isGuildPremium = (await db.get(`premium:guild:${guildId}`)) !== null;
+  const customBgUrl = isGuildPremium ? await db.get(`leave:bg:${guildId}`) : null;
 
-  if (isGuildPremium) {
-    const customBgUrl = await redis.get(`leave:bg:${guildId}`);
-    if (customBgUrl) {
-      try {
-        const bgImg = await loadImage(customBgUrl);
-        ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
-        backgroundLoaded = true;
-      } catch (err) {
-        console.error(`[CANVAS] Failed to render premium leave bg: ${customBgUrl}`, err);
-      }
+  // --- Background Rendering ---
+  let backgroundLoaded = false;
+  if (customBgUrl) {
+    try {
+      const bgImg = await loadImage(customBgUrl);
+      ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
+      backgroundLoaded = true;
+    } catch (err) {
+      console.error(`[CANVAS] Premium BG Load Failure: ${customBgUrl}`, err);
     }
   }
 
   if (!backgroundLoaded) {
-    ctx.fillStyle = "#1a1a1a";
+    ctx.fillStyle = "#0A0A0A"; // Consistent with your dark aesthetic
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
-  // Base Identity Card Typography
-  ctx.fillStyle = "#ff4d4d";
+  // --- Identity Layer ---
+  ctx.fillStyle = "#ff4d4d"; // Departure Alert Color
   ctx.font = "32px 'CustomFontName'";
   ctx.fillText("MEMBER DEPARTED", 250, 110);
 
@@ -39,14 +40,18 @@ async function leaveCard(user, guild, redis) {
   ctx.font = "20px 'CustomFontName'";
   ctx.fillText(`${user.username.toUpperCase()}`, 250, 155);
 
-  // Avatar Layer
+  // --- Avatar Rendering ---
   try {
     const avatar = await loadImage(user.displayAvatarURL({ extension: "png", size: 256 }));
-    ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
-    ctx.fillRect(45, 45, 160, 160);
+    
+    // Avatar Stroke & Clipping
+    ctx.strokeStyle = "#333333";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(45, 45, 160, 160);
+    
     ctx.drawImage(avatar, 50, 50, 150, 150);
   } catch (err) {
-    console.error("[CANVAS] Avatar stream error:", err);
+    console.error("[CANVAS] Avatar rendering fault:", err);
   }
 
   return canvas.toBuffer();
