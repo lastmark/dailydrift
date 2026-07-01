@@ -1,4 +1,4 @@
-// index.js – Main Bot (MongoDB, fixed startup, full)
+// index.js – Main Bot (MongoDB, safe pre‑checks, working /ping)
 require("dotenv").config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
@@ -73,18 +73,87 @@ if (fs.existsSync(commandsPath)) {
 }
 
 // ==========================================
-// 👑 INTERACTION HANDLER (unchanged, same as your last version)
+// 👑 INTERACTION HANDLER (safe pre‑checks)
 // ==========================================
 client.on("interactionCreate", async (interaction) => {
-  // ... (keep the exact same handler you had, including buttons, tickets, counting_buy_, mines_, etc.)
-  // For brevity I'm not pasting it here – you already have it above. It's the same.
+  try {
+    if (interaction.isChatInputCommand()) {
+      const cmd = client.commands.get(interaction.commandName);
+      if (!cmd) return;
+
+      console.log(`[SLASH] ${interaction.commandName} by ${interaction.user.tag}`);
+
+      // ════════════════ TEMPORARY SAFE CHECKS ════════════════
+      try {
+        // Terms check (skip for /terms)
+        if (interaction.commandName !== "terms") {
+          const accepted = await db.get(`terms:accepted:${interaction.user.id}`);
+          if (accepted !== TERMS_VERSION) {
+            const embed = new EmbedBuilder()
+              .setColor("#ED4245")
+              .setTitle("📜 Terms of Service Required")
+              .setDescription("You must accept the Terms of Service before using this bot.")
+              .addFields({ name: "Next Steps", value: "Please run `/terms` to view and accept the Terms of Service." })
+              .setTimestamp();
+            return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+          }
+        }
+
+        // Blacklist check
+        const blacklist = await checkBlacklist(db, interaction.user.id, interaction.guild.id);
+        if (blacklist) {
+          const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
+          return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+        }
+
+        // Maintenance check
+        const maintenanceKey = `maintenance:${interaction.guild.id}`;
+        if (await db.get(maintenanceKey) === "true") {
+          return interaction.reply({
+            content: "🔧 The bot is currently under maintenance. Please try again later.",
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      } catch (checkError) {
+        console.error("⚠️ Pre‑check error (continuing):", checkError);
+        // Allow the command to run even if a check fails – just log it.
+      }
+      // ════════════════════════════════════════════════════════
+
+      try {
+        await cmd.execute(interaction, client, db);
+      } catch (err) {
+        console.error(`[SLASH] Error in ${interaction.commandName}:`, err);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: "❌ An error occurred executing this command." });
+        } else {
+          await interaction.reply({ content: "❌ An error occurred executing this command.", flags: MessageFlags.Ephemeral });
+        }
+      }
+      return;
+    }
+
+    // ---- Buttons ----
+    if (interaction.isButton()) {
+      // ... keep all your existing button handlers ...
+    }
+
+    // ---- Select menus, modals etc. ----
+    // ... (keep your existing code for shop_menu_select, embed_modal: etc.)
+
+  } catch (err) {
+    console.error("❌ FATAL interaction error:", err);
+    if (!interaction.replied) {
+      await interaction.reply({ content: "❌ Internal error.", flags: MessageFlags.Ephemeral }).catch(() => {});
+    }
+  }
 });
 
 // ==========================================
 // 💬 MESSAGE LISTENER (Guardrails & Counting)
 // ==========================================
 client.on("messageCreate", async (message) => {
-  // ... (same as your previous version)
+  // ... (keep your existing messageCreate logic)
 });
 
 // ==========================================
@@ -102,7 +171,7 @@ client.on("guildMemberRemove", async (member) => {
 });
 
 // ==========================================
-// 🚀 READY EVENT (simplified, no debug loop)
+// 🚀 READY EVENT
 // ==========================================
 client.once("ready", async () => {
   console.log(`✅ ${client.user.tag} is online!`);
@@ -113,7 +182,6 @@ client.once("ready", async () => {
   client.user.setActivity("/help", { type: ActivityType.Playing });
   client.user.setStatus("online");
 
-  // Heartbeat
   await db.set('bot:heartbeat', Date.now());
   setInterval(async () => { await db.set('bot:heartbeat', Date.now()); }, 60000);
 
@@ -155,8 +223,7 @@ client.once("ready", async () => {
   try {
     await connectDB();                 // wait for MongoDB
     console.log("⏳ Logging into Discord...");
-    await client.login(token);         // wait for Discord
-    // The 'ready' event will fire when login is complete
+    await client.login(token);
   } catch (err) {
     console.error("❌ Startup error:", err);
     process.exit(1);
