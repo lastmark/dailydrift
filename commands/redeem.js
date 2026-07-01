@@ -1,157 +1,100 @@
-// commands/redeem.js – FIXED to work with generatecode.js
+// commands/redeem.js – Premium Code Redemption Engine (MongoDB Optimized)
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require("discord.js");
 
 module.exports = {
   category: "Premium",
   data: new SlashCommandBuilder()
     .setName("redeem")
-    .setDescription("Redeem a premium code")
+    .setDescription("Claim a premium subscription activation code")
     .addStringOption(o =>
       o.setName("code")
-        .setDescription("The code to redeem")
+        .setDescription("The unique activation hash")
         .setRequired(true)
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const code = interaction.options.getString("code").toUpperCase();
     const userId = interaction.user.id;
     const guildId = interaction.guild.id;
 
     try {
-      const raw = await redis.get(`redeem:${code}`);
-      if (!raw) {
+      // Fetch code data from MongoDB
+      const data = await db.get(`redeem:${code}`);
+      
+      if (!data) {
         return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription("❌ Invalid or expired code.")
-          ],
+          embeds: [new EmbedBuilder().setColor("#BA1A1A").setDescription("❌ **Invalid Registry:** The provided code is unrecognized or has been exhausted.")],
           flags: MessageFlags.Ephemeral
         });
       }
-
-      const data = JSON.parse(raw);
 
       // --- Validation ---
-      if (data.uses <= 0) {
-        await redis.del(`redeem:${code}`);
+      if (data.used >= data.uses) {
+        await db.del(`redeem:${code}`);
         return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription("❌ This code has been fully used.")
-          ],
+          embeds: [new EmbedBuilder().setColor("#BA1A1A").setDescription("❌ **Exhausted:** This code has reached its maximum redemption threshold.")],
           flags: MessageFlags.Ephemeral
         });
       }
 
-      if (data.seconds !== -1 && (Date.now() - data.createdAt) > data.seconds * 1000) {
-        await redis.del(`redeem:${code}`);
-        return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription("❌ This code has expired.")
-          ],
-          flags: MessageFlags.Ephemeral
-        });
-      }
-
+      // Check if user already redeemed
       if (data.users && data.users.includes(userId)) {
         return interaction.reply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription("❌ You have already used this code.")
-          ],
+          embeds: [new EmbedBuilder().setColor("#BA1A1A").setDescription("❌ **Redundancy Detected:** You have already utilized this specific code.")],
           flags: MessageFlags.Ephemeral
         });
       }
 
-      // --- Determine premium type ---
-      const premiumType = data.type || 'user'; // fallback to user
-      const premiumKey = premiumType === 'guild'
-        ? `premium:guild:${guildId}`
-        : `premium:user:${userId}`;
+      // --- Determine premium type and expiry ---
+      const premiumType = data.type || 'user';
+      const premiumKey = premiumType === 'guild' ? `premium:guild:${guildId}` : `premium:user:${userId}`;
+      
+      const now = Date.now();
+      let newExpiry;
 
-      // --- Set premium with TTL ---
-      let ttlUsed = -1;
       if (data.duration === "perm") {
-        await redis.set(premiumKey, "perm");
+        newExpiry = -1;
       } else {
-        const ttl = (data.seconds && data.seconds > 0) ? data.seconds : 3600; // default 1h
-        ttlUsed = ttl;
-        await redis.set(premiumKey, "active", "EX", ttl);
+        // Calculate expiry based on duration (seconds)
+        const durationMs = (data.seconds || 3600) * 1000;
+        newExpiry = now + durationMs;
       }
 
-      // --- Give coins if enabled ---
+      // Save to MongoDB (Updating the subscription record)
+      await db.set(premiumKey, { expiry: newExpiry });
+
+      // --- Give currency rewards if applicable ---
       const updates = [];
       if (data.giveCoins && data.coinAmount > 0) {
-        await redis.incrby(`eco:${userId}:money`, data.coinAmount);
-        updates.push(`💰 ${data.coinAmount} coins`);
+        const currentBal = Number(await db.get(`eco:${userId}:money`) || 0);
+        await db.set(`eco:${userId}:money`, currentBal + data.coinAmount);
+        updates.push(`💰 \`${data.coinAmount.toLocaleString()}\` coins credited`);
       }
 
-      // --- Update code usage ---
-      data.used = (data.used || 0) + 1;
-      if (!data.users) data.users = [];
+      // --- Update code usage registry ---
+      data.used += 1;
       data.users.push(userId);
-
-      if (data.used >= data.uses) {
-        await redis.del(`redeem:${code}`);
-      } else {
-        await redis.set(`redeem:${code}`, JSON.stringify(data));
-      }
+      await db.set(`redeem:${code}`, data);
 
       // --- Build response ---
-      const premiumDisplay = premiumType === 'guild' ? '🏢 Guild' : '👤 User';
-      const durationDisplay = data.duration === "perm" ? "♾️ Lifetime" : data.duration;
-
       const embed = new EmbedBuilder()
-        .setColor("#57F287")
-        .setTitle("✅ Code Redeemed Successfully!")
-        .setDescription(`You redeemed **${code}** for **${premiumDisplay} Premium**.`)
+        .setColor("#0A0A0A") // Premium dark minimalist styling
+        .setTitle("✅ Authorization Successful")
+        .setDescription(`Redemption sequence validated for **${premiumType.toUpperCase()} PREMIUM** profile.`)
         .addFields(
-          {
-            name: "🎁 Rewards",
-            value: updates.length ? updates.join("\n") : "None",
-            inline: false
-          },
-          {
-            name: "⏳ Duration",
-            value: durationDisplay,
-            inline: true
-          },
-          {
-            name: "📊 Remaining Uses",
-            value: `${data.uses - data.used} / ${data.uses}`,
-            inline: true
-          }
+          { name: "🎁 Allocation Rewards", value: updates.length ? updates.join("\n") : "None", inline: false },
+          { name: "⏳ Term Duration", value: data.duration === "perm" ? "♾️ Lifetime" : `\`${data.duration}\``, inline: true },
+          { name: "📊 Usage Status", value: `\`${data.used} / ${data.uses}\``, inline: true }
         )
-        .setFooter({ text: "Your premium is now active!" })
+        .setFooter({ text: "Subscription status updated in the database." })
         .setTimestamp();
 
-      // Debug field for dev (optional)
-      if (interaction.user.id === "1303357369622990889") {
-        embed.addFields({
-          name: "🔧 Debug (DEV only)",
-          value: `Key: \`${premiumKey}\`\nTTL: ${ttlUsed}s`,
-          inline: false
-        });
-      }
-
-      return interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral
-      });
+      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 
     } catch (error) {
-      console.error("Redeem error:", error);
+      console.error("Redemption pipeline error:", error);
       return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor("#ED4245")
-            .setDescription(`❌ An error occurred: ${error.message}`)
-        ],
+        embeds: [new EmbedBuilder().setColor("#BA1A1A").setDescription("❌ **System Fault:** Critical failure during redemption verification.")],
         flags: MessageFlags.Ephemeral
       });
     }
