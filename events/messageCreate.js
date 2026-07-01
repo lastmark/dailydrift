@@ -61,6 +61,48 @@ module.exports = {
       return;
     }
 
+if (cmd === "testanimated") {
+  const bgUrl = await db.get(`profile:${message.author.id}`);
+  const bg = bgUrl?.custom_bg;
+  if (!bg) return message.reply("❌ No background set. Upload one first with /profile upload.");
+
+  const data = {
+    avatarUrl: message.author.displayAvatarURL({ extension: "png", size: 256 }),
+    username: message.author.username,
+    color: "#5865F2",
+    theme: "default",
+    premium: true,
+    beta: false,
+    bio: "Test bio",
+    status: "",
+    balance: 0,
+    reputation: 0,
+    level: 1,
+    xp: 0,
+    needed: 100,
+    progress: 0,
+    barStyle: "default",
+    links: [],
+    nameColor: "#FFFFFF",
+    favGame: "None",
+    embedBg: null,
+    userId: message.author.id,
+  };
+
+  try {
+    const { generateAnimatedProfile } = require("../utils/animatedProfile.js");
+    const buffer = await generateAnimatedProfile(bg, data);
+    await message.author.send({ files: [{ attachment: buffer, name: "test.gif" }] });
+    await message.reply("📬 Sent animated test to your DMs.");
+  } catch (err) {
+    console.error(err);
+    await message.reply(`❌ Failed: ${err.message}`);
+  }
+  return;
+}
+
+
+    
     // ==========================================
     // 💤 AFK SYSTEM
     // ==========================================
