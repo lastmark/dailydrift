@@ -1,85 +1,41 @@
-// database.js
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
+const Profile = require('./models/Profile');
+const Guild = require('./models/Guild');
+const { mongoUri } = require('./config');
 
-// Connect to MongoDB using an environment variable
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("🌐 Connected cleanly to MongoDB Cluster"))
-  .catch(err => console.error("❌ MongoDB connection error:", err));
+// Connect to Mongo once when the bot starts
+mongoose.connect(mongoUri);
 
-// A flexible Key-Value / Hash schema to handle various bot parameters seamlessly
-const StorageSchema = new mongoose.Schema({
-  key: { type: String, required: true, unique: true },
-  value: { type: mongoose.Schema.Types.Mixed }, // Handles strings, arrays, objects
-  updatedAt: { type: Date, default: Date.now }
-});
-
-const Storage = mongoose.model("Storage", StorageSchema);
-
-// Custom client-wrapper mapping Redis commands directly to clean Mongo queries
-const db = {
+module.exports = {
+  // Your old "db.get" calls will now hit this function
   get: async (key) => {
-    const doc = await Storage.findOne({ key });
-    return doc ? doc.value : null;
+    const parts = key.split(':');
+    
+    // Example: "auditlog:12345" -> Guild Model
+    if (parts[0] === 'auditlog') {
+      const g = await Guild.findOne({ guildId: parts[1] });
+      return g?.auditLogChannel;
+    }
+    
+    // Example: "eco:12345:money" -> Profile Model
+    if (parts[0] === 'eco') {
+      const p = await Profile.findOne({ userId: parts[1] });
+      if (parts[2] === 'money') return p?.balance || 0;
+      if (parts[2] === 'shield') return p?.shield || 0;
+    }
+    return null;
   },
+
+  // Your old "db.set" calls will now hit this function
   set: async (key, value) => {
-    await Storage.findOneAndUpdate({ key }, { value, updatedAt: Date.now() }, { upsert: true });
-  },
-  del: async (key) => {
-    await Storage.deleteOne({ key });
-  },
-  incr: async (key) => {
-    const doc = await Storage.findOneAndUpdate(
-      { key },
-      { $inc: { value: 1 }, updatedAt: Date.now() },
-      { upsert: true, new: true }
-    );
-    return doc.value;
-  },
-  // Hash sets (Redis hset/hgetall fallback emulation)
-  hset: async (key, fieldOrObj, value) => {
-    let current = (await db.get(key)) || {};
-    if (typeof fieldOrObj === "object") {
-      current = { ...current, ...fieldOrObj };
-    } else {
-      current[fieldOrObj] = value;
+    const parts = key.split(':');
+    if (parts[0] === 'auditlog') {
+      await Guild.findOneAndUpdate(
+        { guildId: parts[1] },
+        { auditLogChannel: value },
+        { upsert: true }
+      );
     }
-    await db.set(key, current);
-  },
-  hgetall: async (key) => {
-    return (await db.get(key)) || {};
-  },
-  // Sets arrays (Redis sadd/srem/smembers/sismember fallback emulation)
-  sadd: async (key, member) => {
-    let current = (await db.get(key)) || [];
-    if (!Array.isArray(current)) current = [];
-    if (!current.includes(member)) {
-      current.push(member);
-      await db.set(key, current);
-    }
-  },
-  srem: async (key, member) => {
-    let current = (await db.get(key)) || [];
-    if (!Array.isArray(current)) return;
-    current = current.filter(m => m !== member);
-    await db.set(key, current);
-  },
-  smembers: async (key) => {
-    return (await db.get(key)) || [];
-  },
-  sismember: async (key, member) => {
-    const current = (await db.get(key)) || [];
-    return Array.isArray(current) && current.includes(member);
-  },
-  scard: async (key) => {
-    const current = (await db.get(key)) || [];
-    return Array.isArray(current) ? current.length : 0;
-  },
-  keys: async (pattern) => {
-    // Converts basic redis wildcards like giveaway:* to clean Regex queries
-    const regexStr = "^" + pattern.replace(/\*/g, ".*") + "$";
-    const docs = await Storage.find({ key: { $regex: new RegExp(regexStr) } });
-    return docs.map(d => d.key);
+    // ... add more mappings as needed
   }
 };
-
-module.exports = db;
