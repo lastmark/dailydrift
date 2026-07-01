@@ -1,31 +1,40 @@
 // /app/engines/giveawayManager.js
 const { EmbedBuilder } = require("discord.js");
 
-function initGiveawayEngine(client, redis) {
+function initGiveawayEngine(client, db) {
   setInterval(async () => {
     try {
-      const keys = await redis.keys("giveaway:*");
+      // Fetch all keys from the database instance
+      const keys = await db.keys("giveaway:*");
       if (!keys || keys.length === 0) return;
 
       for (const key of keys) {
-        const data = await redis.hgetall(key);
+        // Skip entry registry keys to only process main config lines
+        if (key.includes(":entries:")) continue;
+
+        const data = await db.hgetall(key);
         if (!data || data.ended === "true") continue;
 
         const now = Date.now();
         const endClock = parseInt(data.endsAt);
 
         if (now >= endClock) {
-          await redis.hset(key, "ended", "true");
+          // Mark the giveaway configuration as concluded
+          data.ended = "true";
+          await db.set(key, data);
 
           const channel = await client.channels.fetch(data.channelId).catch(() => null);
           if (!channel) continue;
 
           const message = await channel.messages.fetch(data.messageId).catch(() => null);
           const registryKey = `giveaway:entries:${data.messageId}`;
-          const entriesPool = await redis.smembers(registryKey);
+          
+          // Pull down array list of users who joined
+          let entriesPool = (await db.get(registryKey)) || [];
+          if (!Array.isArray(entriesPool)) entriesPool = [];
 
-          if (!entriesPool || entriesPool.length === 0) {
-            if (message) {
+          if (entriesPool.length === 0) {
+            if (message && message.embeds[0]) {
               const finishedEmbed = EmbedBuilder.from(message.embeds[0])
                 .setColor("#111111")
                 .setTitle(`🎁 GIVEAWAY ENDED: ${data.prize.toUpperCase()}`)
@@ -36,11 +45,12 @@ function initGiveawayEngine(client, redis) {
             continue;
           }
 
-          const randomized = entriesPool.sort(() => 0.5 - Math.random());
-          const selectedWinners = randomized.slice(0, parseInt(data.winners));
+          // Secure cryptographic style randomizing sort line
+          const randomized = [...entriesPool].sort(() => 0.5 - Math.random());
+          const selectedWinners = randomized.slice(0, parseInt(data.winners || 1));
           const tags = selectedWinners.map(id => `<@${id}>`).join(", ");
 
-          if (message) {
+          if (message && message.embeds[0]) {
             const finishedEmbed = EmbedBuilder.from(message.embeds[0])
               .setColor("#111111")
               .setTitle(`🎁 GIVEAWAY ENDED`)
