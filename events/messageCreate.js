@@ -1,41 +1,14 @@
-// events/messageCreate.js – Main Bot (Full) – WITH OFFICIAL PROGRESSION & ECON PAYOUTS
+// events/messageCreate.js – Unified handler (counting first, fast)
 const { Events, EmbedBuilder } = require("discord.js");
 const { checkBlacklist, buildBlacklistEmbed } = require("../blacklist.js");
 
-// Message cache to prevent duplicate processing
 const processedMessages = new Set();
 
 module.exports = {
   name: Events.MessageCreate,
 
   async execute(message, client, db) {
-    // ---- Basic checks ----
     if (!message.guild || message.author.bot) return;
-
-    console.log(`[MSG] From ${message.author.tag}: ${message.content.slice(0, 50)}`);
-
-    // ---- BLACKLIST CHECK (FIRST) ----
-    const blacklist = await checkBlacklist(db, message.author.id, message.guild.id);
-    if (blacklist) {
-      console.log(`[MSG] Blocked by blacklist: ${message.author.tag}`);
-      if (message.content.startsWith("!")) {
-        const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
-        await message.reply({ embeds: [embed] });
-        await message.delete().catch(() => {});
-      }
-      return; // block all messages from blacklisted users/guilds
-    }
-
-    // ---- MAINTENANCE CHECK ----
-    const maintenanceKey = `maintenance:${message.guild.id}`;
-    if (await db.get(maintenanceKey) === "true") {
-      if (message.content.startsWith("!")) {
-        await message.reply("🔧 The bot is currently under maintenance. Please try again later.");
-      }
-      return; // block all messages during maintenance
-    }
-
-    // ---- Prevent duplicate processing (within this handler only) ----
     if (processedMessages.has(message.id)) return;
     processedMessages.add(message.id);
     setTimeout(() => processedMessages.delete(message.id), 5000);
@@ -45,10 +18,52 @@ module.exports = {
     const content = message.content;
 
     // ==========================================
-    // 💤 AFK SYSTEM (auto‑clear & mention reply)
+    // 🔥 COUNTING (skip all other checks)
     // ==========================================
+    try {
+      const countingChannelId = await db.get(`counting:${guildId}:channel`);
+      if (countingChannelId && message.channel.id === countingChannelId) {
+        const pureContent = content.replace(/\s+/g, "");
+        if (!/^[0-9+\-*/^()]+$/.test(pureContent)) {
+          if (message.deletable) await message.delete().catch(() => {});
+          return;
+        }
+        const runCountingGame = require("../games/counting.js");
+        await runCountingGame(message, db);
+        return; // ✅ counting handled, exit immediately
+      }
+    } catch (error) {
+      console.error("Counting engine error:", error);
+    }
 
-    // If the message author is AFK, remove it and notify them
+    // ==========================================
+    // 🛡️ BLACKLIST CHECK (only non‑counting)
+    // ==========================================
+    const blacklist = await checkBlacklist(db, userId, guildId);
+    if (blacklist) {
+      console.log(`[MSG] Blocked by blacklist: ${message.author.tag}`);
+      if (content.startsWith("!")) {
+        const embed = buildBlacklistEmbed(blacklist.data, blacklist.type);
+        await message.reply({ embeds: [embed] });
+        await message.delete().catch(() => {});
+      }
+      return;
+    }
+
+    // ==========================================
+    // 🔧 MAINTENANCE CHECK
+    // ==========================================
+    const maintenanceKey = `maintenance:${guildId}`;
+    if (await db.get(maintenanceKey) === "true") {
+      if (content.startsWith("!")) {
+        await message.reply("🔧 The bot is currently under maintenance. Please try again later.");
+      }
+      return;
+    }
+
+    // ==========================================
+    // 💤 AFK SYSTEM
+    // ==========================================
     const afkData = await db.get(`afk:${userId}`);
     if (afkData) {
       await db.del(`afk:${userId}`);
@@ -63,12 +78,10 @@ module.exports = {
           { name: "Duration", value: timeAgo, inline: true },
           { name: "Last Reason", value: afkData.reason || "No reason provided.", inline: true }
         );
-      
       const afkReply = await message.channel.send({ embeds: [welcomeEmbed] });
       setTimeout(() => afkReply.delete().catch(() => {}), 5000);
     }
 
-    // Check if any mentioned user is AFK
     const mentionedUsers = message.mentions.users.filter(u => u.id !== userId);
     for (const [id, user] of mentionedUsers) {
       const afkCheck = await db.get(`afk:${id}`);
@@ -81,7 +94,7 @@ module.exports = {
     }
 
     // ==========================================
-    // 💎 OFFICIAL XP / LEVELING SYSTEM WITH ECONOMY REWARDS
+    // 💎 XP / LEVELING SYSTEM WITH ECONOMY REWARDS
     // ==========================================
     const cooldownKey = `xp:cd:${userId}`;
     if (!(await db.get(cooldownKey))) {
@@ -91,9 +104,8 @@ module.exports = {
       await db.set(cooldownKey, "1");
       setTimeout(async () => { await db.del(cooldownKey).catch(() => {}); }, cooldownSeconds * 1000);
 
-      // Base XP generation (Official Mee6 bracket: 15-25)
       let xpGain = Math.floor(Math.random() * 11) + 15; 
-      if (isUserPremium) xpGain *= 2; // Permanent double XP booster for premium tier users
+      if (isUserPremium) xpGain *= 2;
 
       const profileKey = `profile:${userId}`;
       const profile = (await db.hgetall(profileKey)) || {};
@@ -101,8 +113,6 @@ module.exports = {
       let level = Number(profile.level || 0); 
 
       xp += xpGain;
-      
-      // Standard Official Progression Formula
       const getNeededXP = (lvl) => 5 * (lvl ** 2) + (50 * lvl) + 100;
       let needed = getNeededXP(level);
 
@@ -115,27 +125,22 @@ module.exports = {
         level++;
         needed = getNeededXP(level);
         leveledUp = true;
-
-        // Calculate scaling economy payout per level up step
         const levelReward = 10000 * level;
         totalCoinReward += levelReward;
       }
 
       if (leveledUp) {
         profile.level = level;
-        
-        // Update user's cash balance inside the economy schema
         const econKey = `eco:${userId}:money`;
         const currentBalance = Number(await db.get(econKey) || 0);
         await db.set(econKey, currentBalance + totalCoinReward);
-        
-        // Generate a visual text progress bar
+
         const progressBarsCount = 10;
         const currentProgress = Math.min(Math.floor((xp / needed) * progressBarsCount), progressBarsCount);
         const progressBarStr = "🟩".repeat(currentProgress) + "⬛".repeat(progressBarsCount - currentProgress);
 
         const lvlEmbed = new EmbedBuilder()
-          .setColor("#0A0A0A") // Premium minimalist background
+          .setColor("#0A0A0A")
           .setTitle("✨ Level Advanced")
           .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL({ dynamic: true }) })
           .setDescription(`Congratulations! Your active participation has progressed your profile account status.`)
@@ -168,6 +173,14 @@ module.exports = {
             .setDescription(responder.reply)
         ]
       });
+    }
+
+    // ==========================================
+    // 💬 PREFIX COMMANDS (optional, if you still use them)
+    // ==========================================
+    if (content.startsWith("!")) {
+      // your existing prefix command logic...
+      // you can keep the shop/buy/shields/countingstats commands here
     }
   }
 };
