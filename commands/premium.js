@@ -2,30 +2,39 @@
 const { 
   SlashCommandBuilder, 
   EmbedBuilder, 
-  ActionRowBuilder, 
-  ButtonBuilder, 
-  ButtonStyle, 
   MessageFlags 
 } = require("discord.js");
 
 const DEV_ID = "1303357369622990889";
 
-function formatTTL(ttl) {
-  if (ttl === -1) return "💎 Lifetime";
-  if (ttl <= 0) return "❌ Expired/Inactive";
-  const d = Math.floor(ttl / 86400);
-  const h = Math.floor((ttl % 86400) / 3600);
-  const m = Math.floor((ttl % 3600) / 60);
+/**
+ * Calculates remaining time from a stored expiry timestamp
+ * @param {number|null} expiryTimestamp 
+ * @returns {string} Formatted duration string
+ */
+function formatTTL(expiryTimestamp) {
+  if (!expiryTimestamp) return "❌ Inactive";
+  if (expiryTimestamp === -1) return "💎 Lifetime";
+  
+  const now = Date.now();
+  const diff = expiryTimestamp - now;
+  
+  if (diff <= 0) return "❌ Expired";
+  
+  const d = Math.floor(diff / 86400000);
+  const h = Math.floor((diff % 86400000) / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  
   const parts = [];
   if (d > 0) parts.push(`${d}d`);
   if (h > 0) parts.push(`${h}h`);
   if (m > 0) parts.push(`${m}m`);
+  
   return parts.length > 0 ? `⏳ **Active** • \`${parts.join(' ')}\` remaining` : "⏳ **Active** • `< 1m` remaining";
 }
 
 module.exports = {
   category: "Premium",
-
   data: new SlashCommandBuilder()
     .setName("premium")
     .setDescription("💎 Premium control center and feature showcase")
@@ -38,110 +47,76 @@ module.exports = {
         .setDescription("Check active subscriptions and server nodes")
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
     const guildId = interaction.guild.id;
 
     // ── /premium info ──
- if (sub === "info") {
-  const embed = new EmbedBuilder()
-    .setColor("#5865F2")
-    .setAuthor({
-      name: "Premium Memberships",
-      iconURL: client.user.displayAvatarURL()
-    })
-    .setDescription(
-      "Unlock exclusive benefits for yourself or enhance your entire server with premium features."
-    )
-    .addFields(
-      {
-        name: "👤 User Premium",
-        value:
-          "• **2× XP Boost** — Earn experience twice as fast.\n" +
-          "• **Reduced Cooldowns** — Use commands more frequently.\n" +
-          "• **Daily Shield** — Receive 1 free counting shield every 24 hours.\n" +
-          "• **Mistake Protection** — One counting mistake won't break the streak each day.\n" +
-          "• **Enhanced Daily Rewards** — Collect 600 daily coins instead of 200.\n" +
-          "• **Animated Profiles** — Use custom GIF profile backgrounds.\n" +
-          "• **Premium Badge** — Display an exclusive badge on your profile."
-      },
-      {
-        name: "🏰 Guild Premium",
-        value:
-          "• **Advanced Statistics** — Voice activity and member tracking analytics.\n" +
-          "• **Ghost Ping Detection** — Automatically log deleted mentions.\n" +
-          "• **Unlimited VIP Channels** — Members can create as many VIP channels as needed.\n" +
-          "• **Custom Welcome Images** — Personalized join and leave graphics.\n" +
-          "• **Unlimited Auto Responses** — Powerful automated responses with regex support."
-      },
-      {
-        name: "💳 Purchase Premium",
-        value:
-          "Interested in Premium? Join our support server and open a ticket to view available plans, pricing, and activation options."
-      }
-    )
-    .setFooter({
-      text: "Thank you for supporting the bot."
-    })
-    .setTimestamp();
+    if (sub === "info") {
+      const embed = new EmbedBuilder()
+        .setColor("#0A0A0A") // Premium dark minimalist aesthetic
+        .setAuthor({ name: "PREMIUM MEMBERSHIP ARCHITECTURE", iconURL: client.user.displayAvatarURL() })
+        .setDescription("Upgrade your operational capacity with exclusive user and guild-wide benefits.")
+        .addFields(
+          {
+            name: "👤 User Premium Tier",
+            value: "• **2× XP Scaling** — Accelerated progression.\n• **Reduced Cooldowns** — Optimized command throughput.\n• **Counting Buffs** — Streak protection and free daily shields.\n• **Enhanced Daily Credits** — 3x payout multiplier.\n• **Identity Customization** — Animated backgrounds and exclusive badges."
+          },
+          {
+            name: "🏰 Guild Premium Tier",
+            value: "• **Advanced Analytics** — Deep-dive activity tracking.\n• **Ghost Ping Intercept** — Log deleted mentions.\n• **VIP Infrastructure** — Unlimited privileged channel creation.\n• **Custom Graphic Assets** — Tailored join/leave branding.\n• **Automated Responses** — Advanced logic and regex support."
+          },
+          {
+            name: "💳 Activation",
+            value: "To initialize a subscription plan, access our support portal to generate an activation hash code."
+          }
+        )
+        .setFooter({ text: "Thank you for supporting the infrastructure." })
+        .setTimestamp();
 
-  return interaction.reply({ embeds: [embed] });
-}
+      return interaction.reply({ embeds: [embed] });
+    }
+
     // ── /premium status ──
     if (sub === "status") {
-      let userValue = await redis.get(`premium:user:${userId}`);
-      let guildValue = await redis.get(`premium:guild:${guildId}`);
+      // Assuming db structure stores expiry as a timestamp (number) or -1 (lifetime)
+      const userSub = await db.get(`premium:user:${userId}`); // Expects { expiry: number|-1 }
+      const guildSub = await db.get(`premium:guild:${guildId}`);
 
-      let userTTL = 0;
-      if (userValue === "perm") userTTL = -1;
-      else if (userValue) {
-        userTTL = await redis.ttl(`premium:user:${userId}`);
-        if (userTTL < 0) userTTL = 0;
-      }
-
-      let guildTTL = 0;
-      if (guildValue === "perm") guildTTL = -1;
-      else if (guildValue) {
-        guildTTL = await redis.ttl(`premium:guild:${guildId}`);
-        if (guildTTL < 0) guildTTL = 0;
-      }
+      const userExpiry = userSub?.expiry || null;
+      const guildExpiry = guildSub?.expiry || null;
 
       const embed = new EmbedBuilder()
-  .setColor("#0A0A0A")
-  .setTitle("💎 Premium Status")
-  .setDescription(
-    "View the current premium status for your account and this server."
-  )
-  .addFields(
-    {
-      name: "👤 Personal Membership",
-      value: userValue
-        ? `🟢 **Active**\nExpires ${formatTTL(userTTL)}`
-        : "⚫ **Inactive**\nNo active personal membership.",
-      inline: false
-    },
-    {
-      name: "🏰 Guild Membership",
-      value: guildValue
-        ? `🟢 **Active**\nExpires ${formatTTL(guildTTL)}`
-        : "⚫ **Inactive**\nThis server is currently using the free tier.",
-      inline: false
-    }
-  )
-  .setFooter({
-    text: "Use /redeem <code> to activate a premium membership."
-  });
+        .setColor("#0A0A0A")
+        .setTitle("💎 Subscription Status Registry")
+        .setDescription("Validated status report for account and guild nodes.")
+        .addFields(
+          {
+            name: "👤 Personal Node",
+            value: userExpiry 
+              ? `🟢 **Status: Enabled**\n${formatTTL(userExpiry)}` 
+              : "⚫ **Status: Standard**\nNo active personal membership.",
+            inline: false
+          },
+          {
+            name: "🏰 Guild Node",
+            value: guildExpiry 
+              ? `🟢 **Status: Enabled**\n${formatTTL(guildExpiry)}` 
+              : "⚫ **Status: Standard**\nThis server is currently operating on the free tier.",
+            inline: false
+          }
+        )
+        .setFooter({ text: "Use /redeem <code> to activate premium authorization." });
 
       if (userId === DEV_ID) {
         embed.addFields({
           name: "🔧 CORE SYSTEM DEPLOYMENT DEBUG",
-          value: `\`\`\`User: ${userValue || 'null'} (TTL: ${userTTL}s)\nGuild: ${guildValue || 'null'} (TTL: ${guildTTL}s)\`\`\``,
+          value: `\`\`\`User: ${JSON.stringify(userSub)}\nGuild: ${JSON.stringify(guildSub)}\`\`\``,
           inline: false
         });
       }
 
-      // Action line row containing clean web link or operational pathways if wanted later
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
   }
