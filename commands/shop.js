@@ -1,4 +1,4 @@
-// commands/shop.js – Working Shop (MongoDB)
+// commands/shop.js – Working Shop (MongoDB, fixed balance deduction)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -69,7 +69,6 @@ module.exports = {
     return interaction.reply({ embeds: [embed], components: [row] });
   },
 
-  // ✅ FIXED: uses interaction.reply instead of interaction.update
   async handleMenu(interaction, db) {
     if (interaction.customId !== "shop_menu_select") return;
 
@@ -90,10 +89,12 @@ module.exports = {
       });
     }
 
-    // Deduct and apply item
-    wallet -= item.price;
-    await db.set(`eco:${userId}:money`, wallet);
+    // Atomic deduction + item action
+    await db.incrby(`eco:${userId}:money`, -item.price);
     await item.action(db, userId);
+
+    // Re‑read balance after deduction
+    wallet = Number(await db.get(`eco:${userId}:money`) || 0);
 
     const embed = new EmbedBuilder()
       .setColor("#57F287")
@@ -104,7 +105,6 @@ module.exports = {
         { name: "💰 New Balance", value: `\`${wallet.toLocaleString()}\` coins`, inline: true }
       );
 
-    // ✅ Use reply instead of update (always works)
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 };
