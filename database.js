@@ -6,6 +6,12 @@ module.exports = {
   get: async (key) => {
     const parts = key.split(':');
     const scope = parts[0];
+    async keys(pattern) {
+  // Assumes you have a Mongoose model named "Data" for key‑value storage
+  const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+  const docs = await Data.find({ key: { $regex: regex } });
+  return docs.map(d => d.key);
+}
 
     // Example: "eco:12345:money"
     if (scope === 'eco') {
