@@ -1,11 +1,9 @@
-// commands/shop.js – Premium Components V2 Economy Shop System
+// commands/shop.js – Premium Components V2 Economy Shop System (MongoDB Optimized)
 const {
   SlashCommandBuilder,
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   MessageFlags,
   ContainerBuilder,
   TextDisplayBuilder
@@ -17,18 +15,18 @@ const SHOP_ITEMS = {
     name: "🛡️ Counting Shield",
     price: 200,
     description: "Protects your server's counting streak from a single mistake.",
-    redisKey: (userId) => `eco:${userId}:shield`,
-    action: async (redis, userId) => {
-      await redis.incr(`eco:${userId}:shield`);
+    // Database operation for MongoDB
+    action: async (db, userId) => {
+      const current = Number(await db.get(`eco:${userId}:shield`) || 0);
+      await db.set(`eco:${userId}:shield`, current + 1);
     }
   },
   double: {
     name: "⚡ Double XP Card",
     price: 500,
     description: "Grants 5 charges of double XP multipliers inside games.",
-    redisKey: (userId) => `eco:${userId}:double`,
-    action: async (redis, userId) => {
-      await redis.set(`eco:${userId}:double`, 5);
+    action: async (db, userId) => {
+      await db.set(`eco:${userId}:double`, 5);
     }
   }
 };
@@ -39,12 +37,10 @@ module.exports = {
     .setName("shop")
     .setDescription("View available upgrades and premium counting perks"),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const userId = interaction.user.id;
-    const balanceKey = `eco:${userId}:money`;
-    const wallet = Number(await redis.get(balanceKey) || 0);
+    const wallet = Number(await db.get(`eco:${userId}:money`) || 0);
 
-    // Build the aesthetic catalog showcase display string
     let inventoryCatalog = [
       `🛒 **PREMIUM INVENTORY CATALOG**`,
       `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯`,
@@ -61,10 +57,9 @@ module.exports = {
 
     const textBlock = new TextDisplayBuilder().setContent(inventoryCatalog.join("\n"));
 
-    // Build modern select menu items
     const menuOptions = Object.entries(SHOP_ITEMS).map(([id, item]) => 
       new StringSelectMenuOptionBuilder()
-        .setLabel(item.name.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '').trim()) // strips emoji for raw text limits
+        .setLabel(item.name.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '').trim())
         .setDescription(`${item.price} coins — ${item.description.slice(0, 50)}`)
         .setValue(`shop_buy_${id}`)
         .setEmoji(item.name.split(" ")[0])
@@ -78,7 +73,7 @@ module.exports = {
     );
 
     const container = new ContainerBuilder()
-      .setAccentColor(0x5865F2) // Aesthetic dark blue blurple
+      .setAccentColor(0x5865F2)
       .addTextDisplayComponents(textBlock)
       .addActionRowComponents(actionRow);
 
@@ -88,10 +83,8 @@ module.exports = {
     });
   },
 
-  // =============================================================================
-  // V2 Menu Selector Handle Processor Interceptor Pipeline
-  // =============================================================================
-  async handleMenu(interaction, redis) {
+  // Processor Interceptor Pipeline
+  async handleMenu(interaction, db) {
     if (interaction.customId !== "shop_menu_select") return;
 
     const selectedValue = interaction.values[0];
@@ -102,8 +95,7 @@ module.exports = {
     if (!item) return interaction.reply({ content: "❌ Item asset missing from global inventory index.", flags: MessageFlags.Ephemeral });
 
     const userId = interaction.user.id;
-    const balanceKey = `eco:${userId}:money`;
-    let wallet = Number(await redis.get(balanceKey) || 0);
+    let wallet = Number(await db.get(`eco:${userId}:money`) || 0);
 
     if (wallet < item.price) {
       return interaction.reply({
@@ -112,10 +104,10 @@ module.exports = {
       });
     }
 
-    // Execute standard atomic ledger deduction and assign perks
+    // Atomic ledger update in MongoDB
     wallet -= item.price;
-    await redis.set(balanceKey, wallet);
-    await item.action(redis, userId);
+    await db.set(`eco:${userId}:money`, wallet);
+    await item.action(db, userId);
 
     const successContent = [
       `✅ **PURCHASE SUCCESSFUL!**`,
@@ -127,10 +119,9 @@ module.exports = {
 
     const textBlock = new TextDisplayBuilder().setContent(successContent);
     const container = new ContainerBuilder()
-      .setAccentColor(0x57F287) // Success Emerald Green
+      .setAccentColor(0x57F287)
       .addTextDisplayComponents(textBlock);
 
-    // Update the layout context natively 
     return interaction.update({
       components: [container],
       flags: MessageFlags.IsComponentsV2
