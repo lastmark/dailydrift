@@ -1,4 +1,4 @@
-// index.js – Main Bot (MongoDB, safe pre‑checks, fixed terms buttons)
+// index.js – Main Bot (MongoDB, safe pre‑checks, fixed terms buttons, fast counting)
 require("dotenv").config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
@@ -337,8 +337,8 @@ client.on("messageCreate", async (message) => {
         if (message.deletable) await message.delete().catch(() => {});
         return;
       }
-      const countingModule = await import("./games/counting.js");
-      const runCountingGame = countingModule.default || countingModule;
+      // ✅ FIX: direct require – no more dynamic import delay
+      const runCountingGame = require("./games/counting.js");
       await runCountingGame(message, db);
       return;
     }
