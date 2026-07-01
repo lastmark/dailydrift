@@ -1,161 +1,108 @@
-// economy.js - Create this file in your project root
+// economy.js – MongoDB-backed Economy Engine
 const { EmbedBuilder } = require("discord.js");
 
 class Economy {
-  constructor(redis) {
-    this.redis = redis;
+  constructor(db) {
+    this.db = db.client.db();
+    this.collection = this.db.collection("profiles");
   }
 
-  // Get user's balance
+  // Helper to get or create profile
+  async _getProfile(userId) {
+    return await this.collection.findOneAndUpdate(
+      { userId },
+      { $setOnInsert: { userId, balance: 0, shield: 0, double: 0, vip: false, total_earned: 0, total_spent: 0 } },
+      { upsert: true, returnDocument: 'after' }
+    );
+  }
+
   async getBalance(userId) {
-    return Number(await this.redis.get(`eco:${userId}:money`) || 0);
+    const profile = await this.collection.findOne({ userId });
+    return profile?.balance || 0;
   }
 
-  // Add coins
   async addBalance(userId, amount) {
-    return await this.redis.incrby(`eco:${userId}:money`, amount);
+    const result = await this.collection.findOneAndUpdate(
+      { userId },
+      { $inc: { balance: amount, total_earned: amount } },
+      { upsert: true, returnDocument: 'after' }
+    );
+    return result.balance;
   }
 
-  // Remove coins
   async takeBalance(userId, amount) {
-    const current = await this.getBalance(userId);
-    if (current < amount) return false;
-    await this.redis.decrby(`eco:${userId}:money`, amount);
+    const profile = await this.collection.findOne({ userId });
+    if (!profile || profile.balance < amount) return false;
+
+    await this.collection.updateOne(
+      { userId },
+      { $inc: { balance: -amount, total_spent: amount } }
+    );
     return true;
   }
 
-  // Transfer coins between users
   async transfer(fromUserId, toUserId, amount) {
-    const fromBalance = await this.getBalance(fromUserId);
-    if (fromBalance < amount) return false;
-    
+    const fromProfile = await this.collection.findOne({ userId: fromUserId });
+    if (!fromProfile || fromProfile.balance < amount) return false;
+
     await this.takeBalance(fromUserId, amount);
     await this.addBalance(toUserId, amount);
     return true;
   }
 
-  // Get user's shields
   async getShield(userId) {
-    return Number(await this.redis.get(`eco:${userId}:shield`) || 0);
+    const profile = await this.collection.findOne({ userId });
+    return profile?.shield || 0;
   }
 
-  // Add shields
   async addShield(userId, amount = 1) {
-    return await this.redis.incrby(`eco:${userId}:shield`, amount);
+    await this.collection.updateOne({ userId }, { $inc: { shield: amount } }, { upsert: true });
   }
 
-  // Remove shields
   async takeShield(userId, amount = 1) {
-    const current = await this.getShield(userId);
-    if (current < amount) return false;
-    await this.redis.decrby(`eco:${userId}:shield`, amount);
+    const profile = await this.collection.findOne({ userId });
+    if (!profile || profile.shield < amount) return false;
+    await this.collection.updateOne({ userId }, { $inc: { shield: -amount } });
     return true;
   }
 
-  // Get double XP uses
   async getDoubleXP(userId) {
-    return Number(await this.redis.get(`eco:${userId}:double`) || 0);
+    const profile = await this.collection.findOne({ userId });
+    return profile?.double || 0;
   }
 
-  // Add double XP
   async addDoubleXP(userId, amount = 1) {
-    return await this.redis.incrby(`eco:${userId}:double`, amount);
+    await this.collection.updateOne({ userId }, { $inc: { double: amount } }, { upsert: true });
   }
 
-  // Get user's VIP status
   async getVIP(userId) {
-    return await this.redis.get(`eco:${userId}:vip`) === 'true';
+    const profile = await this.collection.findOne({ userId });
+    return !!profile?.vip;
   }
 
-  // Set VIP status
   async setVIP(userId, status) {
-    await this.redis.set(`eco:${userId}:vip`, status.toString());
+    await this.collection.updateOne({ userId }, { $set: { vip: Boolean(status) } }, { upsert: true });
   }
 
-  // Get user's total earned
-  async getTotalEarned(userId) {
-    return Number(await this.redis.get(`eco:${userId}:total_earned`) || 0);
-  }
+  // Statistics
+  async getTotalEarned(userId) { return (await this.collection.findOne({ userId }))?.total_earned || 0; }
+  async getTotalSpent(userId) { return (await this.collection.findOne({ userId }))?.total_spent || 0; }
 
-  // Add to total earned
-  async addTotalEarned(userId, amount) {
-    return await this.redis.incrby(`eco:${userId}:total_earned`, amount);
-  }
-
-  // Get user's total spent
-  async getTotalSpent(userId) {
-    return Number(await this.redis.get(`eco:${userId}:total_spent`) || 0);
-  }
-
-  // Add to total spent
-  async addTotalSpent(userId, amount) {
-    return await this.redis.incrby(`eco:${userId}:total_spent`, amount);
-  }
-
-  // Create balance embed for /balance command
+  // Embed Builder remains consistent
   createBalanceEmbed(user, balance, options = {}) {
     const embed = new EmbedBuilder()
-      .setColor(options.color || "#5865F2")
-      .setAuthor({
-        name: `${user.username}'s Wallet`,
-        iconURL: user.displayAvatarURL()
-      })
+      .setColor(options.color || "#0A0A0A")
+      .setAuthor({ name: `${user.username}'s Wallet`, iconURL: user.displayAvatarURL() })
       .setThumbnail(user.displayAvatarURL())
-      .addFields(
-        { 
-          name: "💰 Coins", 
-          value: `\`${balance.toLocaleString()}\``, 
-          inline: true 
-        }
-      );
+      .addFields({ name: "💰 Coins", value: `\`${balance.toLocaleString()}\``, inline: true });
 
-    // Add optional fields
-    if (options.shield !== undefined) {
-      embed.addFields({
-        name: "🛡️ Shields",
-        value: `\`${options.shield}\``,
-        inline: true
-      });
-    }
+    if (options.shield !== undefined) embed.addFields({ name: "🛡️ Shields", value: `\`${options.shield}\``, inline: true });
+    if (options.doubleXP !== undefined) embed.addFields({ name: "⚡ Double XP", value: `\`${options.doubleXP}\``, inline: true });
+    if (options.vip) embed.addFields({ name: "👑 VIP Status", value: `\`✅ Active\``, inline: true });
+    if (options.totalEarned) embed.addFields({ name: "📈 Total Earned", value: `\`${options.totalEarned.toLocaleString()}\``, inline: true });
+    if (options.totalSpent) embed.addFields({ name: "💸 Total Spent", value: `\`${options.totalSpent.toLocaleString()}\``, inline: true });
 
-    if (options.doubleXP !== undefined) {
-      embed.addFields({
-        name: "⚡ Double XP Uses",
-        value: `\`${options.doubleXP}\``,
-        inline: true
-      });
-    }
-
-    if (options.vip) {
-      embed.addFields({
-        name: "👑 VIP Status",
-        value: `\`✅ Active\``,
-        inline: true
-      });
-    }
-
-    if (options.totalEarned) {
-      embed.addFields({
-        name: "📈 Total Earned",
-        value: `\`${options.totalEarned.toLocaleString()}\``,
-        inline: true
-      });
-    }
-
-    if (options.totalSpent) {
-      embed.addFields({
-        name: "💸 Total Spent",
-        value: `\`${options.totalSpent.toLocaleString()}\``,
-        inline: true
-      });
-    }
-
-    embed.setFooter({ 
-      text: `Requested by ${user.username}`,
-      iconURL: user.displayAvatarURL()
-    }).setTimestamp();
-
-    return embed;
+    return embed.setFooter({ text: `Requested by ${user.username}`, iconURL: user.displayAvatarURL() }).setTimestamp();
   }
 }
 
