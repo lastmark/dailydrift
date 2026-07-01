@@ -12,8 +12,8 @@ module.exports = {
         .setDescription("Enable or disable anti‑spam")
         .setRequired(true)
         .addChoices(
-          { name: "Enabled", value: "true" },
-          { name: "Disabled", value: "false" }
+          { name: "Enable", value: "true" },
+          { name: "Disable", value: "false" }
         )
     )
     .addStringOption(opt =>
