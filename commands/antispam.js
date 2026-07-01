@@ -27,18 +27,18 @@ module.exports = {
         )
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const guildId = interaction.guildId;
 
     // ---- PREMIUM CHECK ----
-    const premium = await redis.get(`premium:guild:${guildId}`);
+    const premium = await db.get(`premium:guild:${guildId}`);
     if (!premium) {
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setColor("#ED4245")
-            .setTitle("🔒 Premium Required")
-            .setDescription("Anti‑spam is a **Guild Premium** feature. Upgrade to premium to unlock it.")
+            .setColor("#BA1A1A") // Minimalist deep-red alert tint
+            .setTitle("🔒 Premium Subscription Required")
+            .setDescription("The advanced real-time Anti‑Spam firewall module requires an active **Guild Premium** status registry tier for this cluster node.")
         ],
         flags: MessageFlags.Ephemeral
       });
@@ -47,17 +47,19 @@ module.exports = {
     const status = interaction.options.getString("status");
     const level = interaction.options.getString("level") || "medium";
 
-    await redis.set(`antispam:${guildId}:enabled`, status);
-    await redis.set(`antispam:${guildId}:level`, level);
+    // Set settings within the MongoDB store
+    await db.set(`antispam:${guildId}:enabled`, status);
+    await db.set(`antispam:${guildId}:level`, level);
 
     const embed = new EmbedBuilder()
-      .setColor(status === "true" ? "#57F287" : "#ED4245")
-      .setTitle("🛡️ Anti‑Spam Configuration")
+      .setColor("#0A0A0A") // Premium dark minimalist styling layout
+      .setTitle("🛡️ System Firewall Configuration")
+      .setDescription("The background server processing thresholds have been altered and applied instantly.")
       .addFields(
-        { name: "Status", value: status === "true" ? "✅ Enabled" : "❌ Disabled", inline: true },
-        { name: "Sensitivity", value: level.toUpperCase(), inline: true }
+        { name: "📡 Protection Engine", value: status === "true" ? "🟢 `ONLINE`" : "🔴 `OFFLINE`", inline: true },
+        { name: "📊 Filter Sensitivity", value: `\`${level.toUpperCase()}\``, inline: true }
       )
-      .setFooter({ text: "Changes take effect immediately." })
+      .setFooter({ text: "SYSTEM OVERLAY • CORE HOOK ACTIVE" })
       .setTimestamp();
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
