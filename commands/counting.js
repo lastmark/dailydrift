@@ -1,4 +1,4 @@
-// commands/counting.js - COMPLETE REWRITE
+// commands/counting.js - Complete Counting Engine (Custom Database Adaptation)
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags, ChannelType } = require("discord.js");
 
 module.exports = {
@@ -6,7 +6,7 @@ module.exports = {
 
   data: new SlashCommandBuilder()
     .setName("counting")
-    .setDescription("Counting game system")
+    .setDescription("Counting game system infrastructure")
     .addSubcommand(sub =>
       sub.setName("setup")
         .setDescription("Setup counting channel")
@@ -38,12 +38,11 @@ module.exports = {
         )
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     try {
-      // Check if in server
       if (!interaction.inGuild()) {
         return interaction.reply({
-          content: "❌ This command must be used in a server.",
+          content: "❌ Operation Denied: This command must be executed within a guild matrix.",
           flags: MessageFlags.Ephemeral
         });
       }
@@ -52,35 +51,38 @@ module.exports = {
       const userId = interaction.user.id;
       const sub = interaction.options.getSubcommand();
 
+      // Helper to fetch consolidated guild userdata object
+      const getUserDataStore = async () => {
+        return await db.get(`counting:${guildId}:userdata`) || {};
+      };
+
       // =========================
       // ⚙️ SETUP
       // =========================
       if (sub === "setup") {
-        // Check admin
         if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
           return interaction.reply({
-            content: "❌ You need Administrator permission.",
+            content: "❌ Administrative authority failure: Requires `Administrator` permission flags.",
             flags: MessageFlags.Ephemeral
           });
         }
 
         const channel = interaction.options.getChannel("channel");
         
-        // Save channel to Redis
-        await redis.set(`counting:${guildId}:channel`, channel.id);
+        await db.set(`counting:${guildId}:channel`, channel.id);
         
-        // Initialize count if not exists
-        if (!await redis.get(`counting:${guildId}:number`)) {
-          await redis.set(`counting:${guildId}:number`, 0);
+        const currentNum = await db.get(`counting:${guildId}:number`);
+        if (currentNum === null || currentNum === undefined) {
+          await db.set(`counting:${guildId}:number`, 0);
         }
 
         const embed = new EmbedBuilder()
-          .setColor("#57F287")
-          .setTitle("✅ Counting System Setup Complete!")
-          .setDescription(`Counting channel: ${channel}`)
+          .setColor("#0A0A0A")
+          .setTitle("⚙️ Counting Matrix Initialized")
+          .setDescription(`The counting system interface has targeted a new text sector.`)
           .addFields(
-            { name: "Channel", value: `${channel}`, inline: true },
-            { name: "Current Number", value: `0`, inline: true }
+            { name: "📡 Terminal Channel", value: `${channel}`, inline: true },
+            { name: "🔢 Starting Value", value: `\`${currentNum || 0}\``, inline: true }
           )
           .setTimestamp();
 
@@ -94,34 +96,37 @@ module.exports = {
         const targetUser = interaction.options.getUser("user") || interaction.user;
         const targetId = targetUser.id;
 
-        const correct = Number(await redis.zscore(`counting:${guildId}:correct`, targetId) || 0);
-        const mistakes = Number(await redis.zscore(`counting:${guildId}:mistakes`, targetId) || 0);
-        const streak = Number(await redis.get(`counting:${guildId}:${targetId}:streak`) || 0);
-        const bestStreak = Number(await redis.get(`counting:${guildId}:${targetId}:bestStreak`) || 0);
+        const userDataStore = await getUserDataStore();
+        const profile = userDataStore[targetId] || { correct: 0, mistakes: 0, streak: 0, bestStreak: 0 };
+
+        const correct = Number(profile.correct || 0);
+        const mistakes = Number(profile.mistakes || 0);
+        const streak = Number(profile.streak || 0);
+        const bestStreak = Number(profile.bestStreak || 0);
         
         const total = correct + mistakes;
         const successRate = total > 0 ? Math.round((correct / total) * 100) : 0;
 
         const embed = new EmbedBuilder()
-          .setColor("#5865F2")
+          .setColor("#0A0A0A")
           .setAuthor({
-            name: `${targetUser.username}'s Counting Stats`,
-            iconURL: targetUser.displayAvatarURL()
+            name: `${targetUser.username}'s Matrix Metrics`,
+            iconURL: targetUser.displayAvatarURL({ dynamic: true })
           })
-          .setThumbnail(targetUser.displayAvatarURL())
+          .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
           .addFields(
             { 
-              name: "📊 Overall", 
-              value: `✅ **${correct}** correct\n❌ **${mistakes}** mistakes\n📈 **${successRate}%** success rate`,
+              name: "📊 Precision Logs", 
+              value: `🟢 Correct: \`${correct}\`\n🔴 Mistakes: \`${mistakes}\`\n📈 Rate: \`${successRate}%\``,
               inline: true 
             },
             { 
-              name: "🔥 Streaks", 
-              value: `⚡ Current: **${streak}**\n🏆 Best: **${bestStreak}**`,
+              name: "🔥 Activity Waves", 
+              value: `⚡ Current Streak: \`${streak}\`\n🏆 Max Overload: \`${bestStreak}\``,
               inline: true 
             }
           )
-          .setFooter({ text: `Total attempts: ${total}` })
+          .setFooter({ text: `Total processing lines: ${total}` })
           .setTimestamp();
 
         return interaction.reply({ embeds: [embed] });
@@ -131,33 +136,29 @@ module.exports = {
       // 🏆 LEADERBOARD
       // =========================
       if (sub === "leaderboard") {
-        const data = await redis.zrevrange(`counting:${guildId}:correct`, 0, 9, "WITHSCORES");
+        const userDataStore = await getUserDataStore();
+        
+        // Transform user dictionary array map into dynamic sorting layouts
+        const sorted = Object.entries(userDataStore)
+          .map(([id, data]) => ({ id, correct: data.correct || 0 }))
+          .filter(u => u.correct > 0)
+          .sort((a, b) => b.correct - a.correct)
+          .slice(0, 10);
         
         let description = "";
-        if (!data || data.length === 0) {
-          description = "No one has counted yet!";
+        if (!sorted.length) {
+          description = "*No active network nodes logged inside database tracks.*";
         } else {
-          const medals = ["🥇", "🥈", "🥉"];
-          for (let i = 0; i < data.length; i += 2) {
-            const rank = (i / 2) + 1;
-            const id = data[i];
-            const score = data[i + 1];
-            const medal = rank <= 3 ? medals[rank - 1] : `#${rank}`;
-            
-            try {
-              const user = await client.users.fetch(id);
-              description += `${medal} **${user.username}** — \`${score}\` counts\n`;
-            } catch {
-              description += `${medal} **Unknown User** — \`${score}\` counts\n`;
-            }
-          }
+          sorted.forEach((node, index) => {
+            const rankSymbol = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `\`#${index + 1}\``;
+            description += `${rankSymbol} <@${node.id}> ➔ \`${node.correct}\` processed strings\n`;
+          });
         }
 
         const embed = new EmbedBuilder()
-          .setColor("#FFD700")
-          .setTitle("🏆 Counting Leaderboard")
+          .setColor("#0A0A0A")
+          .setTitle("🏆 Top Node Counters")
           .setDescription(description)
-          .setFooter({ text: "Top 10 counters" })
           .setTimestamp();
 
         return interaction.reply({ embeds: [embed] });
@@ -169,31 +170,32 @@ module.exports = {
       if (sub === "reset") {
         if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
           return interaction.reply({
-            content: "❌ You need Administrator permission.",
+            content: "❌ Administrative authority failure: Requires `Administrator` permission flags.",
             flags: MessageFlags.Ephemeral
           });
         }
 
         const targetUser = interaction.options.getUser("user");
+        const userDataStore = await getUserDataStore();
         
         if (targetUser) {
-          // Reset specific user
-          await redis.zrem(`counting:${guildId}:correct`, targetUser.id);
-          await redis.zrem(`counting:${guildId}:mistakes`, targetUser.id);
-          await redis.del(`counting:${guildId}:${targetUser.id}:streak`);
-          await redis.del(`counting:${guildId}:${targetUser.id}:bestStreak`);
+          // Erase singular node block cleanly from local store mapping
+          if (userDataStore[targetUser.id]) {
+            delete userDataStore[targetUser.id];
+            await db.set(`counting:${guildId}:userdata`, userDataStore);
+          }
           
           return interaction.reply({
-            content: `✅ Reset stats for **${targetUser.username}**`,
+            content: `🟢 **Sector Repaired:** Data tracks cleared for user **${targetUser.username}**.`,
             flags: MessageFlags.Ephemeral
           });
         }
 
-        // Reset all stats (with confirmation)
+        // Full server block wipeout sequence
         const embed = new EmbedBuilder()
-          .setColor("#ED4245")
-          .setTitle("⚠️ Reset All Stats")
-          .setDescription("This will reset ALL counting stats in this server. React with ✅ to confirm.");
+          .setColor("#BA1A1A")
+          .setTitle("⚠️ Warning: Destructive Action Formed")
+          .setDescription("This execution will completely wipe out ALL registry profiles mapped under this guild instance. React with ✅ to confirm.");
 
         await interaction.reply({ embeds: [embed], withResponse: true });
         const msg = await interaction.fetchReply();
@@ -207,28 +209,26 @@ module.exports = {
           });
           
           if (collected.size > 0) {
-            // Reset all counting data
-            const keys = await redis.keys(`counting:${guildId}:*`);
-            for (const key of keys) {
-              await redis.del(key);
-            }
-            await redis.set(`counting:${guildId}:number`, 0);
+            // Drop entire guild mapping fields cleanly via explicit del commands
+            await db.del(`counting:${guildId}:userdata`);
+            await db.set(`counting:${guildId}:number`, 0);
+            await db.set(`counting:${guildId}:lastUser`, "");
             
             return interaction.editReply({
-              content: "✅ All counting stats have been reset.",
+              content: "🟢 **System Flash Completed:** Data sectors wiped. Counter value rolled back to `0`.",
               embeds: [],
               components: []
             });
           } else {
             return interaction.editReply({
-              content: "❌ Reset cancelled.",
+              content: "❌ Sequence aborted: Confirmation timeframe expired.",
               embeds: [],
               components: []
             });
           }
         } catch (error) {
           return interaction.editReply({
-            content: "❌ Reset cancelled or timed out.",
+            content: "❌ Sequence aborted: Internal check failure or timeout.",
             embeds: [],
             components: []
           });
@@ -238,7 +238,7 @@ module.exports = {
     } catch (error) {
       console.error("Counting command error:", error);
       return interaction.reply({
-        content: `❌ Error: ${error.message}`,
+        content: `❌ Critical system error encountered: ${error.message}`,
         flags: MessageFlags.Ephemeral
       });
     }
