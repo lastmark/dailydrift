@@ -112,7 +112,7 @@ module.exports = {
       .addChannelOption(o => o.setName("category").addChannelTypes(ChannelType.GuildCategory))
       .addRoleOption(o => o.setName("support_role").setDescription("Support role")))
     .addSubcommand(sub => sub.setName("transcript").setDescription("Retrieve closed transcript")
-      .addStringOption(o => o.setName("ticket_id").setRequired(true))),
+    .addStringOption(o => o.setName("ticket_id").setDescription("Ticket channel ID").setRequired(true)),
 
   async execute(interaction, client, db) {
     const sub = interaction.options.getSubcommand();
