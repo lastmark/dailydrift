@@ -1,4 +1,4 @@
-// commands/setwelcome.js – Premium Welcome Configuration Panel (MongoDB Optimized)
+// commands/setwelcome.js – Corrected channel key
 const { SlashCommandBuilder, EmbedBuilder, ChannelType, MessageFlags, PermissionFlagsBits } = require("discord.js");
 
 module.exports = {
@@ -33,13 +33,13 @@ module.exports = {
     // ─── SUBCOMMAND: CHANNEL ───
     if (sub === "channel") {
       const targetChannel = interaction.options.getChannel("target");
-      await db.set(`welcome:channel:${guildId}`, targetChannel.id);
+      // ✅ Fixed key – matches index.js: db.get(`welcome:${guildId}`)
+      await db.set(`welcome:${guildId}`, targetChannel.id);
 
       const embed = new EmbedBuilder()
         .setColor("#0A0A0A")
-        .setTitle("⚙️ WELCOME CONFIGURATION INITIALIZED")
-        .setDescription(`• **Module:** \`Welcome Canvas Node\`\n• **Routing Target:** ${targetChannel}`);
-
+        .setTitle("⚙️ Welcome Channel Set")
+        .setDescription(`**Target Channel:** ${targetChannel}\n\nMember join cards will now be sent here.`);
       return interaction.reply({ embeds: [embed] });
     }
 
@@ -50,9 +50,8 @@ module.exports = {
 
       const embed = new EmbedBuilder()
         .setColor("#111111")
-        .setTitle("📝 GREETING TEXT APPLIED")
-        .setDescription(`\`\`\`${msgFormat}\`\`\``);
-
+        .setTitle("📝 Welcome Message Updated")
+        .setDescription(`**Preview:**\n\`\`\`${msgFormat}\`\`\`\n\nVariables {user}, {server}, {count} will be replaced automatically.`);
       return interaction.reply({ embeds: [embed] });
     }
 
@@ -66,14 +65,17 @@ module.exports = {
       }
 
       const url = interaction.options.getString("url");
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        return interaction.reply({ content: "❌ Invalid URL – please provide a direct image link.", flags: MessageFlags.Ephemeral });
+      }
+
       await db.set(`welcome:bg:${guildId}`, url);
 
       const embed = new EmbedBuilder()
         .setColor("#1A1A1A")
-        .setTitle("🎨 PREMIUM WELCOME CANVAS LINKED")
+        .setTitle("🎨 Premium Welcome Background Set")
         .setDescription(`Custom canvas background updated.\n\n🖼️ **Asset:** [View Link](${url})`)
         .setThumbnail(url);
-
       return interaction.reply({ embeds: [embed] });
     }
   }
