@@ -21,41 +21,44 @@ module.exports = {
     )
     .setDMPermission(false),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
 
     if (sub === "set") {
       const reason = interaction.options.getString("reason") || "AFK";
+      
+      // Store clean native schema objects directly into MongoDB
       const data = {
         reason,
         since: Date.now(),
       };
-      await redis.set(`afk:${userId}`, JSON.stringify(data));
+      await db.set(`afk:${userId}`, data);
 
       const embed = new EmbedBuilder()
-        .setColor("#5865F2")
-        .setTitle("💤 AFK Set")
-        .setDescription(`${interaction.user} is now AFK.`)
-        .addFields({ name: "Reason", value: reason })
+        .setColor("#0A0A0A") // Premium minimalist look
+        .setTitle("💤 Status Set")
+        .setDescription(`${interaction.user} is now recorded as AFK.`)
+        .addFields({ name: "💬 Context Details", value: `\`\`\`text\n${reason}\n\`\`\`` })
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed] });
     }
 
     if (sub === "clear") {
-      const exists = await redis.get(`afk:${userId}`);
+      const exists = await db.get(`afk:${userId}`);
       if (!exists) {
         const embed = new EmbedBuilder()
-          .setColor("#ED4245")
-          .setDescription("❌ You are not AFK.");
+          .setColor("#BA1A1A") // Minimalist warning layout dark-red tint
+          .setDescription("❌ You do not have an active AFK status registration.");
         return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       }
-      await redis.del(`afk:${userId}`);
+      
+      await db.del(`afk:${userId}`);
 
       const embed = new EmbedBuilder()
-        .setColor("#57F287")
-        .setDescription("✅ Your AFK status has been removed. Welcome back!")
+        .setColor("#0A0A0A")
+        .setDescription("🟢 **Welcome back!** Your profile status has been re-activated and cleared.")
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed] });
