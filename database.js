@@ -1,14 +1,46 @@
-// database.js – Full MongoDB wrapper (with expire & hgetall)
-const KeyValue = require('./models/KeyValue');
+// database.js – Full MongoDB wrapper (main bot, with Profile & Guild)
+const Profile = require('./models/Profile');
+const Guild = require('./models/Guild');
+const KeyValue = require('./models/KeyValue');   // generic key‑value store
 
 module.exports = {
   // ── STRING ──
   async get(key) {
+    const parts = key.split(':');
+    const scope = parts[0];
+
+    // domain‑specific keys
+    if (scope === 'auditlog') {
+      const guildId = parts[1];
+      const g = await Guild.findOne({ guildId });
+      return g?.auditLogChannel || null;
+    }
+    if (scope === 'maintenance') {
+      const guildId = parts[1];
+      const g = await Guild.findOne({ guildId });
+      return g?.maintenanceMode ? "true" : "false";
+    }
+
+    // all other keys (eco, tickets, warnings, etc.) use KeyValue
     const doc = await KeyValue.findOne({ key });
     return doc ? doc.value : null;
   },
 
   async set(key, value) {
+    const parts = key.split(':');
+    const scope = parts[0];
+
+    // domain‑specific
+    if (scope === 'auditlog') {
+      await Guild.findOneAndUpdate(
+        { guildId: parts[1] },
+        { auditLogChannel: value },
+        { upsert: true }
+      );
+      return 'OK';
+    }
+
+    // everything else goes to KeyValue
     await KeyValue.findOneAndUpdate(
       { key },
       { value },
@@ -35,8 +67,7 @@ module.exports = {
   },
 
   async ttl(key) {
-    // Not implemented for generic keys – return -1 (no expiry)
-    return -1;
+    return -1;   // generic TTL not implemented (use expire)
   },
 
   async expire(key, seconds) {
