@@ -54,29 +54,27 @@ if (fs.existsSync(eventsPath)) {
 }
 
 // ==========================================
-// 🛡️ IMPROVED COMMAND LOADER (With Error Trace)
+// 🛡️ SAFE COMMAND DEPLOYER
 // ==========================================
-const commandsPath = path.join(__dirname, "commands");
-if (fs.existsSync(commandsPath)) {
-  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
-  for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
+const commands = [];
+for (const [name, cmd] of client.commands) {
+  if (cmd?.data) {
     try {
-      console.log(`--- Attempting to load: ${file} ---`); // This line will pinpoint the culprit
-      const cmd = require(filePath);
-      if (cmd && cmd.data && cmd.data.name) {
-        client.commands.set(cmd.data.name, cmd);
-        console.log(`✅ Loaded Command: ${cmd.data.name}`);
-      } else {
-        console.log(`❌ [SKIPPED] "${file}" is missing valid exports or data.`);
-      }
+      // This is the line that crashes if description is missing
+      commands.push(cmd.data.toJSON()); 
     } catch (err) {
-      console.error(`❌ FATAL ERROR LOADING: ${file}`);
-      console.error(err);
-      process.exit(1); // Force the bot to stop so you can see the log
+      console.error(`❌ CRITICAL ERROR IN COMMAND: ${name}`);
+      console.error(`This command has an undefined description or option!`);
     }
   }
 }
+
+try {
+  const { REST, Routes } = require("discord.js");
+  const rest = new REST({ version: "10" }).setToken(token);
+  await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+  console.log(`Successfully deployed ${commands.length} commands!`);
+} catch (err) { console.error(err); }
 
 // ==========================================
 // 👑 INTERACTION HANDLER
