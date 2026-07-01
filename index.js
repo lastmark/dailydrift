@@ -1,4 +1,4 @@
-// index.js – Main Bot (MongoDB, safe pre‑checks, fixed terms buttons, fast counting)
+// index.js – Main Bot (MongoDB, safe pre‑checks, fixed terms buttons, counting removed from inline)
 require("dotenv").config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
@@ -301,53 +301,6 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.replied) {
       await interaction.reply({ content: "❌ Internal error.", flags: MessageFlags.Ephemeral }).catch(() => {});
     }
-  }
-});
-
-// ==========================================
-// 💬 MESSAGE LISTENER (Guardrails & Counting)
-// ==========================================
-client.on("messageCreate", async (message) => {
-  if (!message.guild || message.author.bot) return;
-  if (processedMessages.has(message.id)) return;
-  processedMessages.add(message.id);
-  setTimeout(() => processedMessages.delete(message.id), 5000);
-
-  const blacklist = await checkBlacklist(db, message.author.id, message.guild.id);
-  if (blacklist) {
-    if (message.content.startsWith("!") || message.content.startsWith("?")) {
-      await message.reply({ embeds: [buildBlacklistEmbed(blacklist.data, blacklist.type)] }).catch(() => {});
-      await message.delete().catch(() => {});
-    }
-    return;
-  }
-
-  if (await db.get(`maintenance:${message.guild.id}`) === "true") {
-    if (message.content.startsWith("!") || message.content.startsWith("?")) {
-      await message.reply("🔧 The bot is currently under maintenance. Please try again later.").catch(() => {});
-    }
-    return;
-  }
-
-  try {
-    const countingChannelId = await db.get(`counting:${message.guild.id}:channel`);
-    if (countingChannelId && message.channel.id === countingChannelId) {
-      const pureContent = message.content.replace(/\s+/g, "");
-      if (!/^[0-9+\-*/^()]+$/.test(pureContent)) {
-        if (message.deletable) await message.delete().catch(() => {});
-        return;
-      }
-      // ✅ FIX: direct require – no more dynamic import delay
-      const runCountingGame = require("./games/counting.js");
-      await runCountingGame(message, db);
-      return;
-    }
-  } catch (error) {
-    console.error("Counting engine error:", error);
-  }
-
-  if (message.content.startsWith("!") || message.content.startsWith("?")) {
-    return;
   }
 });
 
