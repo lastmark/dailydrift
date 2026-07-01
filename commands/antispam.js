@@ -38,7 +38,7 @@ module.exports = {
           new EmbedBuilder()
             .setColor("#BA1A1A") // Minimalist deep-red alert tint
             .setTitle("🔒 Premium Subscription Required")
-            .setDescription("The advanced real-time Anti‑Spam firewall module requires an active **Guild Premium** status registry tier for this cluster node.")
+            .setDescription("This feature is only available to servers with **Guild Premium**.")
         ],
         flags: MessageFlags.Ephemeral
       });
@@ -53,13 +53,13 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setColor("#0A0A0A") // Premium dark minimalist styling layout
-      .setTitle("🛡️ System Firewall Configuration")
-      .setDescription("The background server processing thresholds have been altered and applied instantly.")
+      .setTitle("🛡️ Anti-Spam Configuration")
+      .setDescription("settings have been updated successfully..")
       .addFields(
-        { name: "📡 Protection Engine", value: status === "true" ? "🟢 `ONLINE`" : "🔴 `OFFLINE`", inline: true },
-        { name: "📊 Filter Sensitivity", value: `\`${level.toUpperCase()}\``, inline: true }
+        { name: "Spam Protection", value: status === "true" ? "🟢 `Active`" : "🔴 `Disabled`", inline: true },
+        { name: "Detection Level", value: `\`${level.toUpperCase()}\``, inline: true }
       )
-      .setFooter({ text: "SYSTEM OVERLAY • CORE HOOK ACTIVE" })
+      .setFooter({ text: "Anti-Spam System" })
       .setTimestamp();
 
     return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
