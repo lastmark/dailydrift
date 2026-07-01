@@ -1,8 +1,8 @@
-// index.js
+// index.js – Main Bot (MongoDB, debug included)
 require("dotenv").config();
 const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, MessageFlags } = require("discord.js");
 const { token, TERMS_VERSION } = require("./config");
-const db = require("./database"); // Swapped out Redis for clean MongoDB wrapper instance
+const db = require("./database"); // MongoDB wrapper
 const fs = require("fs");
 const path = require("path");
 const { checkBlacklist, buildBlacklistEmbed } = require("./blacklist.js");
@@ -229,7 +229,8 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         await db.set(balanceKey, coins - price);
-        if (item === 'shield') await db.incr(`eco:${user.id}:shield`);
+        // Fixed typo: db.incr → db.incrby
+        if (item === 'shield') await db.incrby(`eco:${user.id}:shield`, 1);
         else if (item === 'double') await db.set(`eco:${user.id}:double`, 5);
 
         const itemNames = { shield: "🛡️ Shield", double: "⚡ Double XP (5 uses)" };
@@ -337,7 +338,7 @@ client.on("messageCreate", async (message) => {
 });
 
 // ==========================================
-// 🛡️ WELCOME / LEAVE SYSTEM WITH TEXT WRAP
+// 🛡️ WELCOME / LEAVE SYSTEM
 // ==========================================
 const { welcomeCard } = require("./canvas/welcome");
 const { leaveCard } = require("./canvas/leave");
@@ -367,7 +368,7 @@ client.on("guildMemberRemove", async (member) => {
 });
 
 // ==========================================
-// 🚀 READY EVENT LOOP CONTROL
+// 🚀 READY EVENT
 // ==========================================
 client.once("ready", async () => {
   console.log(`${client.user.tag} online`);
@@ -452,14 +453,34 @@ client.once("ready", async () => {
     }
   }, 60000);
 
+  // 🔍 DEBUG – Find broken commands before deploying
+  console.log("🔍 Checking commands for missing descriptions...");
+  for (const [name, cmd] of client.commands) {
+    try {
+      cmd.data.toJSON();
+    } catch (err) {
+      console.error(`❌ Broken command: ${name} — ${err.message}`);
+    }
+  }
+
+  // Deploy slash commands
   const commands = [];
-  for (const [name, cmd] of client.commands) { if (cmd?.data) commands.push(cmd.data.toJSON()); }
+  for (const [name, cmd] of client.commands) {
+    try {
+      commands.push(cmd.data.toJSON());
+    } catch (err) {
+      console.error(`⚠️ Skipping ${name} during deploy:`, err.message);
+    }
+  }
   try {
     const { REST, Routes } = require("discord.js");
     const rest = new REST({ version: "10" }).setToken(token);
+    console.log(`🔄 Deploying ${commands.length} commands...`);
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log(`Successfully deployed application command nodes globally!`);
-  } catch (err) { console.error(err); }
+    console.log(`✅ Successfully deployed application command nodes globally!`);
+  } catch (err) {
+    console.error("REST Command Deployment Error:", err);
+  }
 });
 
 client.login(token);
