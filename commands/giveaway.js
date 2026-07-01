@@ -1,4 +1,4 @@
-// /app/commands/giveaway.js
+// commands/giveaway.js – Multi-layered Giveaway Management Engine
 const { SlashCommandBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, PermissionFlagsBits, MessageFlags } = require("discord.js");
 const ms = require("ms");
 
@@ -6,27 +6,28 @@ module.exports = {
   category: "Server Management",
   data: new SlashCommandBuilder()
     .setName("giveaway")
-    .setDescription("⚙️ Start or manage server giveaways")
+    .setDescription("Start or manage server giveaways")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false)
     .addSubcommand(sub =>
       sub.setName("start")
-        .setDescription("🚀 Start a new giveaway")
+        .setDescription("Start a new giveaway")
         .addStringOption(opt => opt.setName("duration").setDescription("Time format (e.g., 1h, 30m, 1d)").setRequired(true))
         .addIntegerOption(opt => opt.setName("winners").setDescription("Number of winners").setRequired(true))
         .addStringOption(opt => opt.setName("prize").setDescription("The prize for the giveaway").setRequired(true))
     )
     .addSubcommand(sub =>
       sub.setName("end")
-        .setDescription("🛑 Force end an active giveaway")
+        .setDescription("Force end an active giveaway")
         .addStringOption(opt => opt.setName("message_id").setDescription("The giveaway message ID").setRequired(true))
     )
     .addSubcommand(sub =>
       sub.setName("reroll")
-        .setDescription("🎲 Reroll winners from a finished giveaway")
+        .setDescription("Reroll winners from a finished giveaway")
         .addStringOption(opt => opt.setName("message_id").setDescription("The giveaway message ID").setRequired(true))
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const sub = interaction.options.getSubcommand();
     const guildId = interaction.guild.id;
 
@@ -41,29 +42,32 @@ module.exports = {
         durationMs = ms(durationStr);
         if (!durationMs || isNaN(durationMs)) throw new Error();
       } catch {
-        return interaction.reply({ content: "❌ **Invalid Time:** Use formats like \`30m\`, \`2h\`, or \`1d\`.", flags: MessageFlags.Ephemeral });
+        const errorEmbed = new EmbedBuilder()
+          .setColor("#BA1A1A")
+          .setDescription("❌ **Invalid Parameter:** Use standard execution increments like `30m`, `2h`, or `1d`.");
+        return interaction.reply({ embeds: [errorEmbed], flags: MessageFlags.Ephemeral });
       }
 
       const endTimestamp = Math.floor((Date.now() + durationMs) / 1000);
 
       const giveawayEmbed = new EmbedBuilder()
-        .setColor("#0A0A0A")
+        .setColor("#0A0A0A") // Premium dark minimalist styling layout
         .setTitle(`🎁 GIVEAWAY: ${prize.toUpperCase()}`)
         .setDescription(
-          `**A new giveaway has started!**\n` +
+          `**A new giveaway pool has been deployed.**\n` +
           `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n` +
           `• **Prize:** \`${prize}\`\n` +
-          `• **Winners:** \`${winnerCount} ${winnerCount === 1 ? 'Winner' : 'Winners'}\`\n` +
-          `• **Ends In:** <t:${endTimestamp}:R> (<t:${endTimestamp}:f>)\n` +
-          `• **Hosted By:** ${interaction.user}\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n` +
-          `*Click the button below to enter the giveaway pool.*`
+          `• **Target Allocations:** \`${winnerCount} ${winnerCount === 1 ? 'Winner' : 'Winners'}\`\n` +
+          `• **Expiration:** <t:${endTimestamp}:R> (<t:${endTimestamp}:f>)\n` +
+          `• **Authorized By:** ${interaction.user}\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n` +
+          `*Interact via the connection node button below to join the entry list.*`
         )
-        .setFooter({ text: `ACTIVE • 0 ENTRIES` })
+        .setFooter({ text: `ACTIVE • 0 ENTRIES LOGGED` })
         .setTimestamp();
 
       const joinButton = new ButtonBuilder()
         .setCustomId("giveaway_join")
-        .setLabel("ENTER GIVEAWAY")
+        .setLabel("ENTER ENTRY POOL")
         .setStyle(ButtonStyle.Secondary);
 
       const row = new ActionRowBuilder().addComponents(joinButton);
@@ -74,59 +78,85 @@ module.exports = {
         channelId: interaction.channel.id,
         guildId: guildId,
         prize: prize,
-        winners: winnerCount.toString(),
-        endsAt: (Date.now() + durationMs).toString(),
-        ended: "false"
+        winners: winnerCount,
+        endsAt: Date.now() + durationMs,
+        ended: false,
+        entries: [] // Initialize dynamic pool matrix array directly inside object tracking
       };
 
-      await redis.hset(`giveaway:${msg.id}`, dataPayload);
+      await db.set(`giveaway:${msg.id}`, dataPayload);
       return;
     }
 
     // ─── SUBCOMMAND: END ───
     if (sub === "end") {
       const msgId = interaction.options.getString("message_id");
-      const data = await redis.hgetall(`giveaway:${msgId}`);
+      const data = await db.get(`giveaway:${msgId}`);
 
-      if (!data || Object.keys(data).length === 0) {
-        return interaction.reply({ content: "❌ **Not Found:** That message ID does not match an active giveaway.", flags: MessageFlags.Ephemeral });
+      if (!data) {
+        const errEmbed = new EmbedBuilder()
+          .setColor("#BA1A1A")
+          .setDescription("❌ **Registry Missing:** No active giveaway mapped under that message identifier.");
+        return interaction.reply({ embeds: [errEmbed], flags: MessageFlags.Ephemeral });
       }
 
-      if (data.ended === "true") {
-        return interaction.reply({ content: "❌ **Ended:** This giveaway has already finished.", flags: MessageFlags.Ephemeral });
+      if (data.ended === true) {
+        const errEmbed = new EmbedBuilder()
+          .setColor("#BA1A1A")
+          .setDescription("❌ **Pipeline Offline:** This giveaway allocation pool has already finished processing.");
+        return interaction.reply({ embeds: [errEmbed], flags: MessageFlags.Ephemeral });
       }
 
-      await redis.hset(`giveaway:${msgId}`, "endsAt", Date.now().toString()); 
-      return interaction.reply({ content: "⚡ **Stopping Giveaway:** Ending the giveaway loop now. Stand by.", flags: MessageFlags.Ephemeral });
+      // Fast-forward timestamp array parameter to immediately execute background tasks
+      data.endsAt = Date.now();
+      await db.set(`giveaway:${msgId}`, data); 
+
+      const successEmbed = new EmbedBuilder()
+        .setColor("#0A0A0A")
+        .setDescription("⚡ **Termination Signal Sent:** Halting giveaway cycle loop. Finalizing collection array stand-by.");
+      return interaction.reply({ embeds: [successEmbed], flags: MessageFlags.Ephemeral });
     }
 
     // ─── SUBCOMMAND: REROLL ───
     if (sub === "reroll") {
       const msgId = interaction.options.getString("message_id");
-      const data = await redis.hgetall(`giveaway:${msgId}`);
+      const data = await db.get(`giveaway:${msgId}`);
 
-      if (!data || Object.keys(data).length === 0) {
-        return interaction.reply({ content: "❌ **Not Found:** No giveaway data found for that message ID.", flags: MessageFlags.Ephemeral });
+      if (!data) {
+        const errEmbed = new EmbedBuilder()
+          .setColor("#BA1A1A")
+          .setDescription("❌ **Registry Missing:** No giveaway metadata records located for that message signature.");
+        return interaction.reply({ embeds: [errEmbed], flags: MessageFlags.Ephemeral });
       }
 
-      if (data.ended !== "true") {
-        return interaction.reply({ content: "❌ **Locked:** The giveaway must be finished before you can reroll it.", flags: MessageFlags.Ephemeral });
+      if (data.ended !== true) {
+        const errEmbed = new EmbedBuilder()
+          .setColor("#BA1A1A")
+          .setDescription("❌ **Transaction Locked:** The targeted giveaway sequence must be fully completed before reroll calculations.");
+        return interaction.reply({ embeds: [errEmbed], flags: MessageFlags.Ephemeral });
       }
 
-      const participants = await redis.smembers(`giveaway:entries:${msgId}`);
-      if (!participants || participants.length === 0) {
-        return interaction.reply({ content: "❌ **No Entries:** Nobody entered this giveaway, cannot reroll.", flags: MessageFlags.Ephemeral });
+      // Safely access participants directly out of custom database object arrays
+      const participants = data.entries || [];
+      if (!participants.length) {
+        const errEmbed = new EmbedBuilder()
+          .setColor("#BA1A1A")
+          .setDescription("❌ **Null Dataset:** Entry matrix holds zero registrations. Unable to execute lottery logic.");
+        return interaction.reply({ embeds: [errEmbed], flags: MessageFlags.Ephemeral });
       }
 
-      const shuffled = participants.sort(() => 0.5 - Math.random());
+      const shuffled = [...participants].sort(() => 0.5 - Math.random());
       const chosenWinners = shuffled.slice(0, parseInt(data.winners)).map(id => `<@${id}>`);
 
-      const channel = client.channels.cache.get(data.channelId);
+      const channel = client.channels.cache.get(data.channelId) || await client.channels.fetch(data.channelId).catch(() => null);
       if (channel) {
-        channel.send(`🎲 **GIVEAWAY REROLLED**\n• **New Winners:** ${chosenWinners.join(", ")}\n• **Prize:** \`${data.prize}\``);
+        channel.send(`🎲 **GIVEAWAY MATRIX REROLLED**\n• **New Winners:** ${chosenWinners.join(", ")}\n• **Prize Allocation:** \`${data.prize}\``);
       }
 
-      return interaction.reply({ content: "✅ **Giveaway successfully rerolled.**", flags: MessageFlags.Ephemeral });
+      const finishEmbed = new EmbedBuilder()
+        .setColor("#0A0A0A")
+        .setDescription("🟢 **Re-indexing Completed:** Winners recalculated and dispatched over the channel terminal text grid.");
+      return interaction.reply({ embeds: [finishEmbed], flags: MessageFlags.Ephemeral });
     }
   }
 };
