@@ -1,4 +1,4 @@
-// utils/animatedProfile.js – Fully animated GIF generation (omggif)
+// utils/animatedProfile.js – Fully animated GIF generation (omggif, no errors)
 const { createCanvas, loadImage, registerFont } = require("canvas");
 const GIFEncoder = require("gif-encoder-2");
 const omggif = require("omggif");
@@ -158,4 +158,107 @@ async function generateAnimatedProfile(gifUrl, data) {
       xPos += 100;
       ctx.font = getFont("normal", 16);
       ctx.fillStyle = data.color;
-      ctx.fillText(stat.value, xPos,
+      ctx.fillText(stat.value, xPos, 205);
+      xPos += 100;
+    });
+
+    if (data.links && data.links.length) {
+      const linkText = data.links.map(l => `${l.platform}: ${l.url}`).join('  •  ');
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
+      ctx.font = getFont("normal", 12);
+      ctx.fillText(linkText, 270, 225);
+    }
+
+    const barX = 270, barY = 240, barWidth = 540, barHeight = 22;
+    ctx.shadowBlur = 5;
+    ctx.shadowColor = "rgba(0,0,0,0.2)";
+    ctx.fillStyle = "rgba(255,255,255,0.15)";
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barWidth, barHeight, 11);
+    ctx.fill();
+
+    let barGradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
+    const barStyle = data.barStyle || "default";
+    if (barStyle === "neon") {
+      barGradient.addColorStop(0, "#00FFAA");
+      barGradient.addColorStop(1, "#00AAFF");
+    } else if (barStyle === "retro") {
+      barGradient.addColorStop(0, "#FF6B6B");
+      barGradient.addColorStop(1, "#FFD93D");
+    } else if (barStyle === "minimal") {
+      barGradient.addColorStop(0, "#FFFFFF");
+      barGradient.addColorStop(1, "#AAAAAA");
+    } else {
+      barGradient.addColorStop(0, data.color);
+      barGradient.addColorStop(1, "#FF6B6B");
+    }
+    ctx.fillStyle = barGradient;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = data.color;
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barWidth * data.progress, barHeight, 11);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.font = getFont("bold", 14);
+    ctx.textAlign = "center";
+    ctx.fillText(`${formatNumber(data.xp)}/${formatNumber(data.needed)} XP`, barX + barWidth / 2, barY + 17);
+
+    ctx.textAlign = "center";
+    const levelX = 780, levelY = 80;
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = "rgba(0,0,0,0.3)";
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.beginPath();
+    ctx.arc(levelX, levelY, 50, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = data.color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(levelX, levelY, 50, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.font = getFont("bold", 18);
+    ctx.fillText("LEVEL", levelX, levelY - 12);
+    ctx.fillStyle = data.color;
+    ctx.font = getFont("bold", 28);
+    ctx.fillText(data.level, levelX, levelY + 22);
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.font = getFont("normal", 12);
+    ctx.fillText(`ID: ${data.userId.slice(0, 8)}...`, 20, 340);
+    ctx.textAlign = "right";
+    ctx.fillText("Profile v2.0", 880, 340);
+  }
+
+  // 6️⃣ Encode the final animated GIF
+  const encoder = new GIFEncoder(W, H, "neuquant", true);
+  encoder.start();
+  encoder.setRepeat(0);   // loop forever
+  encoder.setQuality(10);
+
+  for (const frame of frames) {
+    const frameCanvas = createCanvas(W, H);
+    const ctx = frameCanvas.getContext("2d");
+
+    // Draw the background GIF frame
+    const bgImg = await loadImage(frame.buffer);
+    ctx.drawImage(bgImg, 0, 0, W, H);
+
+    // Overlay profile UI
+    await drawProfileOverlay(ctx);
+
+    encoder.setDelay(frame.delay);
+    encoder.addFrame(ctx);
+  }
+
+  encoder.finish();
+  const outBuffer = encoder.out.getData();
+  console.log(`✅ Animated profile GIF generated: ${frames.length} frames, ${outBuffer.length} bytes`);
+  return outBuffer;
+}
+
+module.exports = { generateAnimatedProfile };
