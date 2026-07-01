@@ -29,7 +29,7 @@ module.exports = {
     if (!isPremium) {
       const embed = new EmbedBuilder()
         .setColor("#BA1A1A")
-        .setDescription("❌ **Premium Authorization Failure:** This processing pipeline requires server tier license keys.");
+        .setDescription("❌ This feature requires an active Server Premium subscription.");
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
@@ -37,7 +37,7 @@ module.exports = {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
       const embed = new EmbedBuilder()
         .setColor("#BA1A1A")
-        .setDescription("❌ **Access Denied:** Execution requires `Administrator` authorization metrics.");
+        .setDescription("❌ You must have the Moderate Members permission to use this command.");
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
 
@@ -47,11 +47,11 @@ module.exports = {
       
       const embed = new EmbedBuilder()
         .setColor("#0A0A0A") // Premium dark minimalist styling layout
-        .setTitle("🛡️ Packet Inspection Active")
-        .setDescription("Ghost ping detection security array has been initialized successfully on this guild hub.")
+        .setTitle("👻 Ghost Ping Detection")
+        .setDescription("Detects and logs ghost pings by monitoring deleted messages that contain user mentions.")
         .addFields(
-          { name: "📡 Pipeline Monitoring", value: "`ONLINE`", inline: true },
-          { name: "📝 Log Actions", value: "`Deleted blocks with mentions will intercept`", inline: true }
+          { name: "Detection Status", value: "`Enabled`", inline: true },
+          { name: "Log Actions", value: "`Deleted blocks with mentions will intercept`", inline: true }
         )
         .setTimestamp();
 
