@@ -1,3 +1,4 @@
+// commands/birthday.js – Advanced Birthday Tracking System
 const {
   SlashCommandBuilder,
   PermissionFlagsBits,
@@ -6,13 +7,12 @@ const {
   MessageFlags
 } = require("discord.js");
 
-
 module.exports = {
   category: "User",
 
   data: new SlashCommandBuilder()
     .setName("birthday")
-    .setDescription("    Set and manage your birthday information.")
+    .setDescription("Set and manage your birthday information.")
     .addSubcommand(sub =>
       sub.setName("set")
         .setDescription("Save your birthday")
@@ -65,35 +65,26 @@ module.exports = {
         .setDescription("Show birthday statistics")
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const sub = interaction.options.getSubcommand();
     const guildId = interaction.guild.id;
     const userId = interaction.user.id;
 
     // -------------------- HELPERS --------------------
     const getBirthday = async (id) => {
-      return await redis.hget(`birthday:user:${guildId}`, id);
+      const allBirthdays = await db.get(`birthday:user:${guildId}`) || {};
+      return allBirthdays[id] || null;
     };
 
     const getAllBirthdays = async () => {
-      return await redis.hgetall(`birthday:user:${guildId}`) || {};
+      return await db.get(`birthday:user:${guildId}`) || {};
     };
 
     const getChannel = async () => {
-      const channelId = await redis.get(`birthday:channel:${guildId}`);
+      const channelId = await db.get(`birthday:channel:${guildId}`);
       if (!channelId) return null;
       try {
         return await interaction.guild.channels.fetch(channelId);
-      } catch {
-        return null;
-      }
-    };
-
-    const getRole = async () => {
-      const roleId = await redis.get(`birthday:role:${guildId}`);
-      if (!roleId) return null;
-      try {
-        return await interaction.guild.roles.fetch(roleId);
       } catch {
         return null;
       }
@@ -118,7 +109,6 @@ module.exports = {
       const month = interaction.options.getInteger("month");
       const day = interaction.options.getInteger("day");
 
-      // Validate date
       const isValidDate = (m, d) => {
         const date = new Date(2000, m - 1, d);
         return date.getMonth() === m - 1 && date.getDate() === d;
@@ -128,9 +118,8 @@ module.exports = {
         return interaction.reply({
           embeds: [
             new EmbedBuilder()
-              .setColor("#ED4245")
-              .setTitle("Invalid Date")
-              .setDescription(`${e.error || "❌"} Please enter a valid date.`)
+              .setColor("#BA1A1A")
+              .setDescription("❌ **Invalid Parameter:** Please provide a valid calendar month and day combination.")
           ],
           flags: MessageFlags.Ephemeral
         });
@@ -138,34 +127,41 @@ module.exports = {
 
       const formatted = `${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       
-      // Remove old date if exists
-      const oldDate = await getBirthday(userId);
+      const allBirthdays = await getAllBirthdays();
+      const oldDate = allBirthdays[userId];
+
       if (oldDate) {
-        await redis.srem(`birthday:date:${guildId}:${oldDate}`, userId);
+        let oldDatePool = await db.get(`birthday:date:${guildId}:${oldDate}`) || [];
+        if (Array.isArray(oldDatePool)) {
+          oldDatePool = oldDatePool.filter(id => id !== userId);
+          await db.set(`birthday:date:${guildId}:${oldDate}`, oldDatePool);
+        }
       }
 
-      // Save new birthday
-      await redis.hset(`birthday:user:${guildId}`, userId, formatted);
-      await redis.sadd(`birthday:date:${guildId}:${formatted}`, userId);
+      // Save to main dataset mappings
+      allBirthdays[userId] = formatted;
+      await db.set(`birthday:user:${guildId}`, allBirthdays);
+
+      // Push to targeted date array
+      let targetDatePool = await db.get(`birthday:date:${guildId}:${formatted}`) || [];
+      if (!Array.isArray(targetDatePool)) targetDatePool = [];
+      if (!targetDatePool.includes(userId)) targetDatePool.push(userId);
+      await db.set(`birthday:date:${guildId}:${formatted}`, targetDatePool);
 
       const age = getAge(month, day);
       const dateStr = formatDate(month, day);
       const zodiac = getZodiac(month, day);
 
       const embed = new EmbedBuilder()
-        .setColor("#FF69B4")
-        .setAuthor({
-          name: "🎂 Birthday Saved!",
-          iconURL: interaction.user.displayAvatarURL()
-        })
-        .setDescription(`${e.success || "✅"} Your birthday has been saved successfully!`)
+        .setColor("#0A0A0A") // Premium minimalist background styling
+        .setTitle("🎂 Birthday Registry Updated")
+        .setDescription(`Your local profile metadata has been logged into the global server node successfully.`)
         .addFields(
-          { name: "📅 Date", value: `**${dateStr}**`, inline: true },
-          { name: "🎈 Age", value: `**${age}** years old`, inline: true },
-          { name: "♈ Zodiac", value: `**${zodiac}**`, inline: true }
+          { name: "📅 Stored Date", value: `\`${dateStr}\``, inline: true },
+          { name: "🎈 Current Cycle", value: `\`${age} years old\``, inline: true },
+          { name: "♈ Constellation", value: `\`${zodiac}\``, inline: true }
         )
-        .setColor("#FF69B4")
-        .setFooter({ text: "We'll remind everyone on your special day!" })
+        .setFooter({ text: "AUTOMATED SYSTEM LAYER ACTIVE" })
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
@@ -173,26 +169,34 @@ module.exports = {
 
     // ==================== REMOVE BIRTHDAY ====================
     if (sub === "remove") {
-      const birthday = await getBirthday(userId);
+      const allBirthdays = await getAllBirthdays();
+      const birthday = allBirthdays[userId];
+
       if (!birthday) {
         return interaction.reply({
           embeds: [
             new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription(`${e.error || "❌"} You don't have a birthday saved.`)
+              .setColor("#BA1A1A")
+              .setDescription("❌ You do not have an active birthday registry logged inside this server.")
           ],
           flags: MessageFlags.Ephemeral
         });
       }
 
-      await redis.hdel(`birthday:user:${guildId}`, userId);
-      await redis.srem(`birthday:date:${guildId}:${birthday}`, userId);
+      delete allBirthdays[userId];
+      await db.set(`birthday:user:${guildId}`, allBirthdays);
+
+      let datePool = await db.get(`birthday:date:${guildId}:${birthday}`) || [];
+      if (Array.isArray(datePool)) {
+        datePool = datePool.filter(id => id !== userId);
+        await db.set(`birthday:date:${guildId}:${birthday}`, datePool);
+      }
 
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setColor("#57F287")
-            .setDescription(`${e.success || "✅"} Your birthday has been removed.`)
+            .setColor("#0A0A0A")
+            .setDescription("🟢 **Registry Purged:** Your birthday signature data has been erased from the server matrix.")
         ],
         flags: MessageFlags.Ephemeral
       });
@@ -206,8 +210,8 @@ module.exports = {
         return interaction.reply({
           embeds: [
             new EmbedBuilder()
-              .setColor("#ED4245")
-              .setDescription(`${e.error || "❌"} Missing **Manage Server** permission.`)
+              .setColor("#BA1A1A")
+              .setDescription("❌ Administrative authority failure: Missing \`ManageGuild\` permission flag.")
           ],
           flags: MessageFlags.Ephemeral
         });
@@ -219,7 +223,6 @@ module.exports = {
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-      // --- Channel setup ---
       let targetChannel = channel;
 
       if (!targetChannel && autoCreate) {
@@ -227,8 +230,8 @@ module.exports = {
           return interaction.editReply({
             embeds: [
               new EmbedBuilder()
-                .setColor("#ED4245")
-                .setDescription(`${e.error || "❌"} I need **Manage Channels** permission.`)
+                .setColor("#BA1A1A")
+                .setDescription("❌ Missing bot system authority flag: Client requires \`ManageChannels\` clearance.")
             ]
           });
         }
@@ -236,7 +239,7 @@ module.exports = {
         targetChannel = await interaction.guild.channels.create({
           name: "🎂-birthdays",
           type: ChannelType.GuildText,
-          topic: "🎉 Birthday celebration system",
+          topic: "🎉 Birthday celebration system pipeline",
           permissionOverwrites: [
             {
               id: interaction.guild.id,
@@ -248,45 +251,34 @@ module.exports = {
         await targetChannel.send({
           embeds: [
             new EmbedBuilder()
-              .setColor("#FF69B4")
-              .setTitle("🎂 Birthday System Activated!")
-              .setDescription("This channel will automatically post birthday celebrations for all members who have set their birthday.")
+              .setColor("#0A0A0A")
+              .setTitle("🎂 Birthday Engine Booted")
+              .setDescription("This streaming terminal channel will handle automatically broadcasting member birthday events instantly.")
               .addFields(
-                { name: "📝 How to set your birthday", value: "Use `/birthday set`", inline: true },
-                { name: "📋 View all birthdays", value: "Use `/birthday list`", inline: true }
+                { name: "📝 Set Birthday", value: "Use \`/birthday set\`", inline: true },
+                { name: "📋 View Calendar", value: "Use \`/birthday list\`", inline: true }
               )
-              .setFooter({ text: "Happy birthday to everyone!" })
           ]
         }).catch(() => null);
       }
 
       if (targetChannel) {
-        await redis.set(`birthday:channel:${guildId}`, targetChannel.id);
+        await db.set(`birthday:channel:${guildId}`, targetChannel.id);
       }
 
-      // --- Role setup ---
       if (role) {
-        await redis.set(`birthday:role:${guildId}`, role.id);
+        await db.set(`birthday:role:${guildId}`, role.id);
       } else {
-        await redis.del(`birthday:role:${guildId}`);
+        await db.del(`birthday:role:${guildId}`);
       }
 
       const embed = new EmbedBuilder()
-        .setColor("#57F287")
-        .setTitle("✅ Configuration Updated")
+        .setColor("#0A0A0A")
+        .setTitle("🛡️ System Pipeline Configured")
         .addFields(
-          { 
-            name: "📢 Channel", 
-            value: targetChannel ? `${targetChannel}` : "Not set", 
-            inline: true 
-          },
-          { 
-            name: "🔔 Role", 
-            value: role ? `${role}` : "Not set", 
-            inline: true 
-          }
+          { name: "📢 Terminal Target", value: targetChannel ? `${targetChannel}` : "`None/Disabled`", inline: true },
+          { name: "🔔 Announce Role", value: role ? `${role}` : "`None/Disabled`", inline: true }
         )
-        .setFooter({ text: "Birthday system is now ready!" })
         .setTimestamp();
 
       return interaction.editReply({ embeds: [embed] });
@@ -301,15 +293,13 @@ module.exports = {
         return interaction.reply({
           embeds: [
             new EmbedBuilder()
-              .setColor("#2B2D31")
-              .setTitle("📋 No Birthdays")
-              .setDescription("No one has set their birthday yet. Be the first!")
-              .setFooter({ text: "Use /birthday set to add yours!" })
+              .setColor("#0A0A0A")
+              .setTitle("📋 Dataset Empty")
+              .setDescription("No profiles have configured active birthday parameters inside this cluster node yet.")
           ]
         });
       }
 
-      // Group by month
       const grouped = {};
       for (const [id, bday] of entries) {
         const month = bday.split("-")[0];
@@ -321,10 +311,9 @@ module.exports = {
                       "July", "August", "September", "October", "November", "December"];
 
       const embed = new EmbedBuilder()
-        .setColor("#5865F2")
-        .setTitle(`🎂 Server Birthdays (${entries.length})`)
-        .setDescription(`Here's everyone's birthday in ${interaction.guild.name}`)
-        .setFooter({ text: `Total: ${entries.length} birthdays` })
+        .setColor("#0A0A0A")
+        .setTitle(`🎂 Guild Birthday Registries (${entries.length})`)
+        .setDescription(`Current directory listings for active accounts tracking within **${interaction.guild.name}**`)
         .setTimestamp();
 
       const sortedMonths = Object.keys(grouped).sort((a, b) => parseInt(a) - parseInt(b));
@@ -333,10 +322,10 @@ module.exports = {
       for (const month of sortedMonths) {
         if (fieldCount >= 25) break;
         const birthdays = grouped[month];
-        const names = birthdays.map(b => `<@${b.id}> → **${b.bday}**`).join("\n");
+        const names = birthdays.map(b => `<@${b.id}> ➔ \`${b.bday}\``).join("\n");
         embed.addFields({
           name: `📅 ${months[parseInt(month) - 1]}`,
-          value: birthdays.length > 5 ? `${birthdays.length} birthdays` : names,
+          value: birthdays.length > 5 ? `\`${birthdays.length} entries active\`` : names,
           inline: true
         });
         fieldCount++;
@@ -354,9 +343,9 @@ module.exports = {
         return interaction.reply({
           embeds: [
             new EmbedBuilder()
-              .setColor("#2B2D31")
-              .setTitle("📅 No Upcoming Birthdays")
-              .setDescription("No birthdays set yet.")
+              .setColor("#0A0A0A")
+              .setTitle("📅 Queue Status Clear")
+              .setDescription("No birthdays are currently logged inside the operational queue database.")
           ]
         });
       }
@@ -365,7 +354,6 @@ module.exports = {
       const currentMonth = now.getMonth() + 1;
       const currentDay = now.getDate();
 
-      // Find upcoming birthdays
       const upcoming = entries
         .map(([id, bday]) => {
           const [month, day] = bday.split("-").map(Number);
@@ -383,17 +371,16 @@ module.exports = {
         .slice(0, 10);
 
       const embed = new EmbedBuilder()
-        .setColor("#FF69B4")
-        .setTitle("🎉 Upcoming Birthdays")
-        .setDescription("Here are the next 10 birthdays coming up!")
-        .setFooter({ text: "🎂 Get ready to celebrate!" })
+        .setColor("#0A0A0A")
+        .setTitle("🎉 Queue Lookahead Matrix")
+        .setDescription("The next 10 approaching profile event indexes currently running on line:")
         .setTimestamp();
 
       for (const b of upcoming) {
         const dateStr = formatDate(b.month, b.day);
         embed.addFields({
           name: `🎈 ${dateStr}`,
-          value: `<@${b.id}> → ${b.daysUntil === 0 ? "🎂 TODAY!" : `in ${b.daysUntil} days`}`,
+          value: `<@${b.id}> ➔ ${b.daysUntil === 0 ? "⚡ **TODAY**" : `\`in ${b.daysUntil} days\``}`,
           inline: true
         });
       }
@@ -411,14 +398,13 @@ module.exports = {
         return interaction.reply({
           embeds: [
             new EmbedBuilder()
-              .setColor("#2B2D31")
-              .setTitle("📊 Birthday Statistics")
-              .setDescription("No data available yet.")
+              .setColor("#0A0A0A")
+              .setTitle("📊 Operational Matrix Statline")
+              .setDescription("Insufficient log metrics available to construct analytical data tracks.")
           ]
         });
       }
 
-      // Count birthdays by month
       const monthCounts = {};
       for (const [_, bday] of entries) {
         const month = bday.split("-")[0];
@@ -431,7 +417,6 @@ module.exports = {
       const mostPopularMonth = Object.entries(monthCounts)
         .sort((a, b) => b[1] - a[1])[0];
 
-      // Calculate average age
       const today = new Date();
       let totalAge = 0;
       let ageCount = 0;
@@ -447,14 +432,13 @@ module.exports = {
       const avgAge = ageCount > 0 ? Math.round(totalAge / ageCount) : 0;
 
       const embed = new EmbedBuilder()
-        .setColor("#5865F2")
-        .setTitle("📊 Birthday Statistics")
+        .setColor("#0A0A0A")
+        .setTitle("📊 Operational Matrix Statline")
         .addFields(
-          { name: "👥 Total Birthdays", value: `${total}`, inline: true },
-          { name: "📅 Most Popular Month", value: `${months[parseInt(mostPopularMonth[0]) - 1]} (${mostPopularMonth[1]})`, inline: true },
-          { name: "📊 Average Age", value: `${avgAge} years`, inline: true }
+          { name: "👥 Registries Active", value: `\`${total}\``, inline: true },
+          { name: "📅 Peak Event Month", value: `\`${months[parseInt(mostPopularMonth[0]) - 1]} (${mostPopularMonth[1]} entries)\``, inline: true },
+          { name: "📊 Mean Node Age", value: `\`${avgAge} years\``, inline: true }
         )
-        .setFooter({ text: "Birthday system statistics" })
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed] });
