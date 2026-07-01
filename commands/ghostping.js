@@ -1,4 +1,4 @@
-// commands/antighostping.js – Toggle ghost ping detection (Premium Infrastructure)
+// commands/antighostping.js – Simple Ghost Ping Toggle (Premium)
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -10,62 +10,53 @@ module.exports = {
   category: "Premium",
   data: new SlashCommandBuilder()
     .setName("antighostping")
-    .setDescription("Track and isolate deleted text blocks containing user mentions")
-    .addSubcommand(sub =>
-      sub.setName("enable")
-        .setDescription("Enable ghost ping intercept logging for this node (Premium Required)")
-    )
-    .addSubcommand(sub =>
-      sub.setName("disable")
-        .setDescription("Deactivate ghost ping interception logs")
+    .setDescription("Enable or disable ghost ping detection")
+    .addBooleanOption(opt =>
+      opt.setName("enabled")
+        .setDescription("True to enable, False to disable")
+        .setRequired(true)
     ),
 
   async execute(interaction, client, db) {
-    const sub = interaction.options.getSubcommand();
     const guildId = interaction.guild.id;
+    const enabled = interaction.options.getBoolean("enabled");
 
-    // Premium configuration structural verification
+    // Premium check
     const isPremium = await db.get(`premium:guild:${guildId}`);
     if (!isPremium) {
-      const embed = new EmbedBuilder()
-        .setColor("#BA1A1A")
-        .setDescription("❌ This feature requires an active Server Premium subscription.");
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#ED4245")
+            .setDescription("❌ This feature requires **Guild Premium**.")
+        ],
+        flags: MessageFlags.Ephemeral
+      });
     }
 
-    // Administrative access permission verification
+    // Admin check
     if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
-      const embed = new EmbedBuilder()
-        .setColor("#BA1A1A")
-        .setDescription("❌ You must have the Moderate Members permission to use this command.");
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor("#ED4245")
+            .setDescription("❌ You need **Administrator** permission.")
+        ],
+        flags: MessageFlags.Ephemeral
+      });
     }
 
-    // ==================== ENABLE SYSTEM ====================
-    if (sub === "enable") {
+    if (enabled) {
       await db.set(`antighostping:${guildId}`, "enabled");
-      
       const embed = new EmbedBuilder()
-        .setColor("#0A0A0A") // Premium dark minimalist styling layout
-        .setTitle("👻 Ghost Ping Detection")
-        .setDescription("Detects and logs ghost pings by monitoring deleted messages that contain user mentions.")
-        .addFields(
-          { name: "Detection Status", value: "`Enabled`", inline: true },
-          { name: "Log Actions", value: "`Deleted blocks with mentions will intercept`", inline: true }
-        )
-        .setTimestamp();
-
+        .setColor("#57F287")
+        .setDescription("✅ Ghost ping detection is now **enabled**.");
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-    }
-
-    // ==================== DISABLE SYSTEM ====================
-    if (sub === "disable") {
+    } else {
       await db.del(`antighostping:${guildId}`);
-      
       const embed = new EmbedBuilder()
-        .setColor("#0A0A0A")
-        .setDescription("🟢 **System Disarmed:** Ghost ping tracing modules turned offline cleanly.");
-
+        .setColor("#FEE75C")
+        .setDescription("✅ Ghost ping detection is now **disabled**.");
       return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
   }
