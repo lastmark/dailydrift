@@ -1,37 +1,43 @@
-// commands/untimeout.js
+// commands/untimeout.js – Member Communication Restoration
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require("discord.js");
 
 module.exports = {
   category: "Moderation",
   data: new SlashCommandBuilder()
     .setName("untimeout")
-    .setDescription("Remove a timeout from a member")
+    .setDescription("Lift the communication restriction from a member")
     .addUserOption(opt =>
       opt.setName("user")
-        .setDescription("User to remove timeout from")
+        .setDescription("Target member to unthrottle")
         .setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .setDMPermission(false),
 
   async execute(interaction) {
-    if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
-      const embed = new EmbedBuilder().setColor("#ED4245").setDescription("❌ You need the **Moderate Members** permission.");
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-    }
     const user = interaction.options.getUser("user");
+
     try {
       const member = await interaction.guild.members.fetch(user.id);
+      
+      // Pass null to remove active timeout
       await member.timeout(null);
+
       const embed = new EmbedBuilder()
-        .setColor("#57F287")
-        .setTitle("✅ Timeout Removed")
-        .setDescription(`The timeout for **${user.tag}** has been removed.`)
+        .setColor("#0A0A0A") // Premium dark minimalist theme
+        .setTitle("✅ Communication Restored")
+        .setDescription(`The timeout restriction has been successfully lifted for **${user.tag}**.`)
         .setTimestamp();
+
       return interaction.reply({ embeds: [embed] });
     } catch (err) {
-      console.error(err);
-      const embed = new EmbedBuilder().setColor("#ED4245").setDescription("❌ I cannot remove the timeout from that user.");
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      console.error("Untimeout Pipeline Exception:", err);
+      return interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor("#BA1A1A")
+          .setDescription("❌ **Operation Failed:** Unable to lift timeout. Please verify hierarchy and permissions.")
+        ],
+        flags: MessageFlags.Ephemeral
+      });
     }
   }
 };
