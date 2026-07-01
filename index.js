@@ -54,19 +54,26 @@ if (fs.existsSync(eventsPath)) {
 }
 
 // ==========================================
-// 🛡️ COMMAND LOADER
+// 🛡️ IMPROVED COMMAND LOADER (With Error Trace)
 // ==========================================
 const commandsPath = path.join(__dirname, "commands");
 if (fs.existsSync(commandsPath)) {
   const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
   for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
-    const cmd = require(filePath);
-    if (cmd && cmd.data && cmd.data.name) {
-      client.commands.set(cmd.data.name, cmd);
-      console.log(`✅ Loaded Command: ${cmd.data.name}`);
-    } else {
-      console.log(`❌ [SKIPPED] The file "${file}" is missing valid exports or data.`);
+    try {
+      console.log(`--- Attempting to load: ${file} ---`); // This line will pinpoint the culprit
+      const cmd = require(filePath);
+      if (cmd && cmd.data && cmd.data.name) {
+        client.commands.set(cmd.data.name, cmd);
+        console.log(`✅ Loaded Command: ${cmd.data.name}`);
+      } else {
+        console.log(`❌ [SKIPPED] "${file}" is missing valid exports or data.`);
+      }
+    } catch (err) {
+      console.error(`❌ FATAL ERROR LOADING: ${file}`);
+      console.error(err);
+      process.exit(1); // Force the bot to stop so you can see the log
     }
   }
 }
