@@ -1,21 +1,18 @@
-// commands/shop.js – Premium Components V2 Economy Shop System (MongoDB Optimized)
+// commands/shop.js – Working Shop (MongoDB)
 const {
   SlashCommandBuilder,
+  EmbedBuilder,
   ActionRowBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
-  MessageFlags,
-  ContainerBuilder,
-  TextDisplayBuilder
+  MessageFlags
 } = require("discord.js");
 
-// ---------- Configured Shop Items Inventory ----------
 const SHOP_ITEMS = {
   shield: {
     name: "🛡️ Counting Shield",
     price: 200,
-    description: "Protects your server's counting streak from a single mistake.",
-    // Database operation for MongoDB
+    description: "Protects your counting streak from a single mistake.",
     action: async (db, userId) => {
       const current = Number(await db.get(`eco:${userId}:shield`) || 0);
       await db.set(`eco:${userId}:shield`, current + 1);
@@ -41,49 +38,38 @@ module.exports = {
     const userId = interaction.user.id;
     const wallet = Number(await db.get(`eco:${userId}:money`) || 0);
 
-    let inventoryCatalog = [
-      `🛒 **PREMIUM INVENTORY CATALOG**`,
-      `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯`,
-      `💰 **Your Current Balance:** \`${wallet.toLocaleString()}\` coins`,
-      ``,
-      `✨ **Available Upgrades:**`
-    ];
+    const embed = new EmbedBuilder()
+      .setColor("#5865F2")
+      .setTitle("🛒 Inventory Catalog")
+      .setDescription(`💰 **Your Balance:** \`${wallet.toLocaleString()}\` coins`)
+      .addFields(
+        ...Object.entries(SHOP_ITEMS).map(([id, item]) => ({
+          name: `${item.name} — \`${item.price}\` coins`,
+          value: item.description,
+          inline: false
+        }))
+      )
+      .setFooter({ text: "Select an item below to purchase." });
 
-    for (const [id, item] of Object.entries(SHOP_ITEMS)) {
-      inventoryCatalog.push(`• **${item.name}** — \`${item.price}\` coins\n  ↳ *${item.description}*`);
-    }
-
-    inventoryCatalog.push(`\n*Select an item below from the menu to purchase instantly.*`);
-
-    const textBlock = new TextDisplayBuilder().setContent(inventoryCatalog.join("\n"));
-
-    const menuOptions = Object.entries(SHOP_ITEMS).map(([id, item]) => 
+    const menuOptions = Object.entries(SHOP_ITEMS).map(([id, item]) =>
       new StringSelectMenuOptionBuilder()
-        .setLabel(item.name.replace(/[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '').trim())
-        .setDescription(`${item.price} coins — ${item.description.slice(0, 50)}`)
+        .setLabel(item.name.replace(/[^\w\s]/g, '').trim())
+        .setDescription(`${item.price} coins`)
         .setValue(`shop_buy_${id}`)
         .setEmoji(item.name.split(" ")[0])
     );
 
-    const actionRow = new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId("shop_menu_select")
-        .setPlaceholder("Select a perk item to buy...")
-        .addOptions(menuOptions)
-    );
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId("shop_menu_select")
+      .setPlaceholder("Select an item to purchase...")
+      .addOptions(menuOptions);
 
-    const container = new ContainerBuilder()
-      .setAccentColor(0x5865F2)
-      .addTextDisplayComponents(textBlock)
-      .addActionRowComponents(actionRow);
+    const row = new ActionRowBuilder().addComponents(selectMenu);
 
-    return interaction.reply({
-      components: [container],
-      flags: MessageFlags.IsComponentsV2
-    });
+    return interaction.reply({ embeds: [embed], components: [row] });
   },
 
-  // Processor Interceptor Pipeline
+  // ✅ FIXED: uses interaction.reply instead of interaction.update
   async handleMenu(interaction, db) {
     if (interaction.customId !== "shop_menu_select") return;
 
@@ -92,39 +78,33 @@ module.exports = {
 
     const itemId = selectedValue.split("_")[2];
     const item = SHOP_ITEMS[itemId];
-    if (!item) return interaction.reply({ content: "❌ Item asset missing from global inventory index.", flags: MessageFlags.Ephemeral });
+    if (!item) return interaction.reply({ content: "❌ Item not found.", flags: MessageFlags.Ephemeral });
 
     const userId = interaction.user.id;
     let wallet = Number(await db.get(`eco:${userId}:money`) || 0);
 
     if (wallet < item.price) {
       return interaction.reply({
-        content: `❌ Transaction declined. You need **${item.price}** coins but currently hold **${wallet.toLocaleString()}**.`,
+        content: `❌ You need **${item.price}** coins but only have **${wallet.toLocaleString()}**.`,
         flags: MessageFlags.Ephemeral
       });
     }
 
-    // Atomic ledger update in MongoDB
+    // Deduct and apply item
     wallet -= item.price;
     await db.set(`eco:${userId}:money`, wallet);
     await item.action(db, userId);
 
-    const successContent = [
-      `✅ **PURCHASE SUCCESSFUL!**`,
-      `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯`,
-      `📦 **Acquired:** ${item.name}`,
-      `💰 **Debited:** \`-${item.price}\` coins`,
-      `💳 **Remaining Ledger Balance:** \`${wallet.toLocaleString()}\` coins`
-    ].join("\n");
+    const embed = new EmbedBuilder()
+      .setColor("#57F287")
+      .setTitle("✅ Purchase Successful!")
+      .setDescription(`You bought **${item.name}** for **${item.price}** coins.`)
+      .addFields(
+        { name: "📦 Acquired", value: item.name, inline: true },
+        { name: "💰 New Balance", value: `\`${wallet.toLocaleString()}\` coins`, inline: true }
+      );
 
-    const textBlock = new TextDisplayBuilder().setContent(successContent);
-    const container = new ContainerBuilder()
-      .setAccentColor(0x57F287)
-      .addTextDisplayComponents(textBlock);
-
-    return interaction.update({
-      components: [container],
-      flags: MessageFlags.IsComponentsV2
-    });
+    // ✅ Use reply instead of update (always works)
+    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
   }
 };
