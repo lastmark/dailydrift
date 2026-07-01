@@ -32,44 +32,44 @@ module.exports = {
         )
     ),
 
-  async execute(interaction, client, redis) {
+  async execute(interaction, client, db) {
     const sub = interaction.options.getSubcommand();
     const userId = interaction.user.id;
 
     // =========================
-    // 👁️ VIEW
+    // 👁️ VIEW subcommand
     // =========================
     if (sub === "view") {
       const target = interaction.options.getUser("user") || interaction.user;
       const targetId = target.id;
 
-      const balance = Number(await redis.get(`eco:${targetId}:money`) || 0);
-      const shield = Number(await redis.get(`eco:${targetId}:shield`) || 0);
+      const balance = Number(await db.get(`eco:${targetId}:money`) || 0);
+      const shield = Number(await db.get(`eco:${targetId}:shield`) || 0);
 
       let dailyRemaining = null;
       if (targetId === userId) {
         const today = new Date().toISOString().slice(0, 10);
         const dailyKey = `eco:send:${userId}:${today}`;
-        const sentToday = Number(await redis.get(dailyKey) || 0);
+        const sentToday = Number(await db.get(dailyKey) || 0);
         const DAILY_LIMIT = 200000;
         dailyRemaining = DAILY_LIMIT - sentToday;
       }
 
       const embed = new EmbedBuilder()
-        .setColor("#FFD700")
+        .setColor("#0A0A0A") // Premium dark minimalist styling
         .setAuthor({
-          name: `${target.username}'s Wallet`,
-          iconURL: target.displayAvatarURL()
+          name: `${target.username}'s Vault`,
+          iconURL: target.displayAvatarURL({ dynamic: true })
         })
-        .setThumbnail(target.displayAvatarURL())
+        .setThumbnail(target.displayAvatarURL({ dynamic: true }))
         .addFields(
           { 
-            name: "💰 Coins", 
+            name: "💰 Coins Balance", 
             value: `\`${formatNumber(balance)}\``, 
             inline: true 
           },
           { 
-            name: "🛡️ Shields", 
+            name: "🛡️ Active Shields", 
             value: `\`${formatNumber(shield)}\``, 
             inline: true 
           }
@@ -78,7 +78,7 @@ module.exports = {
 
       if (dailyRemaining !== null) {
         embed.addFields({
-          name: "📤 Daily Send Limit",
+          name: "📤 Daily Transaction limit",
           value: `\`${formatNumber(Math.max(0, dailyRemaining))}\` / 200,000 remaining`,
           inline: false
         });
@@ -88,7 +88,7 @@ module.exports = {
     }
 
     // =========================
-    // 💸 SEND
+    // 💸 SEND subcommand
     // =========================
     if (sub === "send") {
       const targetUser = interaction.options.getUser("user");
@@ -97,47 +97,47 @@ module.exports = {
 
       if (targetId === userId) {
         return interaction.reply({
-          content: "❌ You cannot send coins to yourself.",
+          content: "❌ Transacting with your own profile wallet address is locked.",
           flags: MessageFlags.Ephemeral
         });
       }
 
-      const senderBalance = Number(await redis.get(`eco:${userId}:money`) || 0);
+      const senderBalance = Number(await db.get(`eco:${userId}:money`) || 0);
       if (senderBalance < amount) {
         return interaction.reply({
-          content: `❌ You don't have enough coins. You have ${formatNumber(senderBalance)}.`,
+          content: `❌ Insufficient account balance. Available: \`${formatNumber(senderBalance)}\``,
           flags: MessageFlags.Ephemeral
         });
       }
 
-      // Daily limit
+      // Daily limit tracking
       const today = new Date().toISOString().slice(0, 10);
       const dailyKey = `eco:send:${userId}:${today}`;
-      let sentToday = Number(await redis.get(dailyKey) || 0);
+      let sentToday = Number(await db.get(dailyKey) || 0);
       const DAILY_LIMIT = 200000;
 
       if (sentToday + amount > DAILY_LIMIT) {
         const remaining = DAILY_LIMIT - sentToday;
         return interaction.reply({
-          content: `❌ You've reached your daily sending limit (${formatNumber(DAILY_LIMIT)} coins/day). You can only send ${formatNumber(remaining)} more today.`,
+          content: `❌ Transaction exceeds daily limit (${formatNumber(DAILY_LIMIT)} coins/day). Remaining capacity: \`${formatNumber(remaining)}\``,
           flags: MessageFlags.Ephemeral
         });
       }
 
       // ---- Public confirmation embed with warning ----
       const confirmEmbed = new EmbedBuilder()
-        .setColor("#F1C40F")
-        .setTitle("📤 Confirm Transaction")
+        .setColor("#0A0A0A")
+        .setTitle("📤 Verify Vault Transaction")
         .setDescription(
-          `<@${userId}> is about to send **${formatNumber(amount)}** coins to **${targetUser.username}**.`
+          `<@${userId}> is initializing a transfer of **${formatNumber(amount)}** coins to **${targetUser.username}**.`
         )
         .addFields(
-          { name: "Sender Balance", value: `${formatNumber(senderBalance)}`, inline: true },
+          { name: "Sender Current", value: `\`${formatNumber(senderBalance)}\``, inline: true },
           { name: "Recipient", value: `${targetUser}`, inline: true },
-          { name: "New Balance (after send)", value: `${formatNumber(senderBalance - amount)}`, inline: true }
+          { name: "Post-Transaction", value: `\`${formatNumber(senderBalance - amount)}\``, inline: true }
         )
         .setFooter({ 
-          text: "ℹ️ Important Notice: Coin trading (buying or selling coins for real money or outside the bot) is strictly prohibited. Use coins only inside the bot system to avoid penalties." 
+          text: "ℹ️ Security Rule: Coin trading (real-money conversions or outside network transactions) is strictly prohibited and flag-monitored." 
         })
         .setTimestamp();
 
@@ -165,24 +165,36 @@ module.exports = {
         const reaction = collected.first();
 
         if (reaction.emoji.name === '✅') {
-          // Transfer
-          await redis.decrby(`eco:${userId}:money`, amount);
-          await redis.incrby(`eco:${targetId}:money`, amount);
-          await redis.incrby(dailyKey, amount);
-          await redis.expire(dailyKey, 86400);
+          // Re-fetch parameters securely to prevent race conditions during reaction wait time
+          const freshSenderBal = Number(await db.get(`eco:${userId}:money`) || 0);
+          const freshTargetBal = Number(await db.get(`eco:${targetId}:money`) || 0);
+          const freshSentToday = Number(await db.get(dailyKey) || 0);
 
-          const newBalance = await redis.get(`eco:${userId}:money`) || 0;
+          if (freshSenderBal < amount) {
+            await replyMsg.reactions.removeAll().catch(() => {});
+            return replyMsg.edit({ content: "❌ Transaction failed. Balance updated before verification completed.", embeds: [] });
+          }
+
+          // Process MongoDB transfers safely
+          await db.set(`eco:${userId}:money`, freshSenderBal - amount);
+          await db.set(`eco:${targetId}:money`, freshTargetBal + amount);
+          await db.set(dailyKey, freshSentToday + amount);
+
+          // Custom execution block expiration mirror via setTimeout loop simulation
+          setTimeout(async () => {
+            await db.del(dailyKey).catch(() => {});
+          }, 86400 * 1000);
 
           const successEmbed = new EmbedBuilder()
-            .setColor("#57F287")
-            .setTitle("✅ Transfer Complete!")
-            .setDescription(`<@${userId}> sent **${formatNumber(amount)}** coins to **${targetUser.username}**.`)
+            .setColor("#0A0A0A")
+            .setTitle("✅ Vault Settlement Completed")
+            .setDescription(`<@${userId}> safely dispatched **${formatNumber(amount)}** coins to **${targetUser.username}**.`)
             .addFields(
-              { name: "New Balance", value: `${formatNumber(newBalance)}`, inline: true },
-              { name: "Today's Remaining Limit", value: `${formatNumber(DAILY_LIMIT - (sentToday + amount))}`, inline: true }
+              { name: "Updated Balance", value: `\`${formatNumber(freshSenderBal - amount)}\``, inline: true },
+              { name: "Remaining Daily Allowance", value: `\`${formatNumber(DAILY_LIMIT - (freshSentToday + amount))}\``, inline: true }
             )
             .setFooter({ 
-              text: "ℹ️ Important Notice: Coin trading (buying or selling coins for real money or outside the bot) is strictly prohibited. Use coins only inside the bot system to avoid penalties." 
+              text: "ℹ️ Security Rule: Coin trading (real-money conversions or outside network transactions) is strictly prohibited and flag-monitored." 
             })
             .setTimestamp();
 
@@ -192,9 +204,9 @@ module.exports = {
 
         } else if (reaction.emoji.name === '❌') {
           const cancelEmbed = new EmbedBuilder()
-            .setColor("#ED4245")
-            .setTitle("❌ Transfer Cancelled")
-            .setDescription(`<@${userId}> cancelled the transaction.`)
+            .setColor("#BA1A1A")
+            .setTitle("❌ Transfer Aborted")
+            .setDescription(`<@${userId}> cancelled the vault transaction pipeline.`)
             .setTimestamp();
 
           await replyMsg.edit({ embeds: [cancelEmbed] });
@@ -204,9 +216,9 @@ module.exports = {
 
       } catch (error) {
         const timeoutEmbed = new EmbedBuilder()
-          .setColor("#ED4245")
-          .setTitle("⌛ Timed Out")
-          .setDescription(`<@${userId}> didn't confirm in time. Transfer cancelled.`)
+          .setColor("#BA1A1A")
+          .setTitle("⌛ Verification Expired")
+          .setDescription(`<@${userId}> failed to respond within the 30s confirmation window. Pipelined transaction rejected.`)
           .setTimestamp();
 
         await replyMsg.edit({ embeds: [timeoutEmbed] });
