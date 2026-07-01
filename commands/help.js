@@ -1,3 +1,4 @@
+// commands/help.js – Advanced Dropdown System Directory
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -6,49 +7,50 @@ const {
   ComponentType
 } = require("discord.js");
 
-
-
 module.exports = {
   category: "Information",
   data: new SlashCommandBuilder()
     .setName("help")
-    .setDescription("View all bot commands"),
+    .setDescription("View all available system command modules"),
 
-  async execute(interaction, client) {
-
+  async execute(interaction, client, db) {
     const categories = new Map();
 
+    // Map through the client commands cluster cache
     for (const [, command] of client.commands) {
-      const category = command.category || "Other";
+      const category = command.category || "General";
 
-      if (!categories.has(category))
+      if (!categories.has(category)) {
         categories.set(category, []);
+      }
 
       categories.get(category).push(command);
     }
 
     const embed = new EmbedBuilder()
-      .setColor("#5865F2")
+      .setColor("#0A0A0A") // Premium dark minimalist styling layout
       .setAuthor({
-        name: `${client.user.username} Help Menu`,
+        name: `${client.user.username.toUpperCase()} // SYSTEM INDEX`,
         iconURL: client.user.displayAvatarURL()
       })
       .setThumbnail(client.user.displayAvatarURL())
       .setDescription(
-        `Welcome ${interaction.user}!\n\n` +
-        `Select a category from the dropdown below.\n\n` +
-        `📚 **${client.commands.size} Commands**\n` +
-        `📂 **${categories.size} Categories**`
-      );
+        `Welcome <@${interaction.user.id}>.\n\n` +
+        `Select a data sector path from the selection menu component drop below to inspect commands.\n\n` +
+        `⚡ **Matrix Index:** \`${client.commands.size}\` commands logged\n` +
+        `📂 **Sectors Partitioned:** \`${categories.size}\` distinct categories`
+      )
+      .setFooter({ text: "OPERATIONAL DIRECTORY ACTIVE" })
+      .setTimestamp();
 
     const menu = new StringSelectMenuBuilder()
-      .setCustomId("help-category")
-      .setPlaceholder("Select a category");
+      .setCustomId("help_category")
+      .setPlaceholder("Select system sector link...");
 
     for (const [category, commands] of categories) {
       menu.addOptions({
-        label: category,
-        description: `${commands.length} commands`,
+        label: category.toUpperCase(),
+        description: `Inspect directory containing [${commands.length}] modules`,
         value: category
       });
     }
@@ -63,13 +65,13 @@ module.exports = {
 
     const collector = msg.createMessageComponentCollector({
       componentType: ComponentType.StringSelect,
-      time: 300000
+      time: 300000 // 5-minute tracking lease length
     });
 
     collector.on("collect", async i => {
       if (i.user.id !== interaction.user.id) {
         return i.reply({
-          content: "This menu isn't yours.",
+          content: "❌ Access Denied: This interaction link is restricted to the execution user node.",
           ephemeral: true
         });
       }
@@ -78,23 +80,34 @@ module.exports = {
       const commands = categories.get(category);
 
       const categoryEmbed = new EmbedBuilder()
-        .setColor("#5865F2")
-        .setTitle(`📂 ${category}`)
+        .setColor("#0A0A0A")
+        .setTitle(`📂 Sector Partition: ${category.toUpperCase()}`)
         .setDescription(
           commands
             .map(cmd =>
-              `**/${cmd.data.name}**\n${cmd.data.description || "No description"}`
+              `**\`/${cmd.data.name}\`**\n*${cmd.data.description || "No systemic description logged for this script."}*`
             )
             .join("\n\n")
         )
         .setFooter({
-          text: `${commands.length} commands`
-        });
+          text: `Total localized elements: ${commands.length}`
+        })
+        .setTimestamp();
 
       await i.update({
         embeds: [categoryEmbed],
         components: [row]
       });
+    });
+
+    // Clean up interface components smoothly when collector window drops offline
+    collector.on("end", async () => {
+      const disabledMenu = StringSelectMenuBuilder.from(menu).setDisabled(true).setPlaceholder("Link expired. Re-execute command.");
+      const disabledRow = new ActionRowBuilder().addComponents(disabledMenu);
+      
+      await interaction.editReply({
+        components: [disabledRow]
+      }).catch(() => null);
     });
   }
 };
